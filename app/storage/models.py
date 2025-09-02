@@ -37,6 +37,20 @@ class DrillRun(Base):
     drill: Mapped["Drill"] = relationship()
 
 # --- На потом (сейчас не используются, оставим пустыми-на-фьючер) ---
+# --- Мини-кастинг ---
+class Test(Base):
+    __tablename__ = "tests"
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    payload_json: Mapped[dict] = mapped_column(JSON)
+
+class TestResult(Base):
+    __tablename__ = "test_results"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    ts: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    axes_json: Mapped[dict] = mapped_column(JSON, default={})
+    score_total: Mapped[int] = mapped_column(Integer, default=0)
+
 class Event(Base):
     __tablename__ = "events"
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
