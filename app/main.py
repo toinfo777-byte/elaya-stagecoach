@@ -5,7 +5,6 @@ from aiogram.fsm.storage.memory import MemoryStorage
 from app.config import settings
 from app.middlewares.error_handler import ErrorsMiddleware
 from app.storage.repo import init_db
-from app.routers import onboarding, menu
 from app.routers import onboarding, menu, training
 
 logging.basicConfig(level=logging.INFO)
@@ -19,8 +18,6 @@ async def main():
     dp.message.middleware(ErrorsMiddleware())
     dp.callback_query.middleware(ErrorsMiddleware())
 
-    dp.include_router(onboarding.router)
-    dp.include_router(menu.router)
     dp.include_router(onboarding.router)
     dp.include_router(menu.router)
     dp.include_router(training.router)   # ← добавить эту строку
