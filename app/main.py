@@ -6,6 +6,7 @@ from app.config import settings
 from app.middlewares.error_handler import ErrorsMiddleware
 from app.storage.repo import init_db
 from app.routers import onboarding, menu
+from app.routers import onboarding, menu, training
 
 logging.basicConfig(level=logging.INFO)
 
@@ -20,6 +21,10 @@ async def main():
 
     dp.include_router(onboarding.router)
     dp.include_router(menu.router)
+    dp.include_router(onboarding.router)
+    dp.include_router(menu.router)
+    dp.include_router(training.router)   # ← добавить эту строку
+
 
     await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types())
 
