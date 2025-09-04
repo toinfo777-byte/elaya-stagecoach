@@ -20,6 +20,7 @@ def spark(value: int) -> str:
 
 @router.message(StateFilter("*"), F.text == "📈 Мой прогресс")
 @router.message(StateFilter("*"), Command("progress"))
+@router.message(StateFilter("*"), lambda m: isinstance(m.text, str) and "прогресс" in m.text.lower())
 async def show_progress(m: Message):
     with session_scope() as s:
         u = s.query(User).filter_by(tg_id=m.from_user.id).first()
