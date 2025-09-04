@@ -1,10 +1,9 @@
 from aiogram import Router, F
-from aiogram.filters import Command  # ← ДОБАВЬ ЭТО
+from aiogram.filters import Command  # ← уже добавлено
 from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.fsm.state import StatesGroup, State
 from aiogram.fsm.context import FSMContext
 from aiogram.exceptions import TelegramBadRequest
-
 
 from app.keyboards.menu import main_menu
 from app.storage.repo import session_scope
@@ -42,6 +41,23 @@ def _reflect_keyboard(selected: set[str], options: list[str]) -> InlineKeyboardM
     rows.append([InlineKeyboardButton(text="Сохранить 💾", callback_data="mk_save")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
+# ---------- Хелпер безопасного редактирования ----------
+async def _safe_edit_text(msg, text: str, reply_markup: InlineKeyboardMarkup | None = None):
+    """Редактируем текст, а если он не меняется — обновляем только клавиатуру."""
+    try:
+        await msg.edit_text(text, reply_markup=reply_markup)
+    except TelegramBadRequest as e:
+        if "message is not modified" in str(e).lower():
+            # текст тот же — попробуем обновить только клавиатуру
+            if reply_markup:
+                try:
+                    await msg.edit_reply_markup(reply_markup=reply_markup)
+                except TelegramBadRequest:
+                    pass
+        else:
+            raise
+# -------------------------------------------------------
+
 @router.message(F.text == "🎯 Тренировка дня")
 async def training_entry(m: Message, state: FSMContext):
     with session_scope() as s:
@@ -56,7 +72,10 @@ async def training_entry(m: Message, state: FSMContext):
         drill_id=p["id"], steps=p["steps"], idx=0, check_q=p["check_question"], markers=p["success_markers"]
     )
     await state.set_state(TrainingFlow.steps)
-    await m.answer(f"Этюд: {p['title']}\nШаг 1/{len(p['steps'])}:\n{p['steps'][0]}", reply_markup=_step_keyboard())
+    await m.answer(
+        f"Этюд: {p['title']}\nШаг 1/{len(p['steps'])}:\n{p['steps'][0]}",
+        reply_markup=_step_keyboard()
+    )
 
 # ← НОВОЕ: команда /training
 @router.message(Command("training"))
@@ -68,7 +87,6 @@ async def training_cmd(m: Message, state: FSMContext):
 async def training_fuzzy(m: Message, state: FSMContext):
     return await training_entry(m, state)
 
-
 @router.callback_query(TrainingFlow.steps, F.data.in_({"step_next", "step_skip", "step_done"}))
 async def steps_flow(cb: CallbackQuery, state: FSMContext):
     d = await state.get_data()
@@ -77,16 +95,24 @@ async def steps_flow(cb: CallbackQuery, state: FSMContext):
 
     if cb.data == "step_done":
         await state.set_state(TrainingFlow.reflect_selecting)
-        await cb.message.edit_text(f"Рефлексия: {d['check_q']}")
+        # вопрос рефлексии
+        await _safe_edit_text(cb.message, f"Рефлексия: {d['check_q']}")
+        # клавиатура — отдельным сообщением
         await cb.message.answer("Отметьте, что произошло:", reply_markup=_reflect_keyboard(set(), d["markers"]))
         await cb.answer()
         return
 
+    # next / skip
     idx = idx + 1 if cb.data == "step_next" else idx + 2
     if idx >= len(steps):
         idx = len(steps) - 1
     await state.update_data(idx=idx)
-    await cb.message.edit_text(f"Шаг {idx+1}/{len(steps)}:\n{steps[idx]}", reply_markup=_step_keyboard())
+
+    await _safe_edit_text(
+        cb.message,
+        f"Шаг {idx+1}/{len(steps)}:\n{steps[idx]}",
+        reply_markup=_step_keyboard()
+    )
     await cb.answer()
 
 @router.callback_query(TrainingFlow.reflect_selecting, F.data.startswith("mk_"))
@@ -115,6 +141,7 @@ async def reflect_markers(cb: CallbackQuery, state: FSMContext):
         await cb.answer()
         return
 
+    # переключение маркера
     _, ixs = cb.data.split("_", 1)
     i = int(ixs)
     if 0 <= i < len(markers):
@@ -124,5 +151,11 @@ async def reflect_markers(cb: CallbackQuery, state: FSMContext):
             selected.add(markers[i])
 
     await state.update_data(selected=selected)
-    await cb.message.edit_reply_markup(reply_markup=_reflect_keyboard(selected, markers))
+
+    # обновляем только клавиатуру, но аккуратно
+    try:
+        await cb.message.edit_reply_markup(reply_markup=_reflect_keyboard(selected, markers))
+    except TelegramBadRequest as e:
+        if "message is not modified" not in str(e).lower():
+            raise
     await cb.answer()
