@@ -3,6 +3,8 @@ from aiogram.filters import Command  # ← ДОБАВЬ ЭТО
 from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.fsm.state import StatesGroup, State
 from aiogram.fsm.context import FSMContext
+from aiogram.exceptions import TelegramBadRequest
+
 
 from app.keyboards.menu import main_menu
 from app.storage.repo import session_scope
