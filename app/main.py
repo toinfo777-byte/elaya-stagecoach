@@ -70,11 +70,4 @@ async def main():
     dp.include_router(progress.router)
 
     # 3) Меню — строго последним
-    dp.include_router(menu.router)
-
-    # Стартуем polling
-    async with bot:
-        await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types())
-
-if __name__ == "__main__":
-    asyncio.run(main())
+    dp.includ
