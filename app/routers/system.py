@@ -1,10 +1,16 @@
 # app/routers/system.py
 from datetime import datetime, timezone
-from aiogram import Router, F, types
+from aiogram import Router, types, F
 from aiogram.filters import Command
+from aiogram.types import (
+    InlineKeyboardMarkup, InlineKeyboardButton,
+    CallbackQuery, BotCommand,
+)
+from aiogram.fsm.state import StatesGroup, State
+from aiogram.fsm.context import FSMContext
 
 from app.config import settings
-from app.storage.repo import session_scope
+from app.storage.repo import session_scope, delete_user_cascade
 from app.storage.models import User
 
 router = Router(name="system")
@@ -39,7 +45,6 @@ VERSION = settings.version if getattr(settings, "version", None) else "dev"
 
 def _uptime() -> str:
     delta = datetime.now(timezone.utc) - STARTED_AT
-    # короткий вид: d hh:mm:ss
     secs = int(delta.total_seconds())
     d, secs = divmod(secs, 86400)
     h, secs = divmod(secs, 3600)
@@ -77,3 +82,61 @@ async def whoami_cmd(m: types.Message):
     un = f"@{m.from_user.username}" if m.from_user.username else "-"
     full = " ".join(filter(None, [m.from_user.first_name, m.from_user.last_name]))
     await m.answer(f"id={uid} | user={un} | name={full or '-'} | admin={is_admin}")
+
+
+# ---------- /wipe_me: подтверждение и полное удаление ----------
+class WipeFlow(StatesGroup):
+    confirm = State()
+
+
+def _wipe_kb() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🗑 Удалить навсегда", callback_data="wipe_yes")],
+        [InlineKeyboardButton(text="Отмена", callback_data="wipe_no")],
+    ])
+
+
+@router.message(Command("wipe_me"))
+async def wipe_me_start(m: types.Message, state: FSMContext):
+    await state.set_state(WipeFlow.confirm)
+    await m.answer(
+        "⚠️ Вы собираетесь удалить профиль и все связанные записи (этюды, тесты, события, лиды). "
+        "Действие необратимо. Подтвердить?",
+        reply_markup=_wipe_kb()
+    )
+
+
+@router.callback_query(WipeFlow.confirm, F.data.in_({"wipe_yes", "wipe_no"}))
+async def wipe_me_confirm(cb: CallbackQuery, state: FSMContext):
+    if cb.data == "wipe_no":
+        await state.clear()
+        await cb.message.edit_text("Отменено. Ничего не удалено.")
+        await cb.answer()
+        return
+
+    # wipe_yes
+    with session_scope() as s:
+        u = s.query(User).filter_by(tg_id=cb.from_user.id).first()
+        if u:
+            delete_user_cascade(s, u.id)
+    await state.clear()
+    try:
+        await cb.message.edit_text("Готово. Ваш профиль и записи удалены. Вы можете снова пройти /start.")
+    except Exception:
+        await cb.message.answer("Готово. Ваш профиль и записи удалены. Вы можете снова пройти /start.")
+    await cb.answer()
+
+
+# ---------- установка меню команд ----------
+async def setup_commands(bot):
+    """Установить команды в меню бота."""
+    cmds = [
+        BotCommand(command="start", description="Начать онбординг"),
+        BotCommand(command="menu", description="Открыть меню"),
+        BotCommand(command="training", description="Тренировка дня"),
+        BotCommand(command="progress", description="Мой прогресс"),
+        BotCommand(command="help", description="Справка"),
+        BotCommand(command="privacy", description="Политика"),
+        BotCommand(command="wipe_me", description="Удалить профиль"),
+    ]
+    await bot.set_my_commands(cmds)
