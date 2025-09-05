@@ -70,4 +70,21 @@ async def main():
     dp.include_router(progress.router)
 
     # 3) Меню — строго последним
-    dp.includ
+    dp.include_router(menu.router)
+
+    # Стартуем polling
+    async with bot:
+        # ⬇️ ВАЖНО: перед поллингом гарантированно выключаем вебхук
+        try:
+            await bot.delete_webhook(drop_pending_updates=False)
+        except Exception as e:
+            logging.warning("delete_webhook failed: %s", e)
+
+        await dp.start_polling(
+            bot,
+            allowed_updates=dp.resolve_used_update_types(),
+            polling_timeout=30,  # немного длиннее таймаут long-poll
+        )
+
+if __name__ == "__main__":
+    asyncio.run(main())
