@@ -2,8 +2,10 @@ from datetime import datetime
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 from sqlalchemy import String, Integer, DateTime, ForeignKey, JSON, Boolean
 
+
 class Base(DeclarativeBase):
     ...
+
 
 # --- Пользователь ---
 class User(Base):
@@ -20,11 +22,15 @@ class User(Base):
     last_seen: Mapped[datetime | None] = mapped_column(DateTime)
     consent_at: Mapped[datetime | None] = mapped_column(DateTime)
 
+    # ⬇️ НОВОЕ: deep-link источник (/start?start=...)
+    source: Mapped[str | None] = mapped_column(String(64), nullable=True)
+
     # связи
     drill_runs: Mapped[list["DrillRun"]] = relationship(back_populates="user", cascade="all, delete-orphan")
     leads: Mapped[list["Lead"]] = relationship(back_populates="user", cascade="all, delete-orphan")
     events: Mapped[list["Event"]] = relationship(back_populates="user", cascade="all, delete-orphan")
     test_results: Mapped[list["TestResult"]] = relationship(back_populates="user", cascade="all, delete-orphan")
+
 
 # --- Этюд и прохождения ---
 class Drill(Base):
@@ -32,6 +38,7 @@ class Drill(Base):
 
     id: Mapped[str] = mapped_column(String(64), primary_key=True)
     payload_json: Mapped[dict] = mapped_column(JSON, default=dict)
+
 
 class DrillRun(Base):
     __tablename__ = "drill_runs"
@@ -46,12 +53,14 @@ class DrillRun(Base):
     user: Mapped["User"] = relationship(back_populates="drill_runs")
     drill: Mapped["Drill"] = relationship()
 
+
 # --- Мини-кастинг (на будущее) ---
 class Test(Base):
     __tablename__ = "tests"
 
     id: Mapped[str] = mapped_column(String(64), primary_key=True)
     payload_json: Mapped[dict] = mapped_column(JSON, default=dict)
+
 
 class TestResult(Base):
     __tablename__ = "test_results"
@@ -64,6 +73,7 @@ class TestResult(Base):
 
     user: Mapped["User"] = relationship(back_populates="test_results")
 
+
 # --- События ---
 class Event(Base):
     __tablename__ = "events"
@@ -75,6 +85,7 @@ class Event(Base):
     ts: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
     user: Mapped["User"] = relationship(back_populates="events")
+
 
 # --- Лиды ---
 class Lead(Base):
