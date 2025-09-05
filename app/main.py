@@ -17,6 +17,9 @@ import app.routers.casting as casting
 import app.routers.progress as progress
 from app.routers import menu
 
+# ⬇️ НОВОЕ: системный роутер (/help, /privacy и техкоманды)
+from app.routers import system  # NEW
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
@@ -56,6 +59,9 @@ async def main():
     _include_optional_router(dp, "app.routers.settings")   # settings_router.router
     _include_optional_router(dp, "app.routers.admin")      # admin.router (последний из служебных)
     _include_optional_router(dp, "app.routers.premium")    # premium.router
+
+    # ⬇️ НОВОЕ: подключаем наш системный роутер
+    dp.include_router(system.router)  # NEW
 
     # 2) Ваши основные фичи
     dp.include_router(onboarding.router)
