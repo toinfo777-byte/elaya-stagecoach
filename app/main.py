@@ -19,6 +19,7 @@ from app.routers import menu
 
 # ⬇️ НОВОЕ: системный роутер (/help, /privacy и техкоманды)
 from app.routers import system  # NEW
+from app.routers.system import setup_commands  # NEW: установка /команд в меню
 
 logging.basicConfig(
     level=logging.INFO,
@@ -74,11 +75,17 @@ async def main():
 
     # Стартуем polling
     async with bot:
-        # ⬇️ ВАЖНО: перед поллингом гарантированно выключаем вебхук
+        # ВАЖНО: перед поллингом гарантированно выключаем вебхук (исключаем конфликты)
         try:
             await bot.delete_webhook(drop_pending_updates=False)
         except Exception as e:
             logging.warning("delete_webhook failed: %s", e)
+
+        # NEW: ставим команды в меню бота
+        try:
+            await setup_commands(bot)
+        except Exception as e:
+            logging.warning("setup_commands failed: %s", e)
 
         await dp.start_polling(
             bot,
