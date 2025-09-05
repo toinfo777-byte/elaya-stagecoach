@@ -1,3 +1,4 @@
+# app/storage/repo.py
 from __future__ import annotations
 
 from contextlib import contextmanager
@@ -5,7 +6,7 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.config import settings
-from app.storage.models import Base
+from app.storage.models import Base, User  # <- User нужен для delete_user_cascade
 
 # Engine / Session
 engine = create_engine(settings.db_url, future=True, pool_pre_ping=True)
@@ -48,3 +49,23 @@ def session_scope() -> Session:
         raise
     finally:
         session.close()
+
+
+# --- NEW: каскадное удаление пользователя и всех связанных записей ---
+def delete_user_cascade(s: Session, user_id: int | None = None, tg_id: int | None = None) -> bool:
+    """
+    Удаляет пользователя и все связанные записи (drill_runs, leads, events, test_results)
+    благодаря cascade='all, delete-orphan' в моделях.
+    Можно передать либо user_id (PK), либо tg_id. Возвращает True, если найден и удалён.
+    """
+    if user_id is None and tg_id is None:
+        return False
+
+    q = s.query(User)
+    u = q.filter_by(id=user_id).first() if user_id is not None else q.filter_by(tg_id=tg_id).first()
+    if not u:
+        return False
+
+    s.delete(u)
+    s.commit()  # фиксируем удаление (на случай, если вызывают вне session_scope)
+    return True
