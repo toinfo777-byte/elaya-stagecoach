@@ -56,7 +56,6 @@ async def main():
     dp.callback_query.middleware(ErrorsMiddleware())
 
     # 1) Специализированные/служебные роутеры (если имеются в проекте)
-    _include_optional_router(dp, "app.routers.help")       # help_router.router
     _include_optional_router(dp, "app.routers.settings")   # settings_router.router
     _include_optional_router(dp, "app.routers.admin")      # admin.router (последний из служебных)
     _include_optional_router(dp, "app.routers.premium")    # premium.router
