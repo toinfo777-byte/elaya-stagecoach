@@ -2,6 +2,7 @@
 from datetime import datetime, timezone
 from aiogram import Router, F, types
 from aiogram.filters import Command
+
 from app.config import settings
 from app.storage.repo import session_scope
 from app.storage.models import User
@@ -35,6 +36,7 @@ PRIVACY_TEXT = (
 
 VERSION = settings.version if getattr(settings, "version", None) else "dev"
 
+
 def _uptime() -> str:
     delta = datetime.now(timezone.utc) - STARTED_AT
     # короткий вид: d hh:mm:ss
@@ -46,22 +48,27 @@ def _uptime() -> str:
         return f"{d}d {h:02}:{m:02}:{s:02}"
     return f"{h:02}:{m:02}:{s:02}"
 
+
 @router.message(Command("help"))
 async def help_cmd(m: types.Message):
     await m.answer(HELP_TEXT)
 
+
 @router.message(Command("privacy"))
 async def privacy_cmd(m: types.Message):
     await m.answer(PRIVACY_TEXT + "\n\nНапоминание: для стирания данных используйте /wipe_me")
+
 
 @router.message(Command("health"))
 async def health_cmd(m: types.Message):
     db_kind = "sqlite" if settings.db_url.startswith("sqlite") else "postgres"
     await m.answer(f"ok | env={settings.env} | db={db_kind} | uptime={_uptime()}")
 
+
 @router.message(Command("version"))
 async def version_cmd(m: types.Message):
     await m.answer(f"version: {VERSION}")
+
 
 @router.message(Command("whoami"))
 async def whoami_cmd(m: types.Message):
