@@ -2,6 +2,7 @@ import asyncio
 import logging
 import importlib
 from typing import Optional
+from datetime import datetime, timedelta, timezone  # NEW
 
 from aiogram import Bot, Dispatcher
 from aiogram.fsm.storage.memory import MemoryStorage
@@ -20,6 +21,9 @@ from app.routers import menu
 # ⬇️ НОВОЕ: системный роутер (/help, /privacy и техкоманды)
 from app.routers import system  # NEW
 from app.routers.system import setup_commands  # NEW: установка /команд в меню
+
+# ⬇️ НОВОЕ: утилиты обслуживания SQLite (бэкап и VACUUM)
+from app.utils.maintenance import backup_sqlite, vacuum_sqlite  # NEW
 
 logging.basicConfig(
     level=logging.INFO,
@@ -40,6 +44,46 @@ def _include_optional_router(dp: Dispatcher, module_path: str, attr: str = "rout
     dp.include_router(r)
     logging.info("Included router: %s.%s", module_path, attr)
     return None
+
+
+# ====== NEW: фоновые задачи обслуживания БД ======
+
+async def _sleep_until_utc(hour: int, minute: int = 0, dow: int | None = None):
+    """
+    Засыпает до ближайшего времени UTC hour:minute.
+    Если указан dow (0=Mon..6=Sun) — до ближайшего такого дня недели.
+    """
+    now = datetime.now(timezone.utc).replace(second=0, microsecond=0)
+    target = now.replace(hour=hour, minute=minute)
+    if target <= now:
+        target += timedelta(days=1)
+    if dow is not None:
+        while target.weekday() != dow:
+            target += timedelta(days=1)
+    await asyncio.sleep((target - now).total_seconds())
+
+async def _backup_loop():
+    """Ежедневно в 02:00 UTC делаем копию /data/elaya.db в /data/backups/."""
+    while True:
+        await _sleep_until_utc(2, 0)  # каждый день 02:00 UTC
+        try:
+            path = backup_sqlite()
+            logging.info("Backup done: %s", path)
+        except Exception as e:
+            logging.exception("Backup failed: %s", e)
+
+async def _vacuum_loop():
+    """Раз в неделю (вс) 02:05 UTC делаем VACUUM для sqlite."""
+    while True:
+        await _sleep_until_utc(2, 5, dow=6)  # воскресенье 02:05 UTC
+        try:
+            vacuum_sqlite()
+            logging.info("Vacuum done")
+        except Exception as e:
+            logging.exception("Vacuum failed: %s", e)
+
+# ==================================================
+
 
 async def main():
     if not settings.bot_token:
@@ -85,6 +129,10 @@ async def main():
             await setup_commands(bot)
         except Exception as e:
             logging.warning("setup_commands failed: %s", e)
+
+        # NEW: запускаем фоновые задачи обслуживания БД (работают в том же контейнере и диске /data)
+        asyncio.create_task(_backup_loop())
+        asyncio.create_task(_vacuum_loop())
 
         await dp.start_polling(
             bot,
