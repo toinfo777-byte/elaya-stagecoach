@@ -15,7 +15,9 @@ SessionLocal = sessionmaker(bind=engine, expire_on_commit=False, autoflush=False
 
 def init_db() -> None:
     """
-    Создаёт таблицы и, при необходимости, добавляет отсутствующую колонку users.source.
+    Создаёт таблицы и, при необходимости, добавляет отсутствующие колонки:
+      - users.source
+      - leads.track
     Безопасно как для SQLite, так и для Postgres.
     """
     # базовые таблицы
@@ -25,15 +27,24 @@ def init_db() -> None:
         url = settings.db_url.lower()
 
         if url.startswith("sqlite"):
-            # Проверяем, есть ли колонка 'source' в таблице users
+            # --- users.source ---
             cols = s.execute(text("PRAGMA table_info(users)")).fetchall()
-            names = {c[1] for c in cols}  # второй столбец = name
+            names = {c[1] for c in cols}
             if "source" not in names:
                 s.execute(text("ALTER TABLE users ADD COLUMN source TEXT"))
                 s.commit()
+
+            # --- leads.track ---
+            cols = s.execute(text("PRAGMA table_info(leads)")).fetchall()
+            names = {c[1] for c in cols}
+            if "track" not in names:
+                s.execute(text("ALTER TABLE leads ADD COLUMN track TEXT"))
+                s.commit()
+
         else:
-            # Postgres и пр.: IF NOT EXISTS
+            # Postgres и др. — с IF NOT EXISTS
             s.execute(text("ALTER TABLE IF EXISTS users ADD COLUMN IF NOT EXISTS source varchar(64)"))
+            s.execute(text("ALTER TABLE IF EXISTS leads ADD COLUMN IF NOT EXISTS track varchar(32)"))
             s.commit()
 
 
@@ -67,5 +78,5 @@ def delete_user_cascade(s: Session, user_id: int | None = None, tg_id: int | Non
         return False
 
     s.delete(u)
-    s.commit()  # фиксируем удаление (на случай, если вызывают вне session_scope)
+    s.commit()
     return True
