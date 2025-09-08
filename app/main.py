@@ -3,32 +3,31 @@ import asyncio
 import logging
 import importlib
 from typing import Optional
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone  # NEW
 
 from aiogram import Bot, Dispatcher
 from aiogram.fsm.storage.memory import MemoryStorage
-from aiogram.types import BotCommand, BotCommandScopeAllPrivateChats
+from aiogram.types import BotCommand, BotCommandScopeAllPrivateChats  # <-- для setup_commands
 
 from app.config import settings
 from app.middlewares.error_handler import ErrorsMiddleware
 from app.storage.repo import init_db
 
-# Базовые роутеры
-from app.routers import onboarding, menu
+# Базовые роутеры (точно есть)
+from app.routers import onboarding
 import app.routers.training as training
 import app.routers.casting as casting
 import app.routers.progress as progress
+from app.routers import menu
 
-# Новые фичи
-import app.routers.deeplink as deeplink     # <-- НОВОЕ
-import app.routers.coach as coach           # <-- НОВОЕ
-import app.routers.apply as apply           # заявка «Путь лидера»
-import app.routers.feedback as feedback     # сбор отзывов
+# ⬇️ НОВОЕ: заявка «Путь лидера» и сбор отзывов
+import app.routers.apply as apply
+import app.routers.feedback as feedback
 
-# Системный роутер
+# ⬇️ НОВОЕ: системный роутер (/help, /privacy и техкоманды)
 from app.routers import system
 
-# Обслуживание SQLite
+# ⬇️ НОВОЕ: утилиты обслуживания SQLite (бэкап и VACUUM)
 from app.utils.maintenance import backup_sqlite, vacuum_sqlite
 
 
@@ -39,6 +38,10 @@ logging.basicConfig(
 
 
 def _include_optional_router(dp: Dispatcher, module_path: str, attr: str = "router") -> Optional[None]:
+    """
+    Пытаемся подключить роутер из module_path.attr.
+    Если ничего нет — просто логируем и идём дальше.
+    """
     try:
         mod = importlib.import_module(module_path)
         r = getattr(mod, attr)
@@ -50,8 +53,13 @@ def _include_optional_router(dp: Dispatcher, module_path: str, attr: str = "rout
     return None
 
 
-# ====== фоновые задачи обслуживания БД ======
+# ====== NEW: фоновые задачи обслуживания БД ======
+
 async def _sleep_until_utc(hour: int, minute: int = 0, dow: int | None = None):
+    """
+    Засыпает до ближайшего времени UTC hour:minute.
+    Если указан dow (0=Mon..6=Sun) — до ближайшего такого дня недели.
+    """
     now = datetime.now(timezone.utc).replace(second=0, microsecond=0)
     target = now.replace(hour=hour, minute=minute)
     if target <= now:
@@ -63,8 +71,9 @@ async def _sleep_until_utc(hour: int, minute: int = 0, dow: int | None = None):
 
 
 async def _backup_loop():
+    """Ежедневно в 02:00 UTC делаем копию /data/elaya.db в /data/backups/."""
     while True:
-        await _sleep_until_utc(2, 0)
+        await _sleep_until_utc(2, 0)  # каждый день 02:00 UTC
         try:
             path = backup_sqlite()
             logging.info("Backup done: %s", path)
@@ -73,25 +82,28 @@ async def _backup_loop():
 
 
 async def _vacuum_loop():
+    """Раз в неделю (вс) 02:05 UTC делаем VACUUM для sqlite."""
     while True:
-        await _sleep_until_utc(2, 5, dow=6)
+        await _sleep_until_utc(2, 5, dow=6)  # воскресенье 02:05 UTC
         try:
             vacuum_sqlite()
             logging.info("Vacuum done")
         except Exception as e:
             logging.exception("Vacuum failed: %s", e)
+
 # ==================================================
 
 
+# --- установка /команд в меню ---
 async def setup_commands(bot: Bot) -> None:
     user_cmds = [
         BotCommand(command="start",     description="Начать"),
-        BotCommand(command="menu",      description="Открыть меню"),
-        BotCommand(command="training",  description="Тренировка дня"),
-        BotCommand(command="progress",  description="Мой прогресс"),
         BotCommand(command="apply",     description="Путь лидера (заявка)"),
-        BotCommand(command="privacy",   description="Политика и удаление данных"),
+        BotCommand(command="coach_on",  description="Включить наставника"),
+        BotCommand(command="coach_off", description="Выключить наставника"),
+        BotCommand(command="ask",       description="Спросить наставника"),
         BotCommand(command="help",      description="Справка"),
+        BotCommand(command="privacy",   description="Политика"),
     ]
     await bot.set_my_commands(user_cmds, scope=BotCommandScopeAllPrivateChats())
 
@@ -100,22 +112,22 @@ async def main():
     if not settings.bot_token:
         raise RuntimeError("BOT_TOKEN is empty. Set it in .env")
 
+    # Инициализируем БД/таблицы и добавочные колонки
     init_db()
 
     bot = Bot(token=settings.bot_token)
     dp = Dispatcher(storage=MemoryStorage())
 
+    # Глобальная обработка ошибок
     dp.message.middleware(ErrorsMiddleware())
     dp.callback_query.middleware(ErrorsMiddleware())
 
-    # Служебные (если есть)
+    # 1) Специализированные/служебные роутеры
     _include_optional_router(dp, "app.routers.settings")
     _include_optional_router(dp, "app.routers.admin")
     _include_optional_router(dp, "app.routers.premium")
 
-    # Порядок: сначала диплинки и коуч, затем основные
-    dp.include_router(deeplink.router)   # <-- до онбординга
-    dp.include_router(coach.router)      # <-- наставник
+    # 2) Основные фичи (apply раньше онбординга)
     dp.include_router(apply.router)
     dp.include_router(onboarding.router)
     dp.include_router(training.router)
@@ -123,10 +135,13 @@ async def main():
     dp.include_router(progress.router)
     dp.include_router(feedback.router)
 
-    # Системный и меню — в конце
+    # 3) Системный роутер
     dp.include_router(system.router)
+
+    # 4) Меню — строго последним
     dp.include_router(menu.router)
 
+    # Стартуем polling
     async with bot:
         try:
             await bot.delete_webhook(drop_pending_updates=False)
