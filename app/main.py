@@ -20,11 +20,12 @@ import app.routers.casting as casting
 import app.routers.progress as progress
 from app.routers import menu
 
+# ⬇️ НОВОЕ: заявка «Путь лидера» и сбор отзывов
+import app.routers.apply as apply                 # <-- НОВОЕ
+import app.routers.feedback as feedback          # <-- НОВОЕ
+
 # ⬇️ НОВОЕ: системный роутер (/help, /privacy и техкоманды)
 from app.routers import system  # NEW
-
-# ⬇️ НОВОЕ: роутер заявки «Путь лидера» (ловим /start leader_waitlist)
-import app.routers.apply as apply  # <-- НОВОЕ
 
 # ⬇️ НОВОЕ: утилиты обслуживания SQLite (бэкап и VACUUM)
 from app.utils.maintenance import backup_sqlite, vacuum_sqlite  # NEW
@@ -100,7 +101,7 @@ async def setup_commands(bot: Bot) -> None:
         BotCommand(command="menu",      description="Открыть меню"),
         BotCommand(command="training",  description="Тренировка дня"),
         BotCommand(command="progress",  description="Мой прогресс"),
-        BotCommand(command="apply",     description="Путь лидера (заявка)"),  # <-- НОВОЕ
+        BotCommand(command="apply",     description="Путь лидера (заявка)"),
         BotCommand(command="privacy",   description="Политика и удаление данных"),
         BotCommand(command="help",      description="Справка"),
     ]
@@ -122,38 +123,36 @@ async def main():
     dp.callback_query.middleware(ErrorsMiddleware())
 
     # 1) Специализированные/служебные роутеры (если имеются в проекте)
-    _include_optional_router(dp, "app.routers.settings")   # settings_router.router
-    _include_optional_router(dp, "app.routers.admin")      # admin.router
-    _include_optional_router(dp, "app.routers.premium")    # premium.router
+    _include_optional_router(dp, "app.routers.settings")
+    _include_optional_router(dp, "app.routers.admin")
+    _include_optional_router(dp, "app.routers.premium")
 
-    # 2) Системный роутер
-    dp.include_router(system.router)
-
-    # 3) Основные фичи: apply раньше онбординга
-    dp.include_router(apply.router)         # <-- ВАЖНО
+    # 2) Основные фичи (apply раньше онбординга)
+    dp.include_router(apply.router)         # <-- важно
     dp.include_router(onboarding.router)
     dp.include_router(training.router)
     dp.include_router(casting.router)
     dp.include_router(progress.router)
+    dp.include_router(feedback.router)      # <-- НОВОЕ: до system/menu
+
+    # 3) Системный роутер
+    dp.include_router(system.router)
 
     # 4) Меню — строго последним
     dp.include_router(menu.router)
 
     # Стартуем polling
     async with bot:
-        # выключаем вебхук перед поллингом
         try:
             await bot.delete_webhook(drop_pending_updates=False)
         except Exception as e:
             logging.warning("delete_webhook failed: %s", e)
 
-        # ставим команды в меню бота
         try:
             await setup_commands(bot)
         except Exception as e:
             logging.warning("setup_commands failed: %s", e)
 
-        # запускаем фоновые задачи обслуживания БД
         asyncio.create_task(_backup_loop())
         asyncio.create_task(_vacuum_loop())
 
