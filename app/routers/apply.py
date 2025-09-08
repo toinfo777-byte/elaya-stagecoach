@@ -1,125 +1,191 @@
 # app/routers/apply.py
 from __future__ import annotations
-from aiogram import Router, F
-from aiogram.filters import Command, StateFilter
-from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
+
+from aiogram import Router, F, types
+from aiogram.filters import Command
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery, Message
+
 from aiogram.fsm.state import StatesGroup, State
 from aiogram.fsm.context import FSMContext
 
 from app.config import settings
 from app.keyboards.menu import main_menu
 from app.storage.repo import session_scope
-from app.storage.models import User
-from app.services.leads import create_lead, LeadPayload
+from app.storage.models import User, Lead
 
 router = Router(name="apply")
 
-INVITE_TEXT = (
-    "«Путь лидера» — вейтлист на новую центральную ось.\n"
-    "Оставьте короткую заявку — вернёмся с деталями."
-)
 
-def invite_kb() -> InlineKeyboardMarkup:
+# ---------- helpers ----------
+def _admin_ids_set() -> set[int]:
+    """Безопасно читаем settings.admin_ids (list|set|tuple|str '1,2,3')."""
+    try:
+        ids = settings.admin_ids
+        if isinstance(ids, (set, list, tuple)):
+            return {int(x) for x in ids}
+        if isinstance(ids, str):
+            parts = ids.replace(";", ",").split(",")
+            return {int(x.strip()) for x in parts if x.strip()}
+    except Exception:
+        pass
+    return set()
+
+
+def _invite_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [InlineKeyboardButton(text="Оставить заявку", callback_data="apply_start")]
         ]
     )
 
-class ApplyFSM(StatesGroup):
+
+# ---------- FSM ----------
+class ApplyFlow(StatesGroup):
     name = State()
     city_tz = State()
     contact = State()
     motivation = State()
 
-# --- входные точки ---
-@router.message(StateFilter("*"), F.text == "Путь лидера")
-@router.message(StateFilter("*"), Command("apply"))
+
+# ---------- deep-link: /start leader_waitlist ----------
+@router.message(Command("start"), F.text.func(lambda t: isinstance(t, str) and "leader_waitlist" in t))
+async def start_leader_waitlist(m: Message):
+    # при старте через deep link — опционально сохраним источник
+    with session_scope() as s:
+        u = s.query(User).filter_by(tg_id=m.from_user.id).first()
+        if u and not getattr(u, "source", None):
+            u.source = "leader_waitlist"
+
+    text = (
+        "🌟 «Путь лидера Элайи»\n\n"
+        "Образовательная программа для воспитания руководителей авангарда смыслов.\n"
+        "Готовы присоединиться к вейтлисту? Нажмите кнопку ниже и заполните короткую форму."
+    )
+    await m.answer(text, reply_markup=_invite_kb())
+
+
+# ---------- entry points ----------
+@router.message(Command("apply"))
+@router.message(F.text == "Путь лидера")
 async def apply_entry(m: Message, state: FSMContext):
-    await state.set_state(ApplyFSM.name)
-    await m.answer("Как вас зовут? (имя/ник)")
-
-@router.callback_query(StateFilter("*"), F.data == "apply_start")
-async def apply_from_button(cb: CallbackQuery, state: FSMContext):
-    await state.set_state(ApplyFSM.name)
-    await cb.message.answer("Как вас зовут? (имя/ник)")
-    await cb.answer()
-
-# --- форма ---
-@router.message(ApplyFSM.name, F.text.len() > 0)
-async def step_name(m: Message, state: FSMContext):
-    await state.update_data(name=m.text.strip())
-    await state.set_state(ApplyFSM.city_tz)
-    await m.answer("Ваш город / часовой пояс? (например: Москва / Europe/Moscow)")
-
-@router.message(ApplyFSM.city_tz, F.text.len() > 0)
-async def step_city(m: Message, state: FSMContext):
-    await state.update_data(city_tz=m.text.strip())
-    await state.set_state(ApplyFSM.contact)
-    prefill = f"@{m.from_user.username}" if m.from_user.username else ""
-    hint = f"\nЕсли удобно, можно так: {prefill}" if prefill else ""
-    await m.answer("Контакт для связи (телеграм @ / почта):" + hint)
-
-@router.message(ApplyFSM.contact, F.text.len() > 0)
-async def step_contact(m: Message, state: FSMContext):
-    await state.update_data(contact=m.text.strip())
-    await state.set_state(ApplyFSM.motivation)
-    await m.answer("Коротко: мотивация (1–2 предложения).")
-
-@router.message(ApplyFSM.motivation, F.text.len() > 0)
-async def step_motivation(m: Message, state: FSMContext):
-    d = await state.get_data()
-    name = d.get("name") or m.from_user.full_name
-    city_tz = d.get("city_tz", "")
-    contact = d.get("contact", "")
-    motivation = m.text.strip()
-
-    # канал связи: грубая эвристика
-    ch = "email" if ("@" in contact and " " not in contact and "." in contact) and not contact.startswith("@") else "telegram"
-    note = f"name={name}; city_tz={city_tz}; motivation={motivation}"
-
     with session_scope() as s:
         u = s.query(User).filter_by(tg_id=m.from_user.id).first()
         if not u:
-            u = User(tg_id=m.from_user.id, username=m.from_user.username or "", name=m.from_user.full_name)
-            s.add(u); s.flush()
-        lead = create_lead(
-            s, u.id,
-            LeadPayload(channel=ch, contact=contact or (f"@{m.from_user.username}" if m.from_user.username else str(m.from_user.id))),
-            # track и note — важное:
-            # (передаём как именованные, чтобы не перепутать порядок)
-        )
-        # обновим track и note (если create_lead из старой версии без новых полей)
-        lead.track = "leader"
-        lead.note = note
-        s.commit()
+            await m.answer("Сначала пройдите /start.", reply_markup=main_menu())
+            return
 
-    # уведомление админам
-    for admin_id in settings.admin_ids:
-        try:
-            src = "(без source)"
-            with session_scope() as s2:
-                u2 = s2.query(User).filter_by(tg_id=m.from_user.id).first()
-                if u2 and getattr(u2, "source", None):
-                    src = f"source={u2.source}"
-            await m.bot.send_message(
-                admin_id,
-                f"Новая заявка «Путь лидера»\n"
-                f"id={m.from_user.id} @{m.from_user.username or '-'}\n"
-                f"{name}, {city_tz}\n"
-                f"contact: {contact}\n"
-                f"{src}\n"
-                f"motivation: {motivation[:300]}"
+        # если уже есть заявка — сообщаем
+        exists = s.query(Lead).filter_by(user_id=u.id, track="leader").first()
+        if exists:
+            await m.answer(
+                "Ваша заявка в трек «Лидер» уже получена ✅\n"
+                "Мы свяжемся с вами по указанным контактам. "
+                "Статус виден в «📈 Мой прогресс».",
+                reply_markup=main_menu(),
             )
-        except Exception:
-            pass
+            return
+
+    await state.set_state(ApplyFlow.name)
+    suggested = " ".join(filter(None, [m.from_user.first_name, m.from_user.last_name]))
+    suggested = suggested or (f"@{m.from_user.username}" if m.from_user.username else "")
+    prompt = "Введите ваше имя (как к вам обращаться)"
+    if suggested:
+        prompt += f"\n\nНапример: *{suggested}*"
+    await m.answer(prompt)
+
+
+@router.callback_query(F.data == "apply_start")
+async def apply_start_cb(cb: CallbackQuery, state: FSMContext):
+    await cb.answer()
+    await state.set_state(ApplyFlow.name)
+    suggested = " ".join(filter(None, [cb.from_user.first_name, cb.from_user.last_name]))
+    suggested = suggested or (f"@{cb.from_user.username}" if cb.from_user.username else "")
+    prompt = "Введите ваше имя (как к вам обращаться)"
+    if suggested:
+        prompt += f"\n\nНапример: *{suggested}*"
+    await cb.message.answer(prompt)
+
+
+# ---------- steps ----------
+@router.message(ApplyFlow.name)
+async def step_name(m: Message, state: FSMContext):
+    name = (m.text or "").strip()
+    if not name:
+        await m.answer("Пожалуйста, напишите имя текстом.")
+        return
+    await state.update_data(name=name)
+    await state.set_state(ApplyFlow.city_tz)
+    await m.answer("Ваш город и часовой пояс (например: «Санкт-Петербург, GMT+3»).")
+
+
+@router.message(ApplyFlow.city_tz)
+async def step_city_tz(m: Message, state: FSMContext):
+    city_tz = (m.text or "").strip()
+    if len(city_tz) < 2:
+        await m.answer("Чуть подробнее, пожалуйста: город и часовой пояс.")
+        return
+    await state.update_data(city_tz=city_tz)
+    await state.set_state(ApplyFlow.contact)
+    un = f"@{m.from_user.username}" if m.from_user.username else "—"
+    await m.answer(
+        "Контакт для связи (телеграм/почта/телефон).\n"
+        f"Можно написать ваш текущий ник: {un}"
+    )
+
+
+@router.message(ApplyFlow.contact)
+async def step_contact(m: Message, state: FSMContext):
+    contact = (m.text or "").strip()
+    if len(contact) < 2:
+        await m.answer("Нужен контакт — ник, телефон или email.")
+        return
+    await state.update_data(contact=contact)
+    await state.set_state(ApplyFlow.motivation)
+    await m.answer("Коротко ваша мотивация: почему хотите в трек? (1–2 предложения)")
+
+
+@router.message(ApplyFlow.motivation)
+async def step_motivation(m: Message, state: FSMContext):
+    motivation = (m.text or "").strip()
+    if len(motivation) < 5:
+        await m.answer("Добавьте, пожалуйста, пару слов о мотивации.")
+        return
+
+    data = await state.get_data()
+    name = data.get("name", "")
+    city_tz = data.get("city_tz", "")
+    contact = data.get("contact", "")
+
+    # Сохраняем лид
+    with session_scope() as s:
+        u = s.query(User).filter_by(tg_id=m.from_user.id).first()
+        if not u:
+            await m.answer("Сначала пройдите /start.", reply_markup=main_menu())
+            await state.clear()
+            return
+
+        note = f"name: {name}; city_tz: {city_tz}; motivation: {motivation}"
+        lead = Lead(
+            user_id=u.id,
+            channel="tg",
+            contact=contact,
+            note=note,
+            track="leader",
+        )
+        s.add(lead)
 
     await state.clear()
-    await m.answer("Заявка принята, вернёмся с деталями. Спасибо! 🙌", reply_markup=main_menu())
+    await m.answer("Заявка принята ✅\nМы вернёмся с деталями.", reply_markup=main_menu())
 
-# --- спец-экран по deeplink ---
-@router.message(StateFilter("*"), F.text.regexp(r"^/start(?:\s+leader_waitlist)?$"))
-async def start_leader_invite(m: Message):
-    # source сохранится в онбординге (users.source) — мы его уже не перетираем
-    if "leader_waitlist" in (m.text or ""):
-        await m.answer(INVITE_TEXT, reply_markup=invite_kb())
+    # Уведомление админам
+    text = (
+        "🆕 Новая заявка: «Путь лидера»\n"
+        f"user_id={m.from_user.id} @{m.from_user.username or '-'}\n"
+        f"Имя: {name}\nГород/часовой пояс: {city_tz}\nКонтакт: {contact}\n"
+        f"Мотивация: {motivation}"
+    )
+    for aid in _admin_ids_set():
+        try:
+            await m.bot.send_message(aid, text)
+        except Exception:
+            pass
