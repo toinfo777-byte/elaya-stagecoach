@@ -18,13 +18,20 @@ from app.storage.models import User
 
 router = Router(name="coach")
 
+# user_id -> {"until": dt, "last": monotonic_ts}
 _COACH_USERS: dict[int, dict] = {}
+# Разрешённые групповые/супергрупповые чаты (вкл./выкл. /coach_toggle)
 _ALLOWED_CHATS: set[int] = set()
+
+# Дефолты — если в Settings нет полей или они не прокинулись из ENV
+_TTL_MIN_DEFAULT = 15
+_RATE_SEC_DEFAULT = 5
 
 
 def _coach_on(uid: int):
+    ttl_min = getattr(settings, "coach_ttl_min", _TTL_MIN_DEFAULT)
     _COACH_USERS[uid] = {
-        "until": datetime.utcnow() + timedelta(minutes=settings.coach_ttl_min),
+        "until": datetime.utcnow() + timedelta(minutes=ttl_min),
         "last": 0.0,
     }
 
@@ -65,9 +72,11 @@ async def coach_toggle(m: Message):
 
 @router.message(F.text)
 async def passive_listen(m: Message, state: FSMContext):
+    # Группы/супергруппы — только если включили
     if m.chat.type in {"group", "supergroup"} and m.chat.id not in _ALLOWED_CHATS:
         return
 
+    # Работать только когда включён и не истек TTL
     uid = m.from_user.id
     st = _COACH_USERS.get(uid)
     if not st:
@@ -76,8 +85,10 @@ async def passive_listen(m: Message, state: FSMContext):
         _COACH_USERS.pop(uid, None)
         return await m.answer("⏳ Сессия наставника завершилась. Включить снова: /coach_on")
 
+    # Rate limit
+    rate_sec = getattr(settings, "coach_rate_sec", _RATE_SEC_DEFAULT)
     now = time.monotonic()
-    if now - st["last"] < settings.coach_rate_sec:
+    if now - st["last"] < rate_sec:
         return
     st["last"] = now
 
@@ -113,10 +124,11 @@ async def _handle_question(m: Message, q: str):
             f"Запусти таймер и отмечай ощущение одним словом."
         )
 
+        # Лог — не должен мешать ответу
         try:
             with session_scope() as s:
                 u = s.query(User).filter_by(tg_id=m.from_user.id).first()
-                log_event(s, u.id if u else None, "coach_answer", {"q": q, "drill_id": drill["id"]})
+                log_event(s, u.id if u else None, "coach_answer", {"q": q, "drill_id": drill.get("id")})
         except Exception:
             pass
 
