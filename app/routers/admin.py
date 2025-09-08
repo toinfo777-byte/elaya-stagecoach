@@ -8,7 +8,7 @@ from datetime import datetime, timedelta  # <-- NEW
 
 from aiogram import Router
 from aiogram.filters import Command
-from aiogram.types import Message, FSInputFile
+from aiogram.types import Message, FSInputFile, InlineKeyboardMarkup, InlineKeyboardButton  # <-- NEW
 from aiogram.exceptions import TelegramForbiddenError, TelegramBadRequest
 
 from app.config import settings
@@ -47,8 +47,9 @@ async def admin_help(m: Message):
         "Админ команды:\n"
         "/broadcast <текст> — рассылка всем пользователям\n"
         "/leads_csv [track] — выгрузка лидов (CSV), опционально с фильтром по треку\n"
-        "/feedback_csv — выгрузка всех отзывов (CSV)\n"           # <-- NEW
-        "/feedback_daily — отзывы за последние 24 часа (CSV)"      # <-- NEW
+        "/feedback_csv — выгрузка всех отзывов (CSV)\n"
+        "/feedback_daily — отзывы за последние 24 часа (CSV)\n"
+        "/post_training — пост в канал с кнопками запуска"  # <-- NEW
     )
 
 
@@ -65,11 +66,9 @@ async def broadcast(m: Message):
     sent = 0
     failed = 0
 
-    # читаем список юзеров одной сессией
     with session_scope() as s:
         users = s.query(User).all()
 
-    # шлём сообщения
     for u in users:
         try:
             await m.bot.send_message(u.tg_id, text)
@@ -85,11 +84,9 @@ async def leads_csv(m: Message):
     if not _is_admin(m.from_user.id):
         return await m.answer("⛔ Только для админов.")
 
-    # опциональный фильтр: "/leads_csv leader"
     parts = m.text.split(maxsplit=1)
     track: str | None = parts[1].strip() if len(parts) > 1 else None
 
-    # собираем данные Lead + User
     with session_scope() as s:
         q = (
             s.query(Lead, User)
@@ -119,7 +116,6 @@ async def leads_csv(m: Message):
         text = "Лидов пока нет." if not track else f"Лидов с треком «{track}» нет."
         return await m.answer(text)
 
-    # пишем во временный CSV
     fd, path = tempfile.mkstemp(prefix="leads_", suffix=".csv")
     os.close(fd)
     try:
@@ -138,7 +134,7 @@ async def leads_csv(m: Message):
             pass
 
 
-# -------- NEW: выгрузка отзывов --------
+# -------- выгрузка отзывов --------
 @router.message(Command("feedback_csv"))
 async def feedback_csv(m: Message):
     if not _is_admin(m.from_user.id):
@@ -160,3 +156,38 @@ async def feedback_daily(m: Message):
     with session_scope() as s:
         export_feedback_csv(s, path, since=since)
     await m.answer_document(FSInputFile(path), caption="Feedback (last 24h)")
+
+
+# -------- NEW: пост в канал с инлайн-кнопками --------
+@router.message(Command("post_training")))
+async def post_training(m: Message):
+    if not _is_admin(m.from_user.id):
+        return await m.answer("⛔ Только для админов.")
+
+    try:
+        me = await m.bot.get_me()
+        link_train = f"https://t.me/{me.username}?start=go_training"
+        link_cast = f"https://t.me/{me.username}?start=go_casting"
+
+        kb = InlineKeyboardMarkup(
+            inline_keyboard=[[
+                InlineKeyboardButton(text="▶️ Запустить тренировку", url=link_train),
+                InlineKeyboardButton(text="🎭 Мини-кастинг", url=link_cast),
+            ]]
+        )
+
+        text = (
+            "Сегодняшняя разминка в один клик 👇\n\n"
+            "• «Тренировка дня» — 2–3 минуты\n"
+            "• «Мини-кастинг» — 60 секунд"
+        )
+
+        await m.bot.send_message(
+            chat_id=settings.channel_username,
+            text=text,
+            reply_markup=kb,
+            disable_web_page_preview=True,
+        )
+        await m.answer("✅ Опубликовано.")
+    except Exception as e:
+        await m.answer(f"⚠️ Не удалось запостить: {e!s}")
