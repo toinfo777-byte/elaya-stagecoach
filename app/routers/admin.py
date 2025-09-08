@@ -1,3 +1,4 @@
+# app/routers/admin.py
 from __future__ import annotations
 
 import csv
@@ -43,7 +44,7 @@ async def admin_help(m: Message):
     await m.answer(
         "Админ команды:\n"
         "/broadcast <текст> — рассылка всем пользователям\n"
-        "/leads_csv — выгрузка лидов (CSV)"
+        "/leads_csv [track] — выгрузка лидов (CSV), опционально с фильтром по треку"
     )
 
 
@@ -80,6 +81,10 @@ async def leads_csv(m: Message):
     if not _is_admin(m.from_user.id):
         return await m.answer("⛔ Только для админов.")
 
+    # опциональный фильтр: "/leads_csv leader"
+    parts = m.text.split(maxsplit=1)
+    track: str | None = parts[1].strip() if len(parts) > 1 else None
+
     # собираем данные Lead + User
     with session_scope() as s:
         q = (
@@ -87,6 +92,11 @@ async def leads_csv(m: Message):
             .join(User, User.id == Lead.user_id)
             .order_by(Lead.ts.desc())
         )
+        if track:
+            q = q.filter(Lead.track == track)
+
+        data = q.all()
+
         rows = [
             {
                 "ts": lead.ts.isoformat(sep=" ", timespec="seconds"),
@@ -96,23 +106,27 @@ async def leads_csv(m: Message):
                 "channel": lead.channel,
                 "contact": lead.contact,
                 "note": lead.note or "",
+                "track": lead.track or "",
             }
-            for lead, user in q.all()
+            for lead, user in data
         ]
 
     if not rows:
-        return await m.answer("Лидов пока нет.")
+        text = "Лидов пока нет." if not track else f"Лидов с треком «{track}» нет."
+        return await m.answer(text)
 
     # пишем во временный CSV
     fd, path = tempfile.mkstemp(prefix="leads_", suffix=".csv")
     os.close(fd)
     try:
+        fieldnames = ["ts", "tg_id", "username", "name", "channel", "contact", "note", "track"]
         with open(path, "w", newline="", encoding="utf-8") as f:
-            writer = csv.DictWriter(f, fieldnames=list(rows[0].keys()))
+            writer = csv.DictWriter(f, fieldnames=fieldnames)
             writer.writeheader()
             writer.writerows(rows)
 
-        await m.answer_document(FSInputFile(path), caption=f"Leads: {len(rows)}")
+        title = f"Leads ({track})" if track else "Leads (all)"
+        await m.answer_document(FSInputFile(path), caption=title)
     finally:
         try:
             os.remove(path)
