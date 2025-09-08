@@ -1,3 +1,4 @@
+# app/main.py
 import asyncio
 import logging
 import importlib
@@ -22,13 +23,18 @@ from app.routers import menu
 from app.routers import system  # NEW
 from app.routers.system import setup_commands  # NEW: установка /команд в меню
 
+# ⬇️ НОВОЕ: роутер заявки «Путь лидера» (ловим /start leader_waitlist)
+import app.routers.apply as apply  # <-- НОВОЕ
+
 # ⬇️ НОВОЕ: утилиты обслуживания SQLite (бэкап и VACUUM)
 from app.utils.maintenance import backup_sqlite, vacuum_sqlite  # NEW
+
 
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
 )
+
 
 def _include_optional_router(dp: Dispatcher, module_path: str, attr: str = "router") -> Optional[None]:
     """
@@ -62,6 +68,7 @@ async def _sleep_until_utc(hour: int, minute: int = 0, dow: int | None = None):
             target += timedelta(days=1)
     await asyncio.sleep((target - now).total_seconds())
 
+
 async def _backup_loop():
     """Ежедневно в 02:00 UTC делаем копию /data/elaya.db в /data/backups/."""
     while True:
@@ -71,6 +78,7 @@ async def _backup_loop():
             logging.info("Backup done: %s", path)
         except Exception as e:
             logging.exception("Backup failed: %s", e)
+
 
 async def _vacuum_loop():
     """Раз в неделю (вс) 02:05 UTC делаем VACUUM для sqlite."""
@@ -89,7 +97,7 @@ async def main():
     if not settings.bot_token:
         raise RuntimeError("BOT_TOKEN is empty. Set it in .env")
 
-    # Инициализируем БД/таблицы
+    # Инициализируем БД/таблицы и добавочные колонки
     init_db()
 
     bot = Bot(token=settings.bot_token)
@@ -104,10 +112,11 @@ async def main():
     _include_optional_router(dp, "app.routers.admin")      # admin.router (последний из служебных)
     _include_optional_router(dp, "app.routers.premium")    # premium.router
 
-    # ⬇️ НОВОЕ: подключаем наш системный роутер
+    # ⬇️ НОВОЕ: подключаем системный роутер
     dp.include_router(system.router)  # NEW
 
-    # 2) Ваши основные фичи
+    # 2) Основные фичи: apply раньше онбординга, чтобы ловить /start leader_waitlist
+    dp.include_router(apply.router)         # <-- ВАЖНО: раньше онбординга
     dp.include_router(onboarding.router)
     dp.include_router(training.router)
     dp.include_router(casting.router)
@@ -139,6 +148,7 @@ async def main():
             allowed_updates=dp.resolve_used_update_types(),
             polling_timeout=30,  # немного длиннее таймаут long-poll
         )
+
 
 if __name__ == "__main__":
     asyncio.run(main())
