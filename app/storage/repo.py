@@ -2,11 +2,12 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
+from datetime import datetime  # <-- NEW
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.config import settings
-from app.storage.models import Base, User  # <- User нужен для delete_user_cascade
+from app.storage.models import Base, User, Event  # <-- Event для логирования
 
 # Engine / Session
 engine = create_engine(settings.db_url, future=True, pool_pre_ping=True)
@@ -61,6 +62,24 @@ def session_scope() -> Session:
         raise
     finally:
         session.close()
+
+
+# --- логирование событий (в таблицу events) ---
+def log_event(s: Session, user_id: int | None, name: str, payload: dict | None = None) -> None:
+    """
+    Добавляет запись в events:
+      - user_id: необязателен (для системных событий можно None)
+      - name: короткое имя/тип события
+      - payload: произвольный JSON с деталями
+    """
+    e = Event(
+        user_id=user_id,
+        kind=name,
+        payload_json=(payload or {}),
+        ts=datetime.utcnow(),
+    )
+    s.add(e)
+    s.commit()
 
 
 # --- каскадное удаление пользователя и всех связанных записей ---
