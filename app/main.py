@@ -1,4 +1,3 @@
-# app/main.py
 import asyncio
 import logging
 import importlib
@@ -19,7 +18,7 @@ import app.routers.training as training
 import app.routers.casting as casting
 import app.routers.progress as progress
 from app.routers import menu
-
+import app.routers.coach as coach  # <-- ДОБАВЛЕНО
 # ⬇️ НОВОЕ: заявка «Путь лидера» и сбор отзывов
 import app.routers.apply as apply
 import app.routers.feedback as feedback
@@ -97,13 +96,13 @@ async def _vacuum_loop():
 # --- установка /команд в меню ---
 async def setup_commands(bot: Bot) -> None:
     user_cmds = [
-        BotCommand(command="start",     description="Начать"),
-        BotCommand(command="apply",     description="Путь лидера (заявка)"),
-        BotCommand(command="coach_on",  description="Включить наставника"),
-        BotCommand(command="coach_off", description="Выключить наставника"),
-        BotCommand(command="ask",       description="Спросить наставника"),
-        BotCommand(command="help",      description="Справка"),
-        BotCommand(command="privacy",   description="Политика"),
+        BotCommand(command="start",       description="Начать"),
+        BotCommand(command="apply",       description="Путь лидера (заявка)"),
+        BotCommand(command="coach_on",    description="Включить наставника"),
+        BotCommand(command="coach_off",   description="Выключить наставника"),
+        BotCommand(command="ask",         description="Спросить наставника"),
+        BotCommand(command="help",        description="Справка"),
+        BotCommand(command="privacy",     description="Политика"),
     ]
     await bot.set_my_commands(user_cmds, scope=BotCommandScopeAllPrivateChats())
 
@@ -129,6 +128,7 @@ async def main():
 
     # 2) Основные фичи (apply раньше онбординга)
     dp.include_router(apply.router)
+    dp.include_router(coach.router)  # <-- ДОБАВЛЕНО
     dp.include_router(onboarding.router)
     dp.include_router(training.router)
     dp.include_router(casting.router)
