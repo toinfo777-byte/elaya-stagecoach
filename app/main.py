@@ -7,6 +7,7 @@ from datetime import datetime, timedelta, timezone  # NEW
 
 from aiogram import Bot, Dispatcher
 from aiogram.fsm.storage.memory import MemoryStorage
+from aiogram.types import BotCommand, BotCommandScopeAllPrivateChats  # <-- для setup_commands
 
 from app.config import settings
 from app.middlewares.error_handler import ErrorsMiddleware
@@ -21,7 +22,6 @@ from app.routers import menu
 
 # ⬇️ НОВОЕ: системный роутер (/help, /privacy и техкоманды)
 from app.routers import system  # NEW
-from app.routers.system import setup_commands  # NEW: установка /команд в меню
 
 # ⬇️ НОВОЕ: роутер заявки «Путь лидера» (ловим /start leader_waitlist)
 import app.routers.apply as apply  # <-- НОВОЕ
@@ -93,6 +93,20 @@ async def _vacuum_loop():
 # ==================================================
 
 
+# --- установка /команд в меню ---
+async def setup_commands(bot: Bot) -> None:
+    user_cmds = [
+        BotCommand(command="start",     description="Начать"),
+        BotCommand(command="menu",      description="Открыть меню"),
+        BotCommand(command="training",  description="Тренировка дня"),
+        BotCommand(command="progress",  description="Мой прогресс"),
+        BotCommand(command="apply",     description="Путь лидера (заявка)"),  # <-- НОВОЕ
+        BotCommand(command="privacy",   description="Политика и удаление данных"),
+        BotCommand(command="help",      description="Справка"),
+    ]
+    await bot.set_my_commands(user_cmds, scope=BotCommandScopeAllPrivateChats())
+
+
 async def main():
     if not settings.bot_token:
         raise RuntimeError("BOT_TOKEN is empty. Set it in .env")
@@ -109,44 +123,44 @@ async def main():
 
     # 1) Специализированные/служебные роутеры (если имеются в проекте)
     _include_optional_router(dp, "app.routers.settings")   # settings_router.router
-    _include_optional_router(dp, "app.routers.admin")      # admin.router (последний из служебных)
+    _include_optional_router(dp, "app.routers.admin")      # admin.router
     _include_optional_router(dp, "app.routers.premium")    # premium.router
 
-    # ⬇️ НОВОЕ: подключаем системный роутер
-    dp.include_router(system.router)  # NEW
+    # 2) Системный роутер
+    dp.include_router(system.router)
 
-    # 2) Основные фичи: apply раньше онбординга, чтобы ловить /start leader_waitlist
-    dp.include_router(apply.router)         # <-- ВАЖНО: раньше онбординга
+    # 3) Основные фичи: apply раньше онбординга
+    dp.include_router(apply.router)         # <-- ВАЖНО
     dp.include_router(onboarding.router)
     dp.include_router(training.router)
     dp.include_router(casting.router)
     dp.include_router(progress.router)
 
-    # 3) Меню — строго последним
+    # 4) Меню — строго последним
     dp.include_router(menu.router)
 
     # Стартуем polling
     async with bot:
-        # ВАЖНО: перед поллингом гарантированно выключаем вебхук (исключаем конфликты)
+        # выключаем вебхук перед поллингом
         try:
             await bot.delete_webhook(drop_pending_updates=False)
         except Exception as e:
             logging.warning("delete_webhook failed: %s", e)
 
-        # NEW: ставим команды в меню бота
+        # ставим команды в меню бота
         try:
             await setup_commands(bot)
         except Exception as e:
             logging.warning("setup_commands failed: %s", e)
 
-        # NEW: запускаем фоновые задачи обслуживания БД (работают в том же контейнере и диске /data)
+        # запускаем фоновые задачи обслуживания БД
         asyncio.create_task(_backup_loop())
         asyncio.create_task(_vacuum_loop())
 
         await dp.start_polling(
             bot,
             allowed_updates=dp.resolve_used_update_types(),
-            polling_timeout=30,  # немного длиннее таймаут long-poll
+            polling_timeout=30,
         )
 
 
