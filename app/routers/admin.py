@@ -4,6 +4,7 @@ from __future__ import annotations
 import csv
 import os
 import tempfile
+from datetime import datetime, timedelta  # <-- NEW
 
 from aiogram import Router
 from aiogram.filters import Command
@@ -13,6 +14,7 @@ from aiogram.exceptions import TelegramForbiddenError, TelegramBadRequest
 from app.config import settings
 from app.storage.repo import session_scope
 from app.storage.models import User, Lead
+from app.services.feedback import export_feedback_csv  # <-- NEW
 
 router = Router(name="admin")
 
@@ -44,7 +46,9 @@ async def admin_help(m: Message):
     await m.answer(
         "Админ команды:\n"
         "/broadcast <текст> — рассылка всем пользователям\n"
-        "/leads_csv [track] — выгрузка лидов (CSV), опционально с фильтром по треку"
+        "/leads_csv [track] — выгрузка лидов (CSV), опционально с фильтром по треку\n"
+        "/feedback_csv — выгрузка всех отзывов (CSV)\n"           # <-- NEW
+        "/feedback_daily — отзывы за последние 24 часа (CSV)"      # <-- NEW
     )
 
 
@@ -132,3 +136,27 @@ async def leads_csv(m: Message):
             os.remove(path)
         except OSError:
             pass
+
+
+# -------- NEW: выгрузка отзывов --------
+@router.message(Command("feedback_csv"))
+async def feedback_csv(m: Message):
+    if not _is_admin(m.from_user.id):
+        return await m.answer("⛔ Только для админов.")
+
+    path = "exports/feedback_all.csv"
+    with session_scope() as s:
+        export_feedback_csv(s, path)
+    await m.answer_document(FSInputFile(path), caption="Feedback (all)")
+
+
+@router.message(Command("feedback_daily"))
+async def feedback_daily(m: Message):
+    if not _is_admin(m.from_user.id):
+        return await m.answer("⛔ Только для админов.")
+
+    since = datetime.utcnow() - timedelta(days=1)
+    path = "exports/feedback_daily.csv"
+    with session_scope() as s:
+        export_feedback_csv(s, path, since=since)
+    await m.answer_document(FSInputFile(path), caption="Feedback (last 24h)")
