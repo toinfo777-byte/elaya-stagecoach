@@ -15,12 +15,13 @@ SessionLocal = sessionmaker(bind=engine, expire_on_commit=False, autoflush=False
 
 def init_db() -> None:
     """
-    Создаёт таблицы и, при необходимости, добавляет отсутствующие колонки:
+    Создаёт все таблицы моделей (в т.ч. feedbacks) и, при необходимости, добавляет
+    отсутствующие колонки:
       - users.source
       - leads.track
     Безопасно как для SQLite, так и для Postgres.
     """
-    # базовые таблицы
+    # создаст недостающие таблицы, включая feedbacks
     Base.metadata.create_all(engine)
 
     with Session(engine) as s:
@@ -62,10 +63,10 @@ def session_scope() -> Session:
         session.close()
 
 
-# --- NEW: каскадное удаление пользователя и всех связанных записей ---
+# --- каскадное удаление пользователя и всех связанных записей ---
 def delete_user_cascade(s: Session, user_id: int | None = None, tg_id: int | None = None) -> bool:
     """
-    Удаляет пользователя и все связанные записи (drill_runs, leads, events, test_results)
+    Удаляет пользователя и всё связанное (drill_runs, leads, events, test_results, feedbacks)
     благодаря cascade='all, delete-orphan' в моделях.
     Можно передать либо user_id (PK), либо tg_id. Возвращает True, если найден и удалён.
     """
