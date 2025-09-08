@@ -96,6 +96,7 @@ class Lead(Base):
     channel: Mapped[str] = mapped_column(String(32))          # источник: tg/insta/site/...
     contact: Mapped[str] = mapped_column(String(255))         # @username, телефон, e-mail
     note: Mapped[str | None] = mapped_column(String(500), default=None)
+    track: Mapped[str | None] = mapped_column(String(32), default=None)  # <-- НОВОЕ
     ts: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
     user: Mapped["User"] = relationship(back_populates="leads")
