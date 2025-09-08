@@ -1,4 +1,3 @@
-# app/routers/coach.py
 from __future__ import annotations
 
 import asyncio
@@ -6,23 +5,22 @@ import time
 from datetime import datetime, timedelta
 
 from aiogram import Router, F
-from aiogram.filters import Command
-from aiogram.types import Message, CallbackQuery
 from aiogram.enums import ChatAction
+from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
+from aiogram.types import Message, CallbackQuery
 
 from app.config import settings
 from app.keyboards.coach import timer_kb
 from app.services.coach_rules import pick_drill_by_keywords
-from app.storage.repo import session_scope, log_event
 from app.storage.models import User
+from app.storage.repo import session_scope, log_event
 
 router = Router(name="coach")
 
-# пользовательская сессия наставника: user_id -> {"until": dt, "last": ts_monotonic}
-_COACH_USERS: dict[int, dict] = {}
-# чаты обсуждений, где разрешены ответы наставника
-_ALLOWED_CHATS: set[int] = set()
+# Состояние «наставника» для каждого пользователя и разрешённые чаты
+_COACH_USERS: dict[int, dict] = {}   # user_id -> {"until": dt, "last": ts}
+_ALLOWED_CHATS: set[int] = set()     # chat_id, включается /coach_toggle
 
 
 def _coach_on(user_id: int) -> None:
@@ -55,7 +53,11 @@ async def ask_cmd(m: Message):
     await _handle_question(m, text)
 
 
-@router.message(F.chat.type.in_({"group", "supergroup"}), Command("coach_toggle"))
+# Включение/выключение наставника в конкретном чате обсуждений (тред)
+# 1) Обычная команда
+# 2) «Запасной» ловец по тексту, чтобы сработало даже в тредах и с /coach_toggle@bot
+@router.message(Command("coach_toggle"))
+@router.message(F.text.as_("txt").filter(lambda txt: isinstance(txt, str) and txt.split()[0].startswith("/coach_toggle")))
 async def coach_toggle(m: Message):
     cid = m.chat.id
     if cid in _ALLOWED_CHATS:
@@ -66,13 +68,19 @@ async def coach_toggle(m: Message):
         await m.answer("🔔 В этом чате наставник включён.")
 
 
+# Служебная команда для быстрого понимания контекста
+@router.message(Command("whochat"))
+async def whochat(m: Message):
+    await m.answer(f"type={m.chat.type} id={m.chat.id}")
+
+
 @router.message(F.text)
 async def passive_listen(m: Message, state: FSMContext):
-    # в группах — отвечаем только если чат разрешён
+    # В группах/супергруппах работаем только если чат разрешён /coach_toggle
     if m.chat.type in {"group", "supergroup"} and m.chat.id not in _ALLOWED_CHATS:
         return
 
-    # работаем только когда у юзера активна сессия
+    # Пользователь должен включить наставника и не выйти за TTL
     st = _COACH_USERS.get(m.from_user.id)
     if not st:
         return
@@ -80,7 +88,7 @@ async def passive_listen(m: Message, state: FSMContext):
         _COACH_USERS.pop(m.from_user.id, None)
         return await m.answer("⏳ Сессия наставника завершилась. Включить снова: /coach_on")
 
-    # rate limit
+    # Rate limit
     now = time.monotonic()
     if now - st["last"] < settings.coach_rate_sec:
         return
@@ -102,10 +110,11 @@ async def _handle_question(m: Message, q: str):
     if not q.strip():
         return await m.answer("Сформулируй коротко, по сути. Например: «зажим в горле».")
 
+    # Имитируем «печатает…»
     stop = asyncio.Event()
     asyncio.create_task(_send_typing(m.bot, m.chat.id, stop))
 
-    # подбор этюда (правила без LLM)
+    # Подбираем этюд по ключевым словам (fallback без LLM)
     drill = pick_drill_by_keywords(q)
     title = drill["title"]
     steps = drill["steps"][:4]
@@ -118,7 +127,7 @@ async def _handle_question(m: Message, q: str):
         f"Запусти таймер и отмечай ощущение одним словом."
     )
 
-    # лог события
+    # Логируем событие
     with session_scope() as s:
         u = s.query(User).filter_by(tg_id=m.from_user.id).first()
         log_event(s, u.id if u else None, "coach_answer", {"q": q, "drill_id": drill["id"]})
