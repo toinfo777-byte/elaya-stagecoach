@@ -30,6 +30,7 @@ class User(Base):
     leads: Mapped[list["Lead"]] = relationship(back_populates="user", cascade="all, delete-orphan")
     events: Mapped[list["Event"]] = relationship(back_populates="user", cascade="all, delete-orphan")
     test_results: Mapped[list["TestResult"]] = relationship(back_populates="user", cascade="all, delete-orphan")
+    feedbacks: Mapped[list["Feedback"]] = relationship(back_populates="user", cascade="all, delete-orphan")  # NEW
 
 
 # --- Этюд и прохождения ---
@@ -96,7 +97,25 @@ class Lead(Base):
     channel: Mapped[str] = mapped_column(String(32))          # источник: tg/insta/site/...
     contact: Mapped[str] = mapped_column(String(255))         # @username, телефон, e-mail
     note: Mapped[str | None] = mapped_column(String(500), default=None)
-    track: Mapped[str | None] = mapped_column(String(32), default=None)  # <-- НОВОЕ
+    track: Mapped[str | None] = mapped_column(String(32), default=None)
     ts: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
     user: Mapped["User"] = relationship(back_populates="leads")
+
+
+# --- Обратная связь (feedback) ---
+class Feedback(Base):
+    __tablename__ = "feedbacks"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+
+    first_source: Mapped[str | None] = mapped_column(String(64), default=None)  # откуда впервые пришёл
+    context: Mapped[str] = mapped_column(String(32))                             # "training" | "casting" | "manual"
+    context_id: Mapped[str | None] = mapped_column(String(64), default=None)     # id этюда/теста и т.п.
+    score: Mapped[int | None] = mapped_column(Integer, default=None)             # 2 / 1 / 0
+    text: Mapped[str | None] = mapped_column(String(2000), default=None)         # свободный текст
+    voice_file_id: Mapped[str | None] = mapped_column(String(256), default=None) # id voice в TG (если будет)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+    user: Mapped["User"] = relationship(back_populates="feedbacks")
