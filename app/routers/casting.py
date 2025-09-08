@@ -7,20 +7,25 @@ from aiogram.fsm.state import StatesGroup, State
 from aiogram.fsm.context import FSMContext
 
 from app.keyboards.menu import main_menu
+from app.keyboards.feedback import feedback_kb  # <-- НОВОЕ
 from app.storage.repo import session_scope
 from app.storage.models import User, Test, TestResult
 from app.services.scoring import questions, score_answers, recommend_drills
 
 router = Router(name="casting")
 
+
 class CastingFlow(StatesGroup):
     q = State()  # спрашиваем по одному
     done = State()
 
+
 def _q_kb(opts: list[str]) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text=opt, callback_data=f"opt::{i}")] for i, opt in enumerate(opts)
-    ])
+    return InlineKeyboardMarkup(
+        inline_keyboard=[[InlineKeyboardButton(text=opt, callback_data=f"opt::{i}")]
+                         for i, opt in enumerate(opts)]
+    )
+
 
 @router.message(StateFilter("*"), F.text == "🎭 Мини-кастинг")
 @router.message(StateFilter("*"), Command("casting"))
@@ -40,6 +45,7 @@ async def start_casting(m: Message, state: FSMContext):
     q = questions()[0]
     await m.answer(f"Вопрос 1/10:\n{q.text}", reply_markup=_q_kb(q.options))
 
+
 @router.callback_query(CastingFlow.q, F.data.startswith("opt::"))
 async def handle_answer(cb: CallbackQuery, state: FSMContext):
     d = await state.get_data()
@@ -57,24 +63,39 @@ async def handle_answer(cb: CallbackQuery, state: FSMContext):
         # конец — считаем профиль
         axes = score_answers(ans)
         total = sum(axes.values())
+
+        # сохраняем результат и получаем его id
+        result_id: int | None = None
         with session_scope() as s:
             u = s.query(User).filter_by(tg_id=cb.from_user.id).first()
             if u:
-                s.add(TestResult(user_id=u.id, axes_json=axes, score_total=total))
+                tr = TestResult(user_id=u.id, axes_json=axes, score_total=total)
+                s.add(tr)
                 s.commit()
+                result_id = tr.id
+
         # рекомендации
         rec_ids = recommend_drills(axes)
         if rec_ids:
             rec_txt = "Рекомендации на завтра: " + ", ".join(f"`{r}`" for r in rec_ids)
         else:
             rec_txt = "Рекомендации: продолжайте текущие этюды."
+
         axes_txt = (
             f"Внимание: {axes['attention']} | Пауза: {axes['pause']} | "
             f"Темп: {axes['tempo']} | Интонация: {axes['intonation']} | Логика: {axes['logic']}"
         )
+
         await state.clear()
         await cb.message.edit_text("Готово. Профиль различения собран.")
         await cb.message.answer(axes_txt + "\n" + rec_txt, reply_markup=main_menu(), parse_mode=None)
+
+        # <-- НОВОЕ: приглашение к отзыву
+        await cb.message.answer(
+            "Как прошёл мини-кастинг? Оцените или оставьте отзыв:",
+            reply_markup=feedback_kb("casting", str(result_id) if result_id is not None else "None"),
+        )
+
         await cb.answer()
         return
 
