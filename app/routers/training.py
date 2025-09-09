@@ -1,5 +1,6 @@
+# app/routers/training.py
 from aiogram import Router, F
-from aiogram.filters import Command  # ← уже добавлено
+from aiogram.filters import Command, StateFilter
 from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.fsm.state import StatesGroup, State
 from aiogram.fsm.context import FSMContext
@@ -83,14 +84,14 @@ async def training_entry(m: Message, state: FSMContext):
     )
 
 
-# ← НОВОЕ: команда /training
-@router.message(Command("training"))
+# ← НОВОЕ: команда /training (в любом состоянии FSM)
+@router.message(StateFilter("*"), Command("training"))
 async def training_cmd(m: Message, state: FSMContext):
     return await training_entry(m, state)
 
 
-# ← НОВОЕ: подстрахуемся, если эмодзи/пробелы отличаются
-@router.message(lambda m: isinstance(m.text, str) and "Тренировка дня" in m.text)
+# ← НОВОЕ: подстрахуемся, если эмодзи/пробелы отличаются (в любом состоянии)
+@router.message(StateFilter("*"), lambda m: isinstance(m.text, str) and "Тренировка дня" in m.text)
 async def training_fuzzy(m: Message, state: FSMContext):
     return await training_entry(m, state)
 
