@@ -1,3 +1,4 @@
+# app/routers/coach.py
 from __future__ import annotations
 
 import asyncio
@@ -23,7 +24,7 @@ _COACH_USERS: dict[int, dict] = {}
 # Разрешённые групповые/супергрупповые чаты (вкл./выкл. /coach_toggle)
 _ALLOWED_CHATS: set[int] = set()
 
-# Дефолты — если в Settings нет полей или они не прокинулись из ENV
+# Дефолты — если поля не прокинуты из ENV
 _TTL_MIN_DEFAULT = 15
 _RATE_SEC_DEFAULT = 5
 
@@ -70,8 +71,13 @@ async def coach_toggle(m: Message):
         await m.answer("🔔 В этом чате наставник включён.")
 
 
-@router.message(F.text)
+# ⚠️ Тихий слушатель: не блокируем другие хендлеры и не перехватываем команды
+@router.message(F.text, flags={"block": False})
 async def passive_listen(m: Message, state: FSMContext):
+    # Игнор команд (чтобы не съедать /start, /menu и т.п.)
+    if m.text and m.text.startswith("/"):
+        return
+
     # Группы/супергруппы — только если включили
     if m.chat.type in {"group", "supergroup"} and m.chat.id not in _ALLOWED_CHATS:
         return
