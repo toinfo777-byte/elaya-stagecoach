@@ -4,6 +4,7 @@ import logging
 
 from aiogram import Bot, Dispatcher
 from aiogram.fsm.storage.memory import MemoryStorage
+from aiogram.types import BotCommand, BotCommandScopeAllPrivateChats
 
 from app.config import settings
 from app.middlewares.error_handler import ErrorsMiddleware
@@ -34,6 +35,21 @@ logging.basicConfig(level=logging.INFO)
 log = logging.getLogger(__name__)
 
 
+# --- меню команд ---
+async def setup_commands(bot: Bot) -> None:
+    user_cmds = [
+        BotCommand(command="start",       description="Начать"),
+        BotCommand(command="apply",       description="Путь лидера (заявка)"),
+        BotCommand(command="coach_on",    description="Включить наставника"),
+        BotCommand(command="coach_off",   description="Выключить наставника"),
+        BotCommand(command="ask",         description="Спросить наставника"),
+        BotCommand(command="progress",    description="Мой прогресс"),  # ⬅️ добавили
+        BotCommand(command="help",        description="Справка"),
+        BotCommand(command="privacy",     description="Политика"),
+    ]
+    await bot.set_my_commands(user_cmds, scope=BotCommandScopeAllPrivateChats())
+
+
 async def main():
     if not settings.bot_token:
         raise RuntimeError("BOT_TOKEN is empty")
@@ -49,7 +65,7 @@ async def main():
 
     # Подключаем ВСЕ роутеры
     for r in (
-        smoke_router,     # ⬅️ добавляем первым
+        smoke_router,     # ⬅️ первым
         apply_router,
         coach_router,
         onboarding_router,
@@ -70,7 +86,18 @@ async def main():
         dp.include_router(post_router)
         log.info("Included router: %s", getattr(post_router, "name", post_router))
 
-    await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types())
+    async with bot:
+        try:
+            await bot.delete_webhook(drop_pending_updates=False)
+        except Exception as e:
+            log.warning("delete_webhook failed: %s", e)
+
+        try:
+            await setup_commands(bot)
+        except Exception as e:
+            log.warning("setup_commands failed: %s", e)
+
+        await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types())
 
 
 if __name__ == "__main__":
