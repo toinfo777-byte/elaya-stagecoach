@@ -16,17 +16,29 @@ router = Router(name="casting")
 
 
 class CastingFlow(StatesGroup):
-    q = State()  # спрашиваем по одному
+    q = State()   # спрашиваем по одному
     done = State()
 
 
 def _q_kb(opts: list[str]) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
-        inline_keyboard=[[InlineKeyboardButton(text=opt, callback_data=f"opt::{i}")]
-                         for i, opt in enumerate(opts)]
+        inline_keyboard=[
+            [InlineKeyboardButton(text=opt, callback_data=f"opt::{i}")]
+            for i, opt in enumerate(opts)
+        ]
     )
 
 
+# ---------- «вход» для диплинков/внешних вызовов ----------
+async def casting_entry(m: Message, state: FSMContext):
+    """
+    Универсальная точка входа в мини-кастинг.
+    Можно безопасно импортировать: from app.routers.casting import casting_entry
+    """
+    await start_casting(m, state)
+
+
+# ---------- старт мини-кастинга (команда/кнопка) ----------
 @router.message(StateFilter("*"), F.text == "🎭 Мини-кастинг")
 @router.message(StateFilter("*"), Command("casting"))
 async def start_casting(m: Message, state: FSMContext):
@@ -46,6 +58,7 @@ async def start_casting(m: Message, state: FSMContext):
     await m.answer(f"Вопрос 1/10:\n{q.text}", reply_markup=_q_kb(q.options))
 
 
+# ---------- обработка ответов ----------
 @router.callback_query(CastingFlow.q, F.data.startswith("opt::"))
 async def handle_answer(cb: CallbackQuery, state: FSMContext):
     d = await state.get_data()
