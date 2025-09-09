@@ -1,47 +1,39 @@
-# app/routers/deeplink.py
+from __future__ import annotations
+
 from aiogram import Router
 from aiogram.filters import CommandStart
+from aiogram.filters.command import CommandObject
 from aiogram.types import Message
 from aiogram.fsm.context import FSMContext
 
-from app.storage.repo import session_scope
-from app.storage.models import User
-from app.routers.training import training_entry
-from app.routers.casting import casting_entry  # см. ниже хендлер
-from app.routers.coach import coach_on_cmd     # см. ниже хендлер
+# будем вызывать готовые входы из других роутеров
+from app.routers.casting import casting_entry            # мини-кастинг
+from app.routers.coach import coach_on                   # включить наставника
 
 router = Router(name="deeplink")
 
-def _remember_first_source(user_id: int, source: str):
-    with session_scope() as s:
-        u = s.query(User).filter_by(tg_id=user_id).first()
-        if not u:
-            return
-        if not u.first_source:
-            u.first_source = source
-        u.last_source = source
-        s.commit()
+
+@router.message(CommandStart())
+async def start_plain(m: Message):
+    # обычный /start без payload — пусть идёт дальше по твоему онбордингу/меню
+    await m.answer("Привет! Открой меню или используй команды: /training /casting /coach_on.")
+
 
 @router.message(CommandStart(deep_link=True))
-async def start_with_payload(m: Message, state: FSMContext, command: CommandStart):
-    payload = (command.args or "").strip()
-    if not payload:
-        return  # обычный /start отработает в onboarding
+async def start_deeplink(m: Message, command: CommandObject, state: FSMContext):
+    payload = (command.args or "").strip().lower()
 
-    # запомним источник однократно + как last_source
-    _remember_first_source(m.from_user.id, payload)
+    if payload in {"go_casting", "casting"}:
+        # сразу запускаем мини-кастинг
+        return await casting_entry(m, state)
 
-    if payload == "go_training":
-        await training_entry(m, state)
-        return
+    if payload in {"coach", "go_coach", "mentor"}:
+        # включаем сессию наставника на N минут
+        return await coach_on(m)
 
-    if payload == "go_casting":
-        await casting_entry(m, state)
-        return
+    if payload in {"go_training", "training"}:
+        # если нет явного входа в training, даём понятный шаг
+        return await m.answer("Открываю тренировку дня. Нажми /training")
 
-    if payload in {"coach", "go_coach"}:
-        await coach_on_cmd(m)
-        return
-
-    # на неизвестный payload — просто привет
-    await m.answer("Привет! Готов?")
+    # неизвестный payload — мягко объясняем
+    await m.answer("Не распознал ссылку. Открой меню: /menu")
