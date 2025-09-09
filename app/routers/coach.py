@@ -8,7 +8,7 @@ from typing import Iterable
 
 from aiogram import Router, F
 from aiogram.enums import ChatAction
-from aiogram.filters import Command
+from aiogram.filters import Command, StateFilter
 from aiogram.types import Message, CallbackQuery, MessageEntity
 from aiogram.fsm.context import FSMContext
 
@@ -55,22 +55,26 @@ async def coach_on(m: Message):
     _coach_on(m.from_user.id)
     await m.answer("🤝 Наставник включён на 15 минут. Спроси коротко — отвечу и предложу этюд.")
 
-@router.message(Command("coach_on"))
+@router.message(StateFilter("*"), Command("coach_on"))
 async def cmd_on(m: Message):
     await coach_on(m)
 
-@router.message(Command("coach_off"))
+@router.message(StateFilter("*"), Command("coach_off"))
 async def cmd_off(m: Message):
     _COACH_USERS.pop(m.from_user.id, None)
     await m.answer("👋 Наставник выключен.")
 
-@router.message(Command("ask"))
-@router.message(F.text.regexp(r"^/вопрос\s+.+"))
+@router.message(StateFilter("*"), Command("ask"))
+@router.message(StateFilter("*"), F.text.regexp(r"^/вопрос\s+.+"))
 async def ask_cmd(m: Message):
     text = m.text.split(maxsplit=1)[1] if " " in m.text else ""
     await _handle_question(m, text)
 
-@router.message(F.chat.type.in_({"group", "supergroup"}), Command("coach_toggle"))
+@router.message(
+    StateFilter("*"),
+    F.chat.type.in_({"group", "supergroup"}),
+    Command("coach_toggle")
+)
 async def coach_toggle(m: Message):
     cid = m.chat.id
     if cid in _ALLOWED_CHATS:
