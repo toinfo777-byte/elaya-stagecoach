@@ -1,64 +1,43 @@
+# app/main.py
 import asyncio
 import logging
-import importlib
-from typing import Optional
-from datetime import datetime, timedelta, timezone  # NEW
+from datetime import datetime, timedelta, timezone
 
 from aiogram import Bot, Dispatcher
 from aiogram.fsm.storage.memory import MemoryStorage
-from aiogram.types import BotCommand, BotCommandScopeAllPrivateChats  # <-- для setup_commands
+from aiogram.types import BotCommand, BotCommandScopeAllPrivateChats
 
 from app.config import settings
 from app.middlewares.error_handler import ErrorsMiddleware
 from app.storage.repo import init_db
-
-# Базовые роутеры (точно есть)
-from app.routers import onboarding
-import app.routers.training as training
-import app.routers.casting as casting
-import app.routers.progress as progress
-from app.routers import menu
-import app.routers.coach as coach  # <-- ДОБАВЛЕНО
-# ⬇️ НОВОЕ: заявка «Путь лидера» и сбор отзывов
-import app.routers.apply as apply
-import app.routers.feedback as feedback
-
-# ⬇️ НОВОЕ: системный роутер (/help, /privacy и техкоманды)
-from app.routers import system
-
-# ⬇️ НОВОЕ: утилиты обслуживания SQLite (бэкап и VACUUM)
 from app.utils.maintenance import backup_sqlite, vacuum_sqlite
 
+# ВАЖНО: импортируем каждый роутер напрямую
+from app.routers.onboarding import router as onboarding_router
+from app.routers.menu import router as menu_router
+from app.routers.training import router as training_router
+from app.routers.casting import router as casting_router
+from app.routers.progress import router as progress_router
+from app.routers.coach import router as coach_router
+from app.routers.settings import router as settings_router
+from app.routers.admin import router as admin_router
+from app.routers.premium import router as premium_router
+from app.routers.apply import router as apply_router
+from app.routers.feedback import router as feedback_router
+from app.routers.system import router as system_router
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
-)
+# если есть публикация постов
+try:
+    from app.routers.post import router as post_router
+except Exception:
+    post_router = None
+
+logging.basicConfig(level=logging.INFO)
+log = logging.getLogger(__name__)
 
 
-def _include_optional_router(dp: Dispatcher, module_path: str, attr: str = "router") -> Optional[None]:
-    """
-    Пытаемся подключить роутер из module_path.attr.
-    Если ничего нет — просто логируем и идём дальше.
-    """
-    try:
-        mod = importlib.import_module(module_path)
-        r = getattr(mod, attr)
-    except Exception as e:
-        logging.info("Skip router %s (%s)", module_path, e)
-        return None
-    dp.include_router(r)
-    logging.info("Included router: %s.%s", module_path, attr)
-    return None
-
-
-# ====== NEW: фоновые задачи обслуживания БД ======
-
+# ====== фоновые задачи обслуживания БД ======
 async def _sleep_until_utc(hour: int, minute: int = 0, dow: int | None = None):
-    """
-    Засыпает до ближайшего времени UTC hour:minute.
-    Если указан dow (0=Mon..6=Sun) — до ближайшего такого дня недели.
-    """
     now = datetime.now(timezone.utc).replace(second=0, microsecond=0)
     target = now.replace(hour=hour, minute=minute)
     if target <= now:
@@ -70,88 +49,86 @@ async def _sleep_until_utc(hour: int, minute: int = 0, dow: int | None = None):
 
 
 async def _backup_loop():
-    """Ежедневно в 02:00 UTC делаем копию /data/elaya.db в /data/backups/."""
     while True:
-        await _sleep_until_utc(2, 0)  # каждый день 02:00 UTC
+        await _sleep_until_utc(2, 0)
         try:
             path = backup_sqlite()
-            logging.info("Backup done: %s", path)
+            log.info("Backup done: %s", path)
         except Exception as e:
-            logging.exception("Backup failed: %s", e)
+            log.exception("Backup failed: %s", e)
 
 
 async def _vacuum_loop():
-    """Раз в неделю (вс) 02:05 UTC делаем VACUUM для sqlite."""
     while True:
-        await _sleep_until_utc(2, 5, dow=6)  # воскресенье 02:05 UTC
+        await _sleep_until_utc(2, 5, dow=6)
         try:
             vacuum_sqlite()
-            logging.info("Vacuum done")
+            log.info("Vacuum done")
         except Exception as e:
-            logging.exception("Vacuum failed: %s", e)
-
-# ==================================================
+            log.exception("Vacuum failed: %s", e)
+# =============================================
 
 
 # --- установка /команд в меню ---
 async def setup_commands(bot: Bot) -> None:
     user_cmds = [
-        BotCommand(command="start",       description="Начать"),
-        BotCommand(command="apply",       description="Путь лидера (заявка)"),
-        BotCommand(command="coach_on",    description="Включить наставника"),
-        BotCommand(command="coach_off",   description="Выключить наставника"),
-        BotCommand(command="ask",         description="Спросить наставника"),
-        BotCommand(command="help",        description="Справка"),
-        BotCommand(command="privacy",     description="Политика"),
+        BotCommand(command="start",     description="Начать"),
+        BotCommand(command="apply",     description="Путь лидера (заявка)"),
+        BotCommand(command="coach_on",  description="Включить наставника"),
+        BotCommand(command="coach_off", description="Выключить наставника"),
+        BotCommand(command="ask",       description="Спросить наставника"),
+        BotCommand(command="help",      description="Справка"),
+        BotCommand(command="privacy",   description="Политика"),
     ]
     await bot.set_my_commands(user_cmds, scope=BotCommandScopeAllPrivateChats())
 
 
 async def main():
     if not settings.bot_token:
-        raise RuntimeError("BOT_TOKEN is empty. Set it in .env")
+        raise RuntimeError("BOT_TOKEN is empty")
 
-    # Инициализируем БД/таблицы и добавочные колонки
     init_db()
 
     bot = Bot(token=settings.bot_token)
     dp = Dispatcher(storage=MemoryStorage())
 
-    # Глобальная обработка ошибок
+    # ошибки ловим в одном месте
     dp.message.middleware(ErrorsMiddleware())
     dp.callback_query.middleware(ErrorsMiddleware())
 
-    # 1) Специализированные/служебные роутеры
-    _include_optional_router(dp, "app.routers.settings")
-    _include_optional_router(dp, "app.routers.admin")
-    _include_optional_router(dp, "app.routers.premium")
+    # Подключаем ВСЁ
+    for r in (
+        apply_router,
+        coach_router,
+        onboarding_router,
+        training_router,
+        casting_router,
+        progress_router,
+        feedback_router,
+        system_router,
+        settings_router,
+        admin_router,
+        premium_router,
+        menu_router,
+    ):
+        dp.include_router(r)
+        log.info("Included router: %s", getattr(r, "name", r))
 
-    # 2) Основные фичи (apply раньше онбординга)
-    dp.include_router(apply.router)
-    dp.include_router(coach.router)  # <-- ДОБАВЛЕНО
-    dp.include_router(onboarding.router)
-    dp.include_router(training.router)
-    dp.include_router(casting.router)
-    dp.include_router(progress.router)
-    dp.include_router(feedback.router)
-
-    # 3) Системный роутер
-    dp.include_router(system.router)
-
-    # 4) Меню — строго последним
-    dp.include_router(menu.router)
+    if post_router:
+        dp.include_router(post_router)
+        log.info("Included router: %s", getattr(post_router, "name", post_router))
 
     # Стартуем polling
     async with bot:
         try:
             await bot.delete_webhook(drop_pending_updates=False)
         except Exception as e:
-            logging.warning("delete_webhook failed: %s", e)
+            log.warning("delete_webhook failed: %s", e)
 
         try:
             await setup_commands(bot)
         except Exception as e:
-            logging.warning("setup_commands failed: %s", e)
+            log.warning("setup_commands failed: %s", e)
 
         asyncio.create_task(_backup_loop())
         asyncio.create_task(_vacuum_loop())
