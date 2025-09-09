@@ -4,11 +4,12 @@ from __future__ import annotations
 import asyncio
 import time
 from datetime import datetime, timedelta
+from typing import Iterable
 
 from aiogram import Router, F
 from aiogram.enums import ChatAction
 from aiogram.filters import Command
-from aiogram.types import Message, CallbackQuery
+from aiogram.types import Message, CallbackQuery, MessageEntity
 from aiogram.fsm.context import FSMContext
 
 from app.config import settings
@@ -21,13 +22,27 @@ router = Router(name="coach")
 
 # user_id -> {"until": dt, "last": monotonic_ts}
 _COACH_USERS: dict[int, dict] = {}
-# Разрешённые групповые/супергрупповые чаты (вкл./выкл. /coach_toggle)
+# Разрешённые групповые чаты для /coach_toggle
 _ALLOWED_CHATS: set[int] = set()
 
-# Дефолты — если поля не прокинуты из ENV
 _TTL_MIN_DEFAULT = 15
 _RATE_SEC_DEFAULT = 5
 
+# Тексты из меню — их наставник должен игнорировать
+_MENU_TEXTS: set[str] = {
+    "🎯 Тренировка дня",
+    "📈 Мой прогресс",
+    "Путь лидера",
+    "🎭 Мини-кастинг",
+    "🔐 Политика",
+    "💬 Помощь",
+}
+
+def _has_bot_command(entities: Iterable[MessageEntity] | None) -> bool:
+    if not entities:
+        return False
+    # aiogram v3: entity.type == "bot_command"
+    return any(getattr(e, "type", None) == "bot_command" for e in entities)
 
 def _coach_on(uid: int):
     ttl_min = getattr(settings, "coach_ttl_min", _TTL_MIN_DEFAULT)
@@ -36,29 +51,24 @@ def _coach_on(uid: int):
         "last": 0.0,
     }
 
-
 async def coach_on(m: Message):
     _coach_on(m.from_user.id)
     await m.answer("🤝 Наставник включён на 15 минут. Спроси коротко — отвечу и предложу этюд.")
 
-
 @router.message(Command("coach_on"))
 async def cmd_on(m: Message):
     await coach_on(m)
-
 
 @router.message(Command("coach_off"))
 async def cmd_off(m: Message):
     _COACH_USERS.pop(m.from_user.id, None)
     await m.answer("👋 Наставник выключен.")
 
-
 @router.message(Command("ask"))
 @router.message(F.text.regexp(r"^/вопрос\s+.+"))
 async def ask_cmd(m: Message):
     text = m.text.split(maxsplit=1)[1] if " " in m.text else ""
     await _handle_question(m, text)
-
 
 @router.message(F.chat.type.in_({"group", "supergroup"}), Command("coach_toggle"))
 async def coach_toggle(m: Message):
@@ -70,19 +80,29 @@ async def coach_toggle(m: Message):
         _ALLOWED_CHATS.add(cid)
         await m.answer("🔔 В этом чате наставник включён.")
 
-
-# ⚠️ Тихий слушатель: не блокируем другие хендлеры и не перехватываем команды
-@router.message(F.text, flags={"block": False})
+@router.message(F.text)
 async def passive_listen(m: Message, state: FSMContext):
-    # Игнор команд (чтобы не съедать /start, /menu и т.п.)
-    if m.text and m.text.startswith("/"):
-        return
-
-    # Группы/супергруппы — только если включили
+    """
+    Молчим на:
+      - бот-команды (/start, /menu, /help и пр.)
+      - тексты кнопок меню
+      - пустые/пробельные сообщения
+    Слушаем только когда включён наставник и не истёк TTL.
+    """
+    # Группы — только если включили
     if m.chat.type in {"group", "supergroup"} and m.chat.id not in _ALLOWED_CHATS:
         return
 
-    # Работать только когда включён и не истек TTL
+    txt = (m.text or "").strip()
+    if not txt:
+        return
+    if txt in _MENU_TEXTS:
+        return
+    if _has_bot_command(m.entities):
+        return
+    if txt.startswith("/"):  # подстрахуемся
+        return
+
     uid = m.from_user.id
     st = _COACH_USERS.get(uid)
     if not st:
@@ -98,8 +118,7 @@ async def passive_listen(m: Message, state: FSMContext):
         return
     st["last"] = now
 
-    await _handle_question(m, m.text)
-
+    await _handle_question(m, txt)
 
 async def _send_typing(bot, chat_id: int, stop_event: asyncio.Event):
     try:
@@ -109,37 +128,30 @@ async def _send_typing(bot, chat_id: int, stop_event: asyncio.Event):
     except Exception:
         pass
 
-
 async def _handle_question(m: Message, q: str):
     if not q.strip():
         return await m.answer("Сформулируй коротко, по сути. Например: «зажим в горле».")
-
     stop = asyncio.Event()
     typing_task = asyncio.create_task(_send_typing(m.bot, m.chat.id, stop))
-
     try:
         drill = pick_drill_by_keywords(q)
         title = drill["title"]
         steps = drill["steps"][:4]
         sign = drill.get("check_question", "Что изменится?")
-
         reply = (
             f"Коротко: попробуй это — {title}.\n"
             f"Шаги: " + " → ".join(steps) + ".\n"
             f"Признак: {sign}\n"
             f"Запусти таймер и отмечай ощущение одним словом."
         )
-
-        # Лог — не должен мешать ответу
+        # Логируем, но без падений
         try:
             with session_scope() as s:
                 u = s.query(User).filter_by(tg_id=m.from_user.id).first()
                 log_event(s, u.id if u else None, "coach_answer", {"q": q, "drill_id": drill.get("id")})
         except Exception:
             pass
-
         await m.answer(reply, reply_markup=timer_kb())
-
     except Exception:
         await m.answer("Ой, что-то пошло не так. Попробуй ещё раз одной короткой фразой 🙏")
         raise
@@ -149,7 +161,6 @@ async def _handle_question(m: Message, q: str):
             await typing_task
         except Exception:
             pass
-
 
 @router.callback_query(F.data == "coach_timer_60")
 async def coach_timer(cb: CallbackQuery):
