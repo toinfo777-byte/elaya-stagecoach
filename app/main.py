@@ -11,21 +11,21 @@ from app.config import settings
 from app.middlewares.error_handler import ErrorsMiddleware
 from app.storage.repo import init_db
 
-# ⬇️ Роутеры подключаем ЯВНО и в правильном порядке
-from app.routers.smoke import router as smoke_router               # smoke-check
+# Роутеры — явные импорты и правильный порядок
+from app.routers.smoke import router as smoke_router               # /ping, /health
 from app.routers.apply import router as apply_router               # заявка
-from app.routers.deeplink import router as deeplink_router         # ⬅️ ДИПЛИНКИ (ДОЛЖЕН ИДТИ РАНО)
-from app.routers.coach import router as coach_router               # наставник
+from app.routers.deeplink import router as deeplink_router         # диплинки /start <payload>
 from app.routers.onboarding import router as onboarding_router     # онбординг (/start)
+from app.routers.coach import router as coach_router               # наставник
 from app.routers.training import router as training_router         # тренировка
 from app.routers.casting import router as casting_router           # мини-кастинг
 from app.routers.progress import router as progress_router         # прогресс
 from app.routers.feedback import router as feedback_router         # отзывы
-from app.routers.system import router as system_router             # /help, /privacy, /health
-from app.routers.settings import router as settings_router         # технастройки
+from app.routers.system import router as system_router             # /help, /privacy, /whoami, /health
+from app.routers.settings import router as settings_router         # тех.настройки
 from app.routers.admin import router as admin_router               # админка
 from app.routers.premium import router as premium_router           # плата/заглушки
-from app.routers.menu import router as menu_router                 # меню (всегда ПОСЛЕДНИМ)
+from app.routers.menu import router as menu_router                 # меню (всегда последним)
 
 # Обслуживание SQLite
 from app.utils.maintenance import backup_sqlite, vacuum_sqlite
@@ -36,8 +36,8 @@ logging.basicConfig(
 )
 log = logging.getLogger(__name__)
 
-# ====== фоновые задачи обслуживания БД ======
 
+# ====== фоновые задачи обслуживания БД ======
 async def _sleep_until_utc(hour: int, minute: int = 0, dow: int | None = None):
     now = datetime.now(timezone.utc).replace(second=0, microsecond=0)
     target = now.replace(hour=hour, minute=minute)
@@ -48,6 +48,7 @@ async def _sleep_until_utc(hour: int, minute: int = 0, dow: int | None = None):
             target += timedelta(days=1)
     await asyncio.sleep((target - now).total_seconds())
 
+
 async def _backup_loop():
     while True:
         await _sleep_until_utc(2, 0)  # ежедневно 02:00 UTC
@@ -56,6 +57,7 @@ async def _backup_loop():
             log.info("Backup done: %s", path)
         except Exception as e:
             log.exception("Backup failed: %s", e)
+
 
 async def _vacuum_loop():
     while True:
@@ -66,8 +68,8 @@ async def _vacuum_loop():
         except Exception as e:
             log.exception("Vacuum failed: %s", e)
 
-# ====== меню команд ======
 
+# ====== меню команд ======
 async def setup_commands(bot: Bot) -> None:
     user_cmds = [
         BotCommand(command="start",     description="Начать"),
@@ -81,8 +83,8 @@ async def setup_commands(bot: Bot) -> None:
     ]
     await bot.set_my_commands(user_cmds, scope=BotCommandScopeAllPrivateChats())
 
-# ====== main ======
 
+# ====== main ======
 async def main():
     if not settings.bot_token:
         raise RuntimeError("BOT_TOKEN is empty. Set it in .env")
@@ -98,11 +100,11 @@ async def main():
 
     # ПОРЯДОК ВАЖЕН!
     for r in (
-        smoke_router,        # самый первый — для /ping, /health и быстрой самопроверки
+        smoke_router,        # быстрые проверки
         apply_router,
-        deeplink_router,     # ⬅️ диплинки идут ДО онбординга
+        deeplink_router,     # диплинки должны идти РАНО
+        onboarding_router,   # /start попадает сюда раньше coach
         coach_router,
-        onboarding_router,
         training_router,
         casting_router,
         progress_router,
@@ -136,6 +138,7 @@ async def main():
             allowed_updates=dp.resolve_used_update_types(),
             polling_timeout=30,
         )
+
 
 if __name__ == "__main__":
     asyncio.run(main())
