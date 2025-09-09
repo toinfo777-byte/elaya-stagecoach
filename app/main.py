@@ -25,6 +25,7 @@ from app.routers.system import router as system_router             # /help, /pri
 from app.routers.settings import router as settings_router         # тех.настройки
 from app.routers.admin import router as admin_router               # админка
 from app.routers.premium import router as premium_router           # плата/заглушки
+from app.routers.cancel import router as cancel_router             # ✅ глобальная отмена /cancel
 from app.routers.menu import router as menu_router                 # меню (всегда последним)
 
 # Обслуживание SQLite
@@ -78,6 +79,7 @@ async def setup_commands(bot: Bot) -> None:
         BotCommand(command="coach_off", description="Выключить наставника"),
         BotCommand(command="ask",       description="Спросить наставника"),
         BotCommand(command="progress",  description="Мой прогресс"),
+        BotCommand(command="cancel",    description="Сбросить и открыть меню"),  # ✅
         BotCommand(command="help",      description="Справка"),
         BotCommand(command="privacy",   description="Политика"),
     ]
@@ -113,6 +115,7 @@ async def main():
         settings_router,
         admin_router,
         premium_router,
+        cancel_router,       # ✅ глобальная отмена до меню
         menu_router,         # меню — строго последним
     ):
         dp.include_router(r)
