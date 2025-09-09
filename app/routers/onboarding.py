@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 from datetime import datetime
-from aiogram import Router
-from aiogram.types import Message
-from aiogram.fsm.state import StatesGroup, State
+from aiogram import Router, F
+from aiogram.filters import CommandStart, Command
 from aiogram.fsm.context import FSMContext
-from aiogram.filters import CommandStart
+from aiogram.fsm.state import StatesGroup, State
+from aiogram.filters.state import StateFilter
+from aiogram.types import Message
 
 from app.texts.strings import (
     HELLO,
@@ -30,12 +31,11 @@ class Onboarding(StatesGroup):
     consent = State()
 
 
-# ---- вспомогалка: достаём payload из /start ----
 def extract_start_payload(text: str | None) -> str | None:
     """
     /start
     /start abc
-    /start?start=abc  (Telgram сам превращает в '/start abc' для бота)
+    Telegram сам превращает deep-link "?start=abc" в строку '/start abc'
     """
     if not text:
         return None
@@ -45,9 +45,9 @@ def extract_start_payload(text: str | None) -> str | None:
     return None
 
 
-@router.message(CommandStart())
+# --- старт онбординга: только если нет активного состояния ---
+@router.message(StateFilter(None), CommandStart())
 async def start(msg: Message, state: FSMContext):
-    # Сохраняем источник (если пришёл диплинком) в FSM — позже положим в базу, но только если у юзера ещё пусто
     payload = extract_start_payload(msg.text)
     if payload:
         await state.update_data(source=payload[:64])
@@ -57,31 +57,46 @@ async def start(msg: Message, state: FSMContext):
     await state.set_state(Onboarding.name)
 
 
-@router.message(Onboarding.name)
+# --- /cancel: позволяет выйти из анкеты в любой момент ---
+@router.message(~StateFilter(None), Command("cancel"))
+async def cancel_anywhere(msg: Message, state: FSMContext):
+    await state.clear()
+    await msg.answer("Анкета сброшена. Возвращаю в меню.", reply_markup=main_menu())
+
+
+# --- если юзер в анкете и жмёт команды, не ломаемся ---
+@router.message(~StateFilter(None), F.text.startswith("/"))
+async def in_form_but_command(msg: Message):
+    await msg.answer("Вы сейчас заполняете короткую анкету. Напишите ответ или /cancel, чтобы выйти.")
+
+
+# === шаги анкеты: принимаем ТОЛЬКО обычный текст, не команды ===
+
+@router.message(Onboarding.name, ~F.text.startswith("/"))
 async def set_name(msg: Message, state: FSMContext):
-    await state.update_data(name=msg.text.strip())
+    await state.update_data(name=(msg.text or "").strip())
     await msg.answer(ONBOARD_TZ_PROMPT)
     await state.set_state(Onboarding.tz)
 
 
-@router.message(Onboarding.tz)
+@router.message(Onboarding.tz, ~F.text.startswith("/"))
 async def set_tz(msg: Message, state: FSMContext):
-    await state.update_data(tz=msg.text.strip())
+    await state.update_data(tz=(msg.text or "").strip())
     await msg.answer(ONBOARD_GOAL_PROMPT)
     await state.set_state(Onboarding.goal)
 
 
-@router.message(Onboarding.goal)
+@router.message(Onboarding.goal, ~F.text.startswith("/"))
 async def set_goal(msg: Message, state: FSMContext):
-    await state.update_data(goal=msg.text.strip())
+    await state.update_data(goal=(msg.text or "").strip())
     await msg.answer(ONBOARD_EXP_PROMPT)
     await state.set_state(Onboarding.exp)
 
 
-@router.message(Onboarding.exp)
+@router.message(Onboarding.exp, ~F.text.startswith("/"))
 async def set_exp(msg: Message, state: FSMContext):
     try:
-        exp = int(msg.text.strip())
+        exp = int((msg.text or "").strip())
     except Exception:
         exp = 0
     await state.update_data(exp=exp)
@@ -89,7 +104,7 @@ async def set_exp(msg: Message, state: FSMContext):
     await state.set_state(Onboarding.consent)
 
 
-@router.message(Onboarding.consent)
+@router.message(Onboarding.consent, ~F.text.startswith("/"))
 async def finalize(msg: Message, state: FSMContext):
     data = await state.get_data()
 
@@ -105,10 +120,9 @@ async def finalize(msg: Message, state: FSMContext):
         u.exp_level = int(data.get("exp") or 0)
         u.consent_at = datetime.utcnow()
 
-        # ⬇️ ВАЖНО: источник пишем только если он ещё не был установлен раньше
-        state_source = (data.get("source") or "").strip() or None
-        if not u.source and state_source:
-            u.source = state_source[:64]
+        src = (data.get("source") or "").strip() or None
+        if not u.source and src:
+            u.source = src[:64]
 
         s.add(u)
 
