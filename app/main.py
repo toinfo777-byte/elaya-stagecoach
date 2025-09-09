@@ -1,18 +1,15 @@
 # app/main.py
 import asyncio
 import logging
-from datetime import datetime, timedelta, timezone
 
 from aiogram import Bot, Dispatcher
 from aiogram.fsm.storage.memory import MemoryStorage
-from aiogram.types import BotCommand, BotCommandScopeAllPrivateChats
 
 from app.config import settings
 from app.middlewares.error_handler import ErrorsMiddleware
 from app.storage.repo import init_db
-from app.utils.maintenance import backup_sqlite, vacuum_sqlite
 
-# ВАЖНО: импортируем каждый роутер напрямую
+# Импорты роутеров
 from app.routers.onboarding import router as onboarding_router
 from app.routers.menu import router as menu_router
 from app.routers.training import router as training_router
@@ -25,6 +22,7 @@ from app.routers.premium import router as premium_router
 from app.routers.apply import router as apply_router
 from app.routers.feedback import router as feedback_router
 from app.routers.system import router as system_router
+from app.routers.smoke import router as smoke_router   # ⬅️ новый
 
 # если есть публикация постов
 try:
@@ -34,53 +32,6 @@ except Exception:
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger(__name__)
-
-
-# ====== фоновые задачи обслуживания БД ======
-async def _sleep_until_utc(hour: int, minute: int = 0, dow: int | None = None):
-    now = datetime.now(timezone.utc).replace(second=0, microsecond=0)
-    target = now.replace(hour=hour, minute=minute)
-    if target <= now:
-        target += timedelta(days=1)
-    if dow is not None:
-        while target.weekday() != dow:
-            target += timedelta(days=1)
-    await asyncio.sleep((target - now).total_seconds())
-
-
-async def _backup_loop():
-    while True:
-        await _sleep_until_utc(2, 0)
-        try:
-            path = backup_sqlite()
-            log.info("Backup done: %s", path)
-        except Exception as e:
-            log.exception("Backup failed: %s", e)
-
-
-async def _vacuum_loop():
-    while True:
-        await _sleep_until_utc(2, 5, dow=6)
-        try:
-            vacuum_sqlite()
-            log.info("Vacuum done")
-        except Exception as e:
-            log.exception("Vacuum failed: %s", e)
-# =============================================
-
-
-# --- установка /команд в меню ---
-async def setup_commands(bot: Bot) -> None:
-    user_cmds = [
-        BotCommand(command="start",     description="Начать"),
-        BotCommand(command="apply",     description="Путь лидера (заявка)"),
-        BotCommand(command="coach_on",  description="Включить наставника"),
-        BotCommand(command="coach_off", description="Выключить наставника"),
-        BotCommand(command="ask",       description="Спросить наставника"),
-        BotCommand(command="help",      description="Справка"),
-        BotCommand(command="privacy",   description="Политика"),
-    ]
-    await bot.set_my_commands(user_cmds, scope=BotCommandScopeAllPrivateChats())
 
 
 async def main():
@@ -96,8 +47,9 @@ async def main():
     dp.message.middleware(ErrorsMiddleware())
     dp.callback_query.middleware(ErrorsMiddleware())
 
-    # Подключаем ВСЁ
+    # Подключаем ВСЕ роутеры
     for r in (
+        smoke_router,     # ⬅️ добавляем первым
         apply_router,
         coach_router,
         onboarding_router,
@@ -118,26 +70,7 @@ async def main():
         dp.include_router(post_router)
         log.info("Included router: %s", getattr(post_router, "name", post_router))
 
-    # Стартуем polling
-    async with bot:
-        try:
-            await bot.delete_webhook(drop_pending_updates=False)
-        except Exception as e:
-            log.warning("delete_webhook failed: %s", e)
-
-        try:
-            await setup_commands(bot)
-        except Exception as e:
-            log.warning("setup_commands failed: %s", e)
-
-        asyncio.create_task(_backup_loop())
-        asyncio.create_task(_vacuum_loop())
-
-        await dp.start_polling(
-            bot,
-            allowed_updates=dp.resolve_used_update_types(),
-            polling_timeout=30,
-        )
+    await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types())
 
 
 if __name__ == "__main__":
