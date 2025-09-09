@@ -32,11 +32,6 @@ class Onboarding(StatesGroup):
 
 
 def extract_start_payload(text: str | None) -> str | None:
-    """
-    /start
-    /start abc
-    Telegram сам превращает deep-link "?start=abc" в строку '/start abc'
-    """
     if not text:
         return None
     parts = text.split(maxsplit=1)
@@ -45,39 +40,47 @@ def extract_start_payload(text: str | None) -> str | None:
     return None
 
 
-# --- старт онбординга: только если нет активного состояния ---
+# ── /start запускает онбординг ТОЛЬКО если нет активного состояния
 @router.message(StateFilter(None), CommandStart())
 async def start(msg: Message, state: FSMContext):
     payload = extract_start_payload(msg.text)
     if payload:
         await state.update_data(source=payload[:64])
-
     await msg.answer(HELLO)
     await msg.answer(ONBOARD_NAME_PROMPT)
     await state.set_state(Onboarding.name)
 
 
-# --- /cancel: позволяет выйти из анкеты в любой момент ---
+# ── Разрешённые команды "сквозь анкету"
 @router.message(~StateFilter(None), Command("cancel"))
 async def cancel_anywhere(msg: Message, state: FSMContext):
     await state.clear()
     await msg.answer("Анкета сброшена. Возвращаю в меню.", reply_markup=main_menu())
 
+@router.message(~StateFilter(None), Command("menu"))
+async def menu_anywhere(msg: Message, state: FSMContext):
+    await state.clear()
+    await msg.answer("Готово. Вот меню:", reply_markup=main_menu())
 
-# --- если юзер в анкете и жмёт команды, не ломаемся ---
+@router.message(~StateFilter(None), CommandStart())
+async def restart_anywhere(msg: Message, state: FSMContext):
+    # повторный /start перезапускает онбординг
+    await state.clear()
+    await start(msg, state)
+
+
+# ── Если в анкете и прилетела другая команда — подскажем, что делать
 @router.message(~StateFilter(None), F.text.startswith("/"))
 async def in_form_but_command(msg: Message):
     await msg.answer("Вы сейчас заполняете короткую анкету. Напишите ответ или /cancel, чтобы выйти.")
 
 
-# === шаги анкеты: принимаем ТОЛЬКО обычный текст, не команды ===
-
+# ── Шаги анкеты: принимаем ТОЛЬКО обычный текст (не команды)
 @router.message(Onboarding.name, ~F.text.startswith("/"))
 async def set_name(msg: Message, state: FSMContext):
     await state.update_data(name=(msg.text or "").strip())
     await msg.answer(ONBOARD_TZ_PROMPT)
     await state.set_state(Onboarding.tz)
-
 
 @router.message(Onboarding.tz, ~F.text.startswith("/"))
 async def set_tz(msg: Message, state: FSMContext):
@@ -85,13 +88,11 @@ async def set_tz(msg: Message, state: FSMContext):
     await msg.answer(ONBOARD_GOAL_PROMPT)
     await state.set_state(Onboarding.goal)
 
-
 @router.message(Onboarding.goal, ~F.text.startswith("/"))
 async def set_goal(msg: Message, state: FSMContext):
     await state.update_data(goal=(msg.text or "").strip())
     await msg.answer(ONBOARD_EXP_PROMPT)
     await state.set_state(Onboarding.exp)
-
 
 @router.message(Onboarding.exp, ~F.text.startswith("/"))
 async def set_exp(msg: Message, state: FSMContext):
@@ -103,28 +104,22 @@ async def set_exp(msg: Message, state: FSMContext):
     await msg.answer(CONSENT + "\n\nНапишите «Согласен».")
     await state.set_state(Onboarding.consent)
 
-
 @router.message(Onboarding.consent, ~F.text.startswith("/"))
 async def finalize(msg: Message, state: FSMContext):
     data = await state.get_data()
-
     with session_scope() as s:
         u = s.query(User).filter_by(tg_id=msg.from_user.id).first()
         if not u:
             u = User(tg_id=msg.from_user.id)
-
         u.username = msg.from_user.username
         u.name = data.get("name")
         u.tz = data.get("tz")
         u.goal = data.get("goal")
         u.exp_level = int(data.get("exp") or 0)
         u.consent_at = datetime.utcnow()
-
         src = (data.get("source") or "").strip() or None
         if not u.source and src:
             u.source = src[:64]
-
         s.add(u)
-
     await state.clear()
     await msg.answer("Готово. Добро пожаловать в меню.", reply_markup=main_menu())
