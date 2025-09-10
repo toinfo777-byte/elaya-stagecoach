@@ -6,11 +6,12 @@ from datetime import datetime, timedelta
 from aiogram import Router, F
 from aiogram.filters import Command, StateFilter
 from aiogram.types import Message, ReplyKeyboardMarkup, KeyboardButton
+from aiogram.fsm.context import FSMContext
 
 from app.storage.repo import session_scope
 from app.storage.models import User, DrillRun
 
-# берём тексты прямо из system.py
+# тексты из system.py
 from app.routers.system import PRIVACY_TEXT, HELP_TEXT
 
 # «входы» фич
@@ -28,7 +29,6 @@ BTN_PRIVACY = "🔐 Политика"
 BTN_HELP = "💬 Помощь"
 
 def main_menu() -> ReplyKeyboardMarkup:
-    # широкая первая строка + две «узкие» ниже
     return ReplyKeyboardMarkup(
         resize_keyboard=True,
         keyboard=[
@@ -44,54 +44,36 @@ def main_menu() -> ReplyKeyboardMarkup:
 async def open_menu(m: Message):
     await m.answer("Готово. Добро пожаловать в меню.", reply_markup=main_menu())
 
-
 # ===== Тренировка дня =====
 @router.message(StateFilter("*"), F.text == BTN_TRAIN)
-async def menu_training(m: Message):
-    # просто вызываем «вход» тренировки
-    from aiogram.fsm.context import FSMContext  # локальный импорт, чтобы не тянуть лишнее
-    state = FSMContext(storage=m.bot.dispatcher.storage, chat=m.chat, user=m.from_user)
+async def menu_training(m: Message, state: FSMContext):
     await training_entry(m, state)
-
 
 # ===== Мини-кастинг =====
 @router.message(StateFilter("*"), F.text == BTN_CASTING)
-async def menu_casting(m: Message):
-    from aiogram.fsm.context import FSMContext
-    state = FSMContext(storage=m.bot.dispatcher.storage, chat=m.chat, user=m.from_user)
+async def menu_casting(m: Message, state: FSMContext):
     await casting_entry(m, state)
-
 
 # ===== Политика =====
 @router.message(StateFilter("*"), F.text == BTN_PRIVACY)
 async def menu_privacy(m: Message):
     await m.answer(PRIVACY_TEXT)
 
-
 # ===== Помощь =====
 @router.message(StateFilter("*"), F.text == BTN_HELP)
 async def menu_help(m: Message):
     await m.answer(HELP_TEXT)
 
-
-# ===== Мой прогресс (не зависит от других роутеров) =====
+# ===== Мой прогресс =====
 @router.message(StateFilter("*"), F.text == BTN_PROGRESS)
 async def menu_progress(m: Message):
-    """
-    Короткий самостоятельный отчёт:
-    - текущий стрик пользователя (если есть в таблице users)
-    - сколько этюдов выполнено за последние 7 дней (по DrillRun)
-    """
     with session_scope() as s:
         u = s.query(User).filter_by(tg_id=m.from_user.id).first()
         if not u:
             await m.answer("Сначала пройди /start, а затем вернись в «Мой прогресс».", reply_markup=main_menu())
             return
 
-        # стрик
         streak = u.streak or 0
-
-        # этюды за 7 дней
         since = datetime.utcnow() - timedelta(days=7)
         runs_7d = (
             s.query(DrillRun)
