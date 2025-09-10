@@ -1,5 +1,6 @@
 # app/routers/system.py
 from __future__ import annotations
+from datetime import datetime
 
 from aiogram import Router
 from aiogram.filters import Command, StateFilter
@@ -7,7 +8,9 @@ from aiogram.types import Message
 
 router = Router(name="system")
 
-# Экспортируемые тексты — их использует меню/шорткаты
+# === ВЕРСИЯ RC ===
+VERSION = "v0.7.0-rc1"  # <-- обновляй по мере выката
+
 PRIVACY_TEXT = (
     "🔐 Политика конфиденциальности\n\n"
     "Мы храним минимальные данные, необходимые для работы бота: ваш Telegram ID, "
@@ -29,6 +32,8 @@ HELP_TEXT = (
     "/progress — мой прогресс\n"
     "/cancel — сбросить состояние\n"
     "/privacy — политика конфиденциальности\n"
+    "/version — версия бота\n"
+    "/health — проверка статуса\n"
 )
 
 @router.message(StateFilter("*"), Command("help"))
@@ -39,10 +44,14 @@ async def help_cmd(m: Message):
 async def privacy_cmd(m: Message):
     await m.answer(PRIVACY_TEXT)
 
-# тех-пинги, если нужны
+@router.message(StateFilter("*"), Command("version"))
+async def version_cmd(m: Message):
+    await m.answer(f"Версия бота: *{VERSION}*", parse_mode="Markdown")
+
 @router.message(StateFilter("*"), Command("health"))
 async def health(m: Message):
-    await m.answer("OK")
+    # быстрая проверка времени + echo id — этого достаточно для Render/RC
+    await m.answer(f"OK {datetime.utcnow().isoformat(timespec='seconds')}Z")
 
 @router.message(StateFilter("*"), Command("whoami"))
 async def whoami(m: Message):
