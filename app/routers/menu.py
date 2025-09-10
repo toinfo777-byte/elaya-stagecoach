@@ -8,10 +8,13 @@ from aiogram.filters import Command, StateFilter
 from aiogram.types import Message, ReplyKeyboardMarkup, KeyboardButton
 from aiogram.fsm.context import FSMContext
 
+from sqlalchemy import inspect as sqla_inspect
+from sqlalchemy.sql.sqltypes import DateTime, Date
+
 from app.storage.repo import session_scope
 from app.storage.models import User, DrillRun
 
-# тексты из system.py
+# берём тексты прямо из system.py
 from app.routers.system import PRIVACY_TEXT, HELP_TEXT
 
 # «входы» фич
@@ -29,6 +32,7 @@ BTN_PRIVACY = "🔐 Политика"
 BTN_HELP = "💬 Помощь"
 
 def main_menu() -> ReplyKeyboardMarkup:
+    # широкая первая строка + две «узкие» ниже
     return ReplyKeyboardMarkup(
         resize_keyboard=True,
         keyboard=[
@@ -64,16 +68,9 @@ async def menu_privacy(m: Message):
 async def menu_help(m: Message):
     await m.answer(HELP_TEXT)
 
-# ===== Мой прогресс (не зависит от других роутеров) =====
+# ===== Мой прогресс =====
 @router.message(StateFilter("*"), F.text == BTN_PROGRESS)
 async def menu_progress(m: Message):
-    from app.storage.models import DrillRun  # локальный импорт, чтобы не плодить циклы
-    def _pick_created_col():
-        for name in ("created_at", "created", "created_dt", "timestamp", "ts", "inserted_at", "created_on"):
-            if hasattr(DrillRun, name):
-                return getattr(DrillRun, name)
-        return None
-
     with session_scope() as s:
         u = s.query(User).filter_by(tg_id=m.from_user.id).first()
         if not u:
@@ -83,11 +80,14 @@ async def menu_progress(m: Message):
         streak = u.streak or 0
 
         q = s.query(DrillRun).filter(DrillRun.user_id == u.id)
-        created_col = _pick_created_col()
-        if created_col is not None:
+        mapper = sqla_inspect(DrillRun)
+        dt_col = next((c for c in mapper.columns if isinstance(c.type, (DateTime, Date))), None)
+
+        if dt_col is not None:
             since = datetime.utcnow() - timedelta(days=7)
-            q = q.filter(created_col >= since)
-        runs_7d = q.count()
+            runs_7d = q.filter(dt_col >= since).count()
+        else:
+            runs_7d = q.count()
 
     txt = (
         "📈 *Мой прогресс*\n\n"
