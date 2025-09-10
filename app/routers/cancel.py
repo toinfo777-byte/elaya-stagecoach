@@ -4,7 +4,7 @@ from aiogram.filters import Command, StateFilter
 from aiogram.types import Message
 from aiogram.fsm.context import FSMContext
 
-from app.keyboards.menu import main_menu
+from app.routers.menu import main_menu
 
 router = Router(name="cancel")
 
