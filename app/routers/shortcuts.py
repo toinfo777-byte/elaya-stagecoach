@@ -28,6 +28,7 @@ from app.routers.menu import (
 
 router = Router(name="shortcuts")
 
+# ===== команды, которые должны работать в ЛЮБОМ состоянии =====
 @router.message(StateFilter("*"), Command("help"))
 async def sc_help_cmd(m: Message):
     await m.answer(HELP_TEXT)
@@ -40,12 +41,22 @@ async def sc_privacy_cmd(m: Message):
 async def sc_progress_cmd(m: Message):
     await _send_progress(m)
 
+# 🔧 ДОБАВЛЕНО: ловим /training и /casting ещё ДО онбординга
+@router.message(StateFilter("*"), Command("training"))
+async def sc_training_cmd(m: Message, state: FSMContext):
+    await training_entry(m, state)
+
+@router.message(StateFilter("*"), Command("casting"))
+async def sc_casting_cmd(m: Message, state: FSMContext):
+    await casting_entry(m, state)
+
+# ===== кнопки меню в любом состоянии =====
 @router.message(StateFilter("*"), F.text == BTN_TRAIN)
-async def sc_training(m: Message, state: FSMContext):
+async def sc_training_btn(m: Message, state: FSMContext):
     await training_entry(m, state)
 
 @router.message(StateFilter("*"), F.text == BTN_CASTING)
-async def sc_casting(m: Message, state: FSMContext):
+async def sc_casting_btn(m: Message, state: FSMContext):
     await casting_entry(m, state)
 
 @router.message(StateFilter("*"), F.text == BTN_PRIVACY)
@@ -60,9 +71,18 @@ async def sc_help_text(m: Message):
 async def sc_progress_text_exact(m: Message):
     await _send_progress(m)
 
+# «фаззи» подстраховки по текстам (на случай иных эмодзи/пробелов)
 @router.message(StateFilter("*"), lambda m: isinstance(m.text, str) and "прогресс" in m.text.lower())
 async def sc_progress_text_fuzzy(m: Message):
     await _send_progress(m)
+
+@router.message(StateFilter("*"), lambda m: isinstance(m.text, str) and "трениров" in m.text.lower())
+async def sc_training_text_fuzzy(m: Message, state: FSMContext):
+    await training_entry(m, state)
+
+@router.message(StateFilter("*"), lambda m: isinstance(m.text, str) and "кастинг" in m.text.lower())
+async def sc_casting_text_fuzzy(m: Message, state: FSMContext):
+    await casting_entry(m, state)
 
 # ===== Реализация «Мой прогресс» =====
 async def _send_progress(m: Message):
@@ -84,7 +104,7 @@ async def _send_progress(m: Message):
         else:
             runs_7d = q.count()
 
-        # добавляем источники
+        # «источник» из meta_json (если есть)
         src_txt = ""
         try:
             meta = dict(u.meta_json or {}) if hasattr(u, "meta_json") else {}
