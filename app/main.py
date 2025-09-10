@@ -9,25 +9,26 @@ from aiogram.types import BotCommand, BotCommandScopeAllPrivateChats
 
 from app.config import settings
 from app.middlewares.error_handler import ErrorsMiddleware
+from app.middlewares.source_tags import SourceTagsMiddleware   # ✅ новое
 from app.storage.repo import init_db
 
 # Роутеры — явные импорты и правильный порядок
-from app.routers.smoke import router as smoke_router               # /ping, /health
-from app.routers.apply import router as apply_router               # заявка
-from app.routers.deeplink import router as deeplink_router         # диплинки /start <payload>
-from app.routers.shortcuts import router as shortcuts_router       # ✅ глобальные шорткаты (до онбординга)
-from app.routers.onboarding import router as onboarding_router     # онбординг (/start)
-from app.routers.coach import router as coach_router               # наставник
-from app.routers.training import router as training_router         # тренировка
-from app.routers.casting import router as casting_router           # мини-кастинг
-from app.routers.progress import router as progress_router         # прогресс
-from app.routers.feedback import router as feedback_router         # отзывы
-from app.routers.system import router as system_router             # /help, /privacy, /whoami, /health
-from app.routers.settings import router as settings_router         # тех.настройки
-from app.routers.admin import router as admin_router               # админка
-from app.routers.premium import router as premium_router           # плата/заглушки
-from app.routers.cancel import router as cancel_router             # ✅ глобальная отмена /cancel
-from app.routers.menu import router as menu_router                 # меню (всегда последним)
+from app.routers.smoke import router as smoke_router
+from app.routers.apply import router as apply_router
+from app.routers.deeplink import router as deeplink_router
+from app.routers.shortcuts import router as shortcuts_router
+from app.routers.onboarding import router as onboarding_router
+from app.routers.coach import router as coach_router
+from app.routers.training import router as training_router
+from app.routers.casting import router as casting_router
+from app.routers.progress import router as progress_router
+from app.routers.feedback import router as feedback_router
+from app.routers.system import router as system_router
+from app.routers.settings import router as settings_router
+from app.routers.admin import router as admin_router
+from app.routers.premium import router as premium_router
+from app.routers.cancel import router as cancel_router
+from app.routers.menu import router as menu_router
 
 # Обслуживание SQLite
 from app.utils.maintenance import backup_sqlite, vacuum_sqlite
@@ -39,7 +40,7 @@ logging.basicConfig(
 log = logging.getLogger(__name__)
 
 
-# ====== фоновые задачи обслуживания БД ======
+# ====== фоновые задачи ======
 async def _sleep_until_utc(hour: int, minute: int = 0, dow: int | None = None):
     now = datetime.now(timezone.utc).replace(second=0, microsecond=0)
     target = now.replace(hour=hour, minute=minute)
@@ -53,7 +54,7 @@ async def _sleep_until_utc(hour: int, minute: int = 0, dow: int | None = None):
 
 async def _backup_loop():
     while True:
-        await _sleep_until_utc(2, 0)  # ежедневно 02:00 UTC
+        await _sleep_until_utc(2, 0)
         try:
             path = backup_sqlite()
             log.info("Backup done: %s", path)
@@ -63,7 +64,7 @@ async def _backup_loop():
 
 async def _vacuum_loop():
     while True:
-        await _sleep_until_utc(2, 5, dow=6)  # вс 02:05 UTC
+        await _sleep_until_utc(2, 5, dow=6)
         try:
             vacuum_sqlite()
             log.info("Vacuum done")
@@ -80,7 +81,7 @@ async def setup_commands(bot: Bot) -> None:
         BotCommand(command="coach_off", description="Выключить наставника"),
         BotCommand(command="ask",       description="Спросить наставника"),
         BotCommand(command="progress",  description="Мой прогресс"),
-        BotCommand(command="cancel",    description="Сбросить и открыть меню"),  # ✅
+        BotCommand(command="cancel",    description="Сбросить и открыть меню"),
         BotCommand(command="help",      description="Справка"),
         BotCommand(command="privacy",   description="Политика"),
     ]
@@ -97,17 +98,19 @@ async def main():
     bot = Bot(token=settings.bot_token)
     dp = Dispatcher(storage=MemoryStorage())
 
-    # глобальный обработчик ошибок
+    # middlewares
+    dp.message.middleware(SourceTagsMiddleware())      # ✅ новое
+    dp.callback_query.middleware(SourceTagsMiddleware())
     dp.message.middleware(ErrorsMiddleware())
     dp.callback_query.middleware(ErrorsMiddleware())
 
-    # ПОРЯДОК ВАЖЕН!
+    # порядок важен
     for r in (
-        smoke_router,        # быстрые проверки
+        smoke_router,
         apply_router,
-        deeplink_router,     # диплинки должны идти РАНО
-        shortcuts_router,    # ✅ глобальные шорткаты — до онбординга
-        onboarding_router,   # /start попадает сюда раньше coach
+        deeplink_router,
+        shortcuts_router,
+        onboarding_router,
         coach_router,
         training_router,
         casting_router,
@@ -117,8 +120,8 @@ async def main():
         settings_router,
         admin_router,
         premium_router,
-        cancel_router,       # ✅ глобальная отмена до меню
-        menu_router,         # меню — строго последним
+        cancel_router,
+        menu_router,
     ):
         dp.include_router(r)
         log.info("Included router: %s", getattr(r, "name", r))
@@ -134,7 +137,6 @@ async def main():
         except Exception as e:
             log.warning("setup_commands failed: %s", e)
 
-        # фоновые задачи
         asyncio.create_task(_backup_loop())
         asyncio.create_task(_vacuum_loop())
 
