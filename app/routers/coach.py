@@ -20,15 +20,16 @@ from app.storage.models import User
 
 router = Router(name="coach")
 
-# user_id -> {"until": dt, "last": monotonic_ts}
-_COACH_USERS: dict[int, dict] = {}
-# Разрешённые групповые чаты для /coach_toggle
-_ALLOWED_CHATS: set[int] = set()
+# --- флаги и состояния ---
+_COACH_USERS: dict[int, dict] = {}      # user_id -> {"until": dt, "last": monotonic_ts}
+_ALLOWED_CHATS: set[int] = set()        # чаты, где включён групповой режим
+_MAINTENANCE: bool = False              # быстрый выключатель
+_GROUPS_DISABLED: bool = False          # глобально запретить групповой режим
 
 _TTL_MIN_DEFAULT = 15
 _RATE_SEC_DEFAULT = 5
 
-# Тексты из меню — их наставник должен игнорировать
+# Тексты кнопок меню — игнорируем их в пассивном слушателе
 _MENU_TEXTS: set[str] = {
     "🎯 Тренировка дня",
     "📈 Мой прогресс",
@@ -41,7 +42,6 @@ _MENU_TEXTS: set[str] = {
 def _has_bot_command(entities: Iterable[MessageEntity] | None) -> bool:
     if not entities:
         return False
-    # aiogram v3: entity.type == "bot_command"
     return any(getattr(e, "type", None) == "bot_command" for e in entities)
 
 def _coach_on(uid: int):
@@ -51,22 +51,36 @@ def _coach_on(uid: int):
         "last": 0.0,
     }
 
-async def coach_on(m: Message):
-    _coach_on(m.from_user.id)
-    await m.answer("🤝 Наставник включён на 15 минут. Спроси коротко — отвечу и предложу этюд.")
-
+# ====== публичные команды / тексты ======
 @router.message(StateFilter("*"), Command("coach_on"))
 async def cmd_on(m: Message):
-    await coach_on(m)
+    if _MAINTENANCE:
+        return await m.answer("🔧 Идут техработы. Попробуйте позже.")
+    _coach_on(m.from_user.id)
+    await m.answer("🤝 Личный режим наставника включён на 15 минут. "
+                   "Сформулируйте коротко проблему — отвечу и предложу этюд.")
 
 @router.message(StateFilter("*"), Command("coach_off"))
 async def cmd_off(m: Message):
     _COACH_USERS.pop(m.from_user.id, None)
-    await m.answer("👋 Наставник выключен.")
+    await m.answer("👋 Личный режим наставника выключен.")
+
+@router.message(StateFilter("*"), Command("coach_status"))
+async def cmd_status(m: Message):
+    uid = m.from_user.id
+    st = _COACH_USERS.get(uid)
+    personal = "включён до " + st["until"].strftime("%H:%M UTC") if st and datetime.utcnow() < st["until"] else "выключен"
+    if m.chat.type in {"group", "supergroup"}:
+        group = "включён" if m.chat.id in _ALLOWED_CHATS and not _GROUPS_DISABLED else "выключен"
+        await m.answer(f"📊 Статус наставника:\n• Личный режим: {personal}\n• Групповой режим чата: {group}")
+    else:
+        await m.answer(f"📊 Статус наставника:\n• Личный режим: {personal}")
 
 @router.message(StateFilter("*"), Command("ask"))
 @router.message(StateFilter("*"), F.text.regexp(r"^/вопрос\s+.+"))
 async def ask_cmd(m: Message):
+    if _MAINTENANCE:
+        return await m.answer("🔧 Идут техработы. Попробуйте позже.")
     text = m.text.split(maxsplit=1)[1] if " " in m.text else ""
     await _handle_question(m, text)
 
@@ -76,35 +90,31 @@ async def ask_cmd(m: Message):
     Command("coach_toggle")
 )
 async def coach_toggle(m: Message):
+    if _MAINTENANCE or _GROUPS_DISABLED:
+        return await m.answer("🔕 Групповой режим сейчас недоступен.")
     cid = m.chat.id
     if cid in _ALLOWED_CHATS:
         _ALLOWED_CHATS.remove(cid)
-        await m.answer("🔕 В этом чате наставник отключён.")
+        await m.answer("🔕 Групповой режим этого чата **выключён**.")
     else:
         _ALLOWED_CHATS.add(cid)
-        await m.answer("🔔 В этом чате наставник включён.")
+        await m.answer("🔔 Групповой режим этого чата **включён**.")
 
+# ====== пассивное слушание ======
 @router.message(F.text)
 async def passive_listen(m: Message, state: FSMContext):
-    """
-    Молчим на:
-      - бот-команды (/start, /menu, /help и пр.)
-      - тексты кнопок меню
-      - пустые/пробельные сообщения
-    Слушаем только когда включён наставник и не истёк TTL.
-    """
-    # Группы — только если включили
-    if m.chat.type in {"group", "supergroup"} and m.chat.id not in _ALLOWED_CHATS:
-        return
+    if _MAINTENANCE:
+        return  # тихо молчим во время техработ
+
+    # Группы — только если включили, и глобально не отключено
+    if m.chat.type in {"group", "supergroup"}:
+        if _GROUPS_DISABLED or m.chat.id not in _ALLOWED_CHATS:
+            return
 
     txt = (m.text or "").strip()
-    if not txt:
+    if not txt or txt in _MENU_TEXTS:
         return
-    if txt in _MENU_TEXTS:
-        return
-    if _has_bot_command(m.entities):
-        return
-    if txt.startswith("/"):  # подстрахуемся
+    if _has_bot_command(m.entities) or txt.startswith("/"):
         return
 
     uid = m.from_user.id
@@ -124,6 +134,7 @@ async def passive_listen(m: Message, state: FSMContext):
 
     await _handle_question(m, txt)
 
+# ====== служебные ======
 async def _send_typing(bot, chat_id: int, stop_event: asyncio.Event):
     try:
         while not stop_event.is_set():
@@ -157,7 +168,7 @@ async def _handle_question(m: Message, q: str):
             pass
         await m.answer(reply, reply_markup=timer_kb())
     except Exception:
-        await m.answer("Ой, что-то пошло не так. Попробуй ещё раз одной короткой фразой 🙏")
+        await m.answer("Ой, что-то пошло не так. Повтори шаг или вернись в меню: /menu 🙏")
         raise
     finally:
         stop.set()
@@ -175,3 +186,40 @@ async def coach_timer(cb: CallbackQuery):
     await asyncio.sleep(5)
     await msg.edit_text("⏱ Готово! Как ощущение? Одно слово.")
     await cb.answer()
+
+# ====== админ-команды быстрых флагов ======
+def _is_admin(uid: int) -> bool:
+    admin_ids = getattr(settings, "admin_ids", []) or []
+    return uid in admin_ids
+
+@router.message(StateFilter("*"), Command("maint_on"))
+async def maint_on(m: Message):
+    if not _is_admin(m.from_user.id):
+        return
+    global _MAINTENANCE
+    _MAINTENANCE = True
+    await m.answer("🔧 Режим техработ включён. Бот отвечает только на базовые команды.")
+
+@router.message(StateFilter("*"), Command("maint_off"))
+async def maint_off(m: Message):
+    if not _is_admin(m.from_user.id):
+        return
+    global _MAINTENANCE
+    _MAINTENANCE = False
+    await m.answer("✅ Техработы выключены.")
+
+@router.message(StateFilter("*"), Command("coach_groups_off"))
+async def groups_off(m: Message):
+    if not _is_admin(m.from_user.id):
+        return
+    global _GROUPS_DISABLED
+    _GROUPS_DISABLED = True
+    await m.answer("🔕 Глобально отключён групповой режим наставника.")
+
+@router.message(StateFilter("*"), Command("coach_groups_on"))
+async def groups_on(m: Message):
+    if not _is_admin(m.from_user.id):
+        return
+    global _GROUPS_DISABLED
+    _GROUPS_DISABLED = False
+    await m.answer("🔔 Глобально включён групповой режим наставника.")
