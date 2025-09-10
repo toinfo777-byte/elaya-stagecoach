@@ -15,6 +15,7 @@ from app.storage.repo import init_db
 from app.routers.smoke import router as smoke_router               # /ping, /health
 from app.routers.apply import router as apply_router               # заявка
 from app.routers.deeplink import router as deeplink_router         # диплинки /start <payload>
+from app.routers.shortcuts import router as shortcuts_router       # ✅ глобальные шорткаты (до онбординга)
 from app.routers.onboarding import router as onboarding_router     # онбординг (/start)
 from app.routers.coach import router as coach_router               # наставник
 from app.routers.training import router as training_router         # тренировка
@@ -105,6 +106,7 @@ async def main():
         smoke_router,        # быстрые проверки
         apply_router,
         deeplink_router,     # диплинки должны идти РАНО
+        shortcuts_router,    # ✅ глобальные шорткаты — до онбординга
         onboarding_router,   # /start попадает сюда раньше coach
         coach_router,
         training_router,
