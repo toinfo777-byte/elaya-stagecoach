@@ -64,9 +64,16 @@ async def menu_privacy(m: Message):
 async def menu_help(m: Message):
     await m.answer(HELP_TEXT)
 
-# ===== Мой прогресс =====
+# ===== Мой прогресс (не зависит от других роутеров) =====
 @router.message(StateFilter("*"), F.text == BTN_PROGRESS)
 async def menu_progress(m: Message):
+    from app.storage.models import DrillRun  # локальный импорт, чтобы не плодить циклы
+    def _pick_created_col():
+        for name in ("created_at", "created", "created_dt", "timestamp", "ts", "inserted_at", "created_on"):
+            if hasattr(DrillRun, name):
+                return getattr(DrillRun, name)
+        return None
+
     with session_scope() as s:
         u = s.query(User).filter_by(tg_id=m.from_user.id).first()
         if not u:
@@ -74,12 +81,13 @@ async def menu_progress(m: Message):
             return
 
         streak = u.streak or 0
-        since = datetime.utcnow() - timedelta(days=7)
-        runs_7d = (
-            s.query(DrillRun)
-            .filter(DrillRun.user_id == u.id, DrillRun.created_at >= since)
-            .count()
-        )
+
+        q = s.query(DrillRun).filter(DrillRun.user_id == u.id)
+        created_col = _pick_created_col()
+        if created_col is not None:
+            since = datetime.utcnow() - timedelta(days=7)
+            q = q.filter(created_col >= since)
+        runs_7d = q.count()
 
     txt = (
         "📈 *Мой прогресс*\n\n"
