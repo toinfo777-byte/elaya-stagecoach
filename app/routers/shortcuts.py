@@ -19,7 +19,7 @@ from app.storage.models import User, DrillRun
 from app.routers.menu import (
     BTN_TRAIN,
     BTN_PROGRESS,
-    BTN_APPLY,     # не используем здесь, но полезно для единообразия
+    BTN_APPLY,
     BTN_CASTING,
     BTN_PRIVACY,
     BTN_HELP,
@@ -28,7 +28,6 @@ from app.routers.menu import (
 
 router = Router(name="shortcuts")
 
-# ===== Команды в любом состоянии (срабатывают ДО онбординга) =====
 @router.message(StateFilter("*"), Command("help"))
 async def sc_help_cmd(m: Message):
     await m.answer(HELP_TEXT)
@@ -41,7 +40,6 @@ async def sc_privacy_cmd(m: Message):
 async def sc_progress_cmd(m: Message):
     await _send_progress(m)
 
-# ===== Текстовые кнопки в любом состоянии =====
 @router.message(StateFilter("*"), F.text == BTN_TRAIN)
 async def sc_training(m: Message, state: FSMContext):
     await training_entry(m, state)
@@ -58,12 +56,10 @@ async def sc_privacy_text(m: Message):
 async def sc_help_text(m: Message):
     await m.answer(HELP_TEXT)
 
-# — точный матч «📈 Мой прогресс»
 @router.message(StateFilter("*"), F.text == BTN_PROGRESS)
 async def sc_progress_text_exact(m: Message):
     await _send_progress(m)
 
-# — «фаззи» подстраховка (если эмодзи/пробелы отличаются)
 @router.message(StateFilter("*"), lambda m: isinstance(m.text, str) and "прогресс" in m.text.lower())
 async def sc_progress_text_fuzzy(m: Message):
     await _send_progress(m)
@@ -77,11 +73,8 @@ async def _send_progress(m: Message):
             return
 
         streak = u.streak or 0
-
-        # Базовый запрос прогонов пользователя
         q = s.query(DrillRun).filter(DrillRun.user_id == u.id)
 
-        # Ищем любой дата/время столбец в модели (created_at/created/timestamp/…)
         mapper = sqla_inspect(DrillRun)
         dt_col = next((c for c in mapper.columns if isinstance(c.type, (DateTime, Date))), None)
 
@@ -89,13 +82,28 @@ async def _send_progress(m: Message):
             since = datetime.utcnow() - timedelta(days=7)
             runs_7d = q.filter(dt_col >= since).count()
         else:
-            # Если нет даты — считаем все прогоны, чтобы кнопка всегда отвечала
             runs_7d = q.count()
+
+        # добавляем источники
+        src_txt = ""
+        try:
+            meta = dict(u.meta_json or {}) if hasattr(u, "meta_json") else {}
+            sources = meta.get("sources", {})
+            first_src = sources.get("first_source")
+            last_src = sources.get("last_source")
+            if first_src or last_src:
+                if first_src and last_src and first_src != last_src:
+                    src_txt = f"\n• Источник: {first_src} → {last_src}"
+                elif last_src:
+                    src_txt = f"\n• Источник: {last_src}"
+        except Exception:
+            pass
 
     txt = (
         "📈 *Мой прогресс*\n\n"
         f"• Стрик: *{streak}*\n"
-        f"• Этюдов за 7 дней: *{runs_7d}*\n\n"
+        f"• Этюдов за 7 дней: *{runs_7d}*"
+        f"{src_txt}\n\n"
         "Продолжай каждый день — тренировка дня в один клик 👇"
     )
     await m.answer(txt, reply_markup=main_menu(), parse_mode="Markdown")
