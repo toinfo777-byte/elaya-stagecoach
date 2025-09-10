@@ -4,7 +4,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 
 from aiogram import Router, F
-from aiogram.filters import Command
+from aiogram.filters import Command, StateFilter
 from aiogram.types import Message, ReplyKeyboardMarkup, KeyboardButton
 
 from app.storage.repo import session_scope
@@ -40,13 +40,13 @@ def main_menu() -> ReplyKeyboardMarkup:
     )
 
 # ===== /menu =====
-@router.message(Command("menu"))
+@router.message(StateFilter("*"), Command("menu"))
 async def open_menu(m: Message):
     await m.answer("Готово. Добро пожаловать в меню.", reply_markup=main_menu())
 
 
 # ===== Тренировка дня =====
-@router.message(F.text == BTN_TRAIN)
+@router.message(StateFilter("*"), F.text == BTN_TRAIN)
 async def menu_training(m: Message):
     # просто вызываем «вход» тренировки
     from aiogram.fsm.context import FSMContext  # локальный импорт, чтобы не тянуть лишнее
@@ -55,7 +55,7 @@ async def menu_training(m: Message):
 
 
 # ===== Мини-кастинг =====
-@router.message(F.text == BTN_CASTING)
+@router.message(StateFilter("*"), F.text == BTN_CASTING)
 async def menu_casting(m: Message):
     from aiogram.fsm.context import FSMContext
     state = FSMContext(storage=m.bot.dispatcher.storage, chat=m.chat, user=m.from_user)
@@ -63,19 +63,19 @@ async def menu_casting(m: Message):
 
 
 # ===== Политика =====
-@router.message(F.text == BTN_PRIVACY)
+@router.message(StateFilter("*"), F.text == BTN_PRIVACY)
 async def menu_privacy(m: Message):
     await m.answer(PRIVACY_TEXT)
 
 
 # ===== Помощь =====
-@router.message(F.text == BTN_HELP)
+@router.message(StateFilter("*"), F.text == BTN_HELP)
 async def menu_help(m: Message):
     await m.answer(HELP_TEXT)
 
 
 # ===== Мой прогресс (не зависит от других роутеров) =====
-@router.message(F.text == BTN_PROGRESS)
+@router.message(StateFilter("*"), F.text == BTN_PROGRESS)
 async def menu_progress(m: Message):
     """
     Короткий самостоятельный отчёт:
