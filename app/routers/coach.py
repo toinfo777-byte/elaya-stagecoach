@@ -15,7 +15,7 @@ from aiogram.fsm.context import FSMContext
 from app.config import settings
 from app.keyboards.coach import timer_kb
 from app.services.coach_rules import pick_drill_by_keywords
-from app.storage.repo import session_scope, log_event
+from app.storage.repo import session_scope, log_event          # ✅ метрики
 from app.storage.models import User
 
 router = Router(name="coach")
@@ -29,7 +29,6 @@ _GROUPS_DISABLED: bool = False          # глобально запретить 
 _TTL_MIN_DEFAULT = 15
 _RATE_SEC_DEFAULT = 5
 
-# Тексты кнопок меню — игнорируем их в пассивном слушателе
 _MENU_TEXTS: set[str] = {
     "🎯 Тренировка дня",
     "📈 Мой прогресс",
@@ -51,23 +50,31 @@ def _coach_on(uid: int):
         "last": 0.0,
     }
 
-# ====== ПУБЛИЧНАЯ ФУНКЦИЯ (экспортируется) ======
-# НУЖНА для: from app.routers.coach import coach_on (deeplink и пр.)
+# ===== ПУБЛИЧНАЯ функция (используется в deeplink и командах) =====
 async def coach_on(m: Message):
-    """Включить личный режим наставника для пользователя и отправить стандартный текст."""
     if _MAINTENANCE:
         await m.answer("🔧 Идут техработы. Попробуйте позже.")
         return
     _coach_on(m.from_user.id)
+
+    # ✅ метрика: coach_on
+    try:
+        with session_scope() as s:
+            u = s.query(User).filter_by(tg_id=m.from_user.id).first()
+            if u:
+                log_event(s, u.id, "coach_on", {})
+                s.commit()
+    except Exception:
+        pass
+
     await m.answer(
         "🤝 Личный режим наставника включён на 15 минут. "
         "Сформулируйте коротко проблему — отвечу и предложу этюд."
     )
 
-# ====== команды ======
+# ===== команды =====
 @router.message(StateFilter("*"), Command("coach_on"))
 async def cmd_on(m: Message):
-    # просто используем публичную функцию, чтобы поведение было единым
     await coach_on(m)
 
 @router.message(StateFilter("*"), Command("coach_off"))
@@ -110,13 +117,12 @@ async def coach_toggle(m: Message):
         _ALLOWED_CHATS.add(cid)
         await m.answer("🔔 Групповой режим этого чата **включён**.")
 
-# ====== пассивное слушание ======
+# ===== пассивное слушание =====
 @router.message(F.text)
 async def passive_listen(m: Message, state: FSMContext):
     if _MAINTENANCE:
-        return  # тихо молчим во время техработ
+        return
 
-    # Группы — только если включили, и глобально не отключено
     if m.chat.type in {"group", "supergroup"}:
         if _GROUPS_DISABLED or m.chat.id not in _ALLOWED_CHATS:
             return
@@ -135,7 +141,6 @@ async def passive_listen(m: Message, state: FSMContext):
         _COACH_USERS.pop(uid, None)
         return await m.answer("⏳ Сессия наставника завершилась. Включить снова: /coach_on")
 
-    # Rate limit
     rate_sec = getattr(settings, "coach_rate_sec", _RATE_SEC_DEFAULT)
     now = time.monotonic()
     if now - st["last"] < rate_sec:
@@ -144,7 +149,7 @@ async def passive_listen(m: Message, state: FSMContext):
 
     await _handle_question(m, txt)
 
-# ====== служебные ======
+# ===== служебные =====
 async def _send_typing(bot, chat_id: int, stop_event: asyncio.Event):
     try:
         while not stop_event.is_set():
@@ -169,7 +174,6 @@ async def _handle_question(m: Message, q: str):
             f"Признак: {sign}\n"
             f"Запусти таймер и отмечай ощущение одним словом."
         )
-        # Логируем, но без падений
         try:
             with session_scope() as s:
                 u = s.query(User).filter_by(tg_id=m.from_user.id).first()
@@ -197,7 +201,7 @@ async def coach_timer(cb: CallbackQuery):
     await msg.edit_text("⏱ Готово! Как ощущение? Одно слово.")
     await cb.answer()
 
-# ====== админ-команды быстрых флагов ======
+# ===== админ-команды быстрых флагов =====
 def _is_admin(uid: int) -> bool:
     admin_ids = getattr(settings, "admin_ids", []) or []
     return uid in admin_ids
