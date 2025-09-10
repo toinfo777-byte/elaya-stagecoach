@@ -8,21 +8,22 @@ from aiogram.filters import StateFilter, Command
 from aiogram.types import Message
 from aiogram.fsm.context import FSMContext
 
+from sqlalchemy import inspect as sqla_inspect
+from sqlalchemy.sql.sqltypes import DateTime, Date
+
 from app.routers.system import PRIVACY_TEXT, HELP_TEXT
 from app.routers.training import training_entry
 from app.routers.casting import casting_entry
 from app.storage.repo import session_scope
 from app.storage.models import User, DrillRun
-
-# ⚠️ берём тексты прямо из menu.py, чтобы не было рассинхрона
 from app.routers.menu import (
     BTN_TRAIN,
     BTN_PROGRESS,
-    BTN_APPLY,         # не используем, но оставил для симметрии
+    BTN_APPLY,     # не используем здесь, но полезно для единообразия
     BTN_CASTING,
     BTN_PRIVACY,
     BTN_HELP,
-    main_menu,         # используем в _send_progress
+    main_menu,
 )
 
 router = Router(name="shortcuts")
@@ -57,12 +58,12 @@ async def sc_privacy_text(m: Message):
 async def sc_help_text(m: Message):
     await m.answer(HELP_TEXT)
 
-# — основной точный матч
+# — точный матч «📈 Мой прогресс»
 @router.message(StateFilter("*"), F.text == BTN_PROGRESS)
 async def sc_progress_text_exact(m: Message):
     await _send_progress(m)
 
-# — «фаззи» подстраховка (если вдруг другая раскладка/эмодзи/пробелы)
+# — «фаззи» подстраховка (если эмодзи/пробелы отличаются)
 @router.message(StateFilter("*"), lambda m: isinstance(m.text, str) and "прогресс" in m.text.lower())
 async def sc_progress_text_fuzzy(m: Message):
     await _send_progress(m)
@@ -76,12 +77,20 @@ async def _send_progress(m: Message):
             return
 
         streak = u.streak or 0
-        since = datetime.utcnow() - timedelta(days=7)
-        runs_7d = (
-            s.query(DrillRun)
-            .filter(DrillRun.user_id == u.id, DrillRun.created_at >= since)
-            .count()
-        )
+
+        # Базовый запрос прогонов пользователя
+        q = s.query(DrillRun).filter(DrillRun.user_id == u.id)
+
+        # Ищем любой дата/время столбец в модели (created_at/created/timestamp/…)
+        mapper = sqla_inspect(DrillRun)
+        dt_col = next((c for c in mapper.columns if isinstance(c.type, (DateTime, Date))), None)
+
+        if dt_col is not None:
+            since = datetime.utcnow() - timedelta(days=7)
+            runs_7d = q.filter(dt_col >= since).count()
+        else:
+            # Если нет даты — считаем все прогоны, чтобы кнопка всегда отвечала
+            runs_7d = q.count()
 
     txt = (
         "📈 *Мой прогресс*\n\n"
