@@ -1,4 +1,6 @@
 # app/routers/training.py
+from __future__ import annotations
+
 from aiogram import Router, F
 from aiogram.filters import Command, StateFilter
 from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
@@ -7,8 +9,8 @@ from aiogram.fsm.context import FSMContext
 from aiogram.exceptions import TelegramBadRequest
 
 from app.keyboards.menu import main_menu
-from app.keyboards.feedback import feedback_kb            # <-- НОВОЕ
-from app.storage.repo import session_scope
+from app.keyboards.feedback import feedback_kb
+from app.storage.repo import session_scope, log_event           # ✅ метрики
 from app.storage.models import User, DrillRun
 from app.services.drills import ensure_drills_in_db, choose_drill_for_user
 
@@ -64,7 +66,8 @@ async def _safe_edit_text(msg, text: str, reply_markup: InlineKeyboardMarkup | N
 # -------------------------------------------------------
 
 
-@router.message(F.text == "🎯 Тренировка дня")
+# ===== вход в тренировку =====
+@router.message(StateFilter("*"), F.text == "🎯 Тренировка дня")
 async def training_entry(m: Message, state: FSMContext):
     with session_scope() as s:
         ensure_drills_in_db(s)
@@ -73,6 +76,14 @@ async def training_entry(m: Message, state: FSMContext):
             await m.answer("Сначала /start для онбординга.", reply_markup=main_menu())
             return
         drill = choose_drill_for_user(s, u)
+
+        # ✅ метрика: старт тренировки
+        try:
+            log_event(s, u.id, "started_training", {"drill_id": drill.payload_json.get("id")})
+            s.commit()
+        except Exception:
+            pass
+
     p = drill.payload_json
     await state.update_data(
         drill_id=p["id"], steps=p["steps"], idx=0, check_q=p["check_question"], markers=p["success_markers"]
@@ -84,13 +95,12 @@ async def training_entry(m: Message, state: FSMContext):
     )
 
 
-# ← НОВОЕ: команда /training (в любом состоянии FSM)
+# ← команды-синонимы
 @router.message(StateFilter("*"), Command("training"))
 async def training_cmd(m: Message, state: FSMContext):
     return await training_entry(m, state)
 
 
-# ← НОВОЕ: подстрахуемся, если эмодзи/пробелы отличаются (в любом состоянии)
 @router.message(StateFilter("*"), lambda m: isinstance(m.text, str) and "Тренировка дня" in m.text)
 async def training_fuzzy(m: Message, state: FSMContext):
     return await training_entry(m, state)
@@ -133,7 +143,7 @@ async def reflect_markers(cb: CallbackQuery, state: FSMContext):
 
     if cb.data == "mk_save":
         success = len(selected) >= 2
-        run_id: int | None = None  # <-- НОВОЕ: сохраним id прогона для ссылки в фидбэке
+        run_id: int | None = None
         with session_scope() as s:
             u = s.query(User).filter_by(tg_id=cb.from_user.id).first()
             if u:
@@ -146,13 +156,25 @@ async def reflect_markers(cb: CallbackQuery, state: FSMContext):
                 s.add(run)
                 u.streak = (u.streak or 0) + 1
                 s.commit()
-                run_id = run.id  # получаем id после commit
+                run_id = run.id
+
+                # ✅ метрика: финиш тренировки
+                try:
+                    log_event(
+                        s,
+                        u.id,
+                        "finished_training",
+                        {"drill_id": d["drill_id"], "run_id": run.id, "success": bool(success)},
+                    )
+                    s.commit()
+                except Exception:
+                    pass
 
         await state.clear()
         verdict = "успех" if success else "нужно ещё разок"
         await cb.message.answer(f"Сохранено: {verdict}. Стрик +1. 🎉", reply_markup=main_menu())
 
-        # <-- НОВОЕ: приглашение к отзыву
+        # приглашение к отзыву
         if run_id is not None:
             await cb.message.answer(
                 "Как прошёл этюд? Оцените или оставьте краткий отзыв:",
