@@ -14,17 +14,20 @@ from app.routers.casting import casting_entry
 from app.storage.repo import session_scope
 from app.storage.models import User, DrillRun
 
+# ⚠️ берём тексты прямо из menu.py, чтобы не было рассинхрона
+from app.routers.menu import (
+    BTN_TRAIN,
+    BTN_PROGRESS,
+    BTN_APPLY,         # не используем, но оставил для симметрии
+    BTN_CASTING,
+    BTN_PRIVACY,
+    BTN_HELP,
+    main_menu,         # используем в _send_progress
+)
+
 router = Router(name="shortcuts")
 
-# тексты кнопок (должны совпадать с menu.py и coach._MENU_TEXTS)
-BTN_TRAIN = "🎯 Тренировка дня"
-BTN_PROGRESS = "📈 Мой прогресс"
-BTN_APPLY = "Путь лидера"
-BTN_CASTING = "🎭 Мини-кастинг"
-BTN_PRIVACY = "🔐 Политика"
-BTN_HELP = "💬 Помощь"
-
-# --- Команды в любом состоянии (раньше онбординга) ---
+# ===== Команды в любом состоянии (срабатывают ДО онбординга) =====
 @router.message(StateFilter("*"), Command("help"))
 async def sc_help_cmd(m: Message):
     await m.answer(HELP_TEXT)
@@ -37,7 +40,7 @@ async def sc_privacy_cmd(m: Message):
 async def sc_progress_cmd(m: Message):
     await _send_progress(m)
 
-# --- Текстовые кнопки в любом состоянии ---
+# ===== Текстовые кнопки в любом состоянии =====
 @router.message(StateFilter("*"), F.text == BTN_TRAIN)
 async def sc_training(m: Message, state: FSMContext):
     await training_entry(m, state)
@@ -54,13 +57,18 @@ async def sc_privacy_text(m: Message):
 async def sc_help_text(m: Message):
     await m.answer(HELP_TEXT)
 
+# — основной точный матч
 @router.message(StateFilter("*"), F.text == BTN_PROGRESS)
-async def sc_progress_text(m: Message):
+async def sc_progress_text_exact(m: Message):
     await _send_progress(m)
 
-# --- общая реализация «Мой прогресс» ---
+# — «фаззи» подстраховка (если вдруг другая раскладка/эмодзи/пробелы)
+@router.message(StateFilter("*"), lambda m: isinstance(m.text, str) and "прогресс" in m.text.lower())
+async def sc_progress_text_fuzzy(m: Message):
+    await _send_progress(m)
+
+# ===== Реализация «Мой прогресс» =====
 async def _send_progress(m: Message):
-    from app.routers.menu import main_menu  # чтобы избежать циклического импорта в модуле
     with session_scope() as s:
         u = s.query(User).filter_by(tg_id=m.from_user.id).first()
         if not u:
