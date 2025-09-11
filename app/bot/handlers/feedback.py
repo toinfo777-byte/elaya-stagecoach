@@ -1,88 +1,79 @@
 # app/bot/handlers/feedback.py
 from aiogram import Router, F
-from aiogram.filters import StateFilter
+from aiogram.types import CallbackQuery, Message, ReplyKeyboardMarkup, KeyboardButton
 from aiogram.fsm.context import FSMContext
-from aiogram.types import Message, CallbackQuery
 
-from app.bot.states import Feedback
-from app.bot.keyboards.feedback import rating_kb, skip_kb
-from app.bot.keyboards.main_menu import main_menu_kb  # если есть свой — используй его импорт
+from app.bot.states import FeedbackStates
+from app.bot.keyboards.feedback import feedback_inline_kb  # твоя инлайн-клава c 🔥/👌/😐 и "1 фраза"
+from app.storage.repo import session_scope, log_event
 
-# твои функции работы с БД (из того файла, который ты прислал)
-from app.storage.db import session_scope, log_event
+router = Router(name="feedback2")
 
-router = Router()
-
-# ВЫЗОВ СПРОСИТЬ ОТЗЫВ — подставь свой триггер/место, где это уместно
-@router.message(F.text == "/ask_review")
-async def ask_review(msg: Message, state: FSMContext):
-    await state.set_state(Feedback.WaitRating)
-    await msg.answer(
-        "Как прошёл этюд? Оцените или оставьте краткий отзыв:",
-        reply_markup=rating_kb()
+# Простая клавиатура "в меню" — шлёт /cancel (у тебя это открывает меню)
+def menu_kb() -> ReplyKeyboardMarkup:
+    return ReplyKeyboardMarkup(
+        keyboard=[[KeyboardButton(text="/cancel")]],
+        resize_keyboard=True,
+        one_time_keyboard=True,
     )
 
-# ПОЛУЧАЕМ ОЦЕНКУ (кнопки 🔥/👌/😐 или переход к тексту)
-@router.callback_query(F.data.startswith("rate:"), Feedback.WaitRating)
-async def on_rating(cb: CallbackQuery, state: FSMContext):
-    action = cb.data.split(":", 1)[1]
-    tg_id = cb.from_user.id
+# ----- 1) Поймать клик на оценку 🔥/👌/😐 -----
+@router.callback_query(F.data.startswith("fb:rate:"))
+async def on_feedback_rate(cb: CallbackQuery, state: FSMContext):
+    # fb:rate:hot | ok | meh
+    _, _, rate = cb.data.split(":", 2)
+    await state.update_data(rate=rate)
 
-    if action == "text":
-        # Переключаемся на ввод текста
-        await state.set_state(Feedback.WaitText)
-        # убираем старые inline-кнопки, чтобы не нажимали второй раз
-        await cb.message.edit_reply_markup(reply_markup=None)
-        await cb.message.answer("Напишите 1 фразу о впечатлении:", reply_markup=skip_kb())
-        await cb.answer()
-        return
+    # просим одно предложение
+    await cb.message.answer(
+        "Принято 👍\nНапиши, пожалуйста, одну фразу: что именно получилось/не получилось?",
+        reply_markup=menu_kb(),
+    )
+    await cb.answer()  # закрыть "часики"
+    await state.set_state(FeedbackStates.wait_text)
 
-    # Оценки и «Пропустить» с шага WaitRating
-    rating = {"hot": "🔥", "ok": "👌", "meh": "😐", "skip": "skip"}.get(action, "skip")
+# ----- 2) Пользователь выбрал «1 фраза» из инлайн-клавы без оценки -----
+@router.callback_query(F.data == "fb:text")
+async def on_feedback_text_only(cb: CallbackQuery, state: FSMContext):
+    await cb.message.answer(
+        "Окей, напиши коротко одной фразой 🙏",
+        reply_markup=menu_kb(),
+    )
+    await cb.answer()
+    await state.set_state(FeedbackStates.wait_text)
 
-    # Логируем, но не ломаем поток, если что-то пойдёт не так
+# ----- 3) Принять свободный текст и сохранить -----
+@router.message(FeedbackStates.wait_text)
+async def on_feedback_text(msg: Message, state: FSMContext):
+    data = await state.get_data()
+    rate = data.get("rate")  # может быть None, если человек нажал сразу «1 фраза»
+
+    payload = {
+        "tg_id": msg.from_user.id,
+        "username": msg.from_user.username,
+        "rate": rate,                # "hot" | "ok" | "meh" | None
+        "text": msg.text.strip(),
+        "message_id": msg.message_id,
+    }
+
+    # Логируем безопасно (user_id нам неизвестен — кладём None и tg_id в payload)
     try:
         with session_scope() as s:
-            log_event(s, user_id=None, name="rating", payload={"tg_id": tg_id, "rating": rating})
+            log_event(s, user_id=None, name="feedback_added", payload=payload)
     except Exception:
+        # не роняем поток, спасибо и так отправим
         pass
 
-    await cb.message.edit_reply_markup(reply_markup=None)
-    await cb.answer("Сохранено")
     await state.clear()
-    await cb.message.answer("Спасибо! Что дальше?", reply_markup=main_menu_kb())
+    await msg.answer(
+        "Спасибо! Сохранил отзыв 🙌\nНажми /cancel, чтобы вернуться в меню.",
+        reply_markup=menu_kb(),
+    )
 
-# ТЕКСТОВЫЙ ОТЗЫВ
-@router.message(Feedback.WaitText)
-async def on_text_review(msg: Message, state: FSMContext):
-    tg_id = msg.from_user.id
-    text = (msg.text or "").strip()
-
-    if text:
-        try:
-            with session_scope() as s:
-                log_event(s, user_id=None, name="review_text", payload={"tg_id": tg_id, "text": text})
-        except Exception:
-            pass
-
-    await state.clear()
-    await msg.answer("Спасибо! Учтено ✅", reply_markup=main_menu_kb())
-
-# «ПРОПУСТИТЬ» на шаге текстового отзыва
-@router.callback_query(F.data == "rate:skip", Feedback.WaitText)
-async def on_skip_text(cb: CallbackQuery, state: FSMContext):
-    await cb.answer("Пропущено")
-    await state.clear()
-    await cb.message.edit_reply_markup(reply_markup=None)
-    await cb.message.answer("Спасибо! Что дальше?", reply_markup=main_menu_kb())
-
-# МЕНЮ ДОЛЖНО РАБОТАТЬ ИЗ ЛЮБОГО СОСТОЯНИЯ — перехватываем кнопки меню
-@router.message(
-    StateFilter("*"),
-    F.text.in_({"🏋️ Тренировка дня", "📈 Мой прогресс", "🧭 Путь лидера", "🎭 Мини-кастинг", "🗣 Помощь"})
-)
-async def menu_any_state(msg: Message, state: FSMContext):
-    # сбрасываем зависшее состояние
-    await state.clear()
-    # здесь сделай переходы на свои сценарии; базово просто показываем меню
-    await msg.answer("Готово. Вы в главном меню.", reply_markup=main_menu_kb())
+# ----- 4) Запасной вход: показать инлайн-клаву с оценками -----
+@router.message(F.text.casefold() == "отзыв")
+async def show_feedback_buttons(msg: Message):
+    await msg.answer(
+        "Как прошёл этюд? Оцени или оставь краткий отзыв:",
+        reply_markup=feedback_inline_kb(),
+    )
