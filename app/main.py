@@ -31,6 +31,9 @@ from app.routers.metrics import router as metrics_router           # ✅ /metric
 from app.routers.cancel import router as cancel_router             # глобальная отмена /cancel
 from app.routers.menu import router as menu_router                 # меню (всегда последним)
 
+# ⬇️ НОВОЕ: универсальный обработчик отзывов (кнопки 🔥/👌/😐 + «1 фраза»)
+from app.bot.handlers.feedback import router as feedback2_router
+
 # Обслуживание SQLite
 from app.utils.maintenance import backup_sqlite, vacuum_sqlite
 
@@ -119,7 +122,13 @@ async def main():
         training_router,
         casting_router,
         progress_router,
+
+        # наш новый обработчик отзывов (кнопки 🔥/👌/😐 + «1 фраза»)
+        feedback2_router,
+
+        # существующий проектный роутер отзывов (если есть своя метрика/логика)
         feedback_router,
+
         system_router,
         settings_router,
         admin_router,
