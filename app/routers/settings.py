@@ -1,3 +1,4 @@
+# app/routers/settings.py
 from __future__ import annotations
 from aiogram import Router, F
 from aiogram.filters import Command
@@ -23,10 +24,18 @@ def _confirm_kb() -> InlineKeyboardMarkup:
         ]
     ])
 
+# Открыть настройки: и по кнопке, и по /settings
+@router.message(Command("settings"))
 @router.message(F.text == "⚙️ Настройки")
 async def open_settings(m: Message):
-    await m.answer("Настройки профиля:", reply_markup=_settings_kb())
+    await m.answer(
+        "⚙️ Настройки профиля:\n\n"
+        "• Здесь вы можете удалить профиль и все записи (онбординг начнётся заново).\n\n"
+        "В бете других настроек нет.",
+        reply_markup=_settings_kb(),
+    )
 
+# Прямая команда — быстрый запрос подтверждения
 @router.message(Command("wipe_me"))
 async def wipe_me_command(m: Message):
     await m.answer("Удалить профиль и все записи? Это действие необратимо.", reply_markup=_confirm_kb())
@@ -42,10 +51,13 @@ async def wipe_actions(cb: CallbackQuery, state: FSMContext):
         await cb.message.answer("Ок, ничего не удалял.", reply_markup=main_menu())
         await cb.answer()
         return
+
+    # wipe_yes
     with session_scope() as s:
         u = s.query(User).filter_by(tg_id=cb.from_user.id).first()
         if u:
             delete_user_cascade(s, u.id)
+
     await state.clear()
     await cb.message.answer("Готово. Профиль удалён. /start — заново пройти онбординг.", reply_markup=main_menu())
     await cb.answer()
