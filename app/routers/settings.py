@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from aiogram import Router, F
-from aiogram.filters import Command
+from aiogram.filters import Command, StateFilter
 from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.fsm.context import FSMContext
 
@@ -24,24 +24,24 @@ def _confirm_kb() -> InlineKeyboardMarkup:
         ]
     ])
 
-# --- Открыть настройки ---
-@router.message(Command("settings"))
-@router.message(lambda m: isinstance(m.text, str) and "Настрой" in m.text)
+# Открыть настройки (работает в любом состоянии + фаззи по тексту)
+@router.message(StateFilter("*"), Command("settings"))
+@router.message(StateFilter("*"), lambda m: isinstance(m.text, str) and "Настрой" in m.text)
 async def open_settings(m: Message):
     await m.answer("Настройки профиля:", reply_markup=_settings_kb())
 
-# --- Команда на удаление профиля ---
-@router.message(Command("wipe_me"))
+# Команда на удаление профиля
+@router.message(StateFilter("*"), Command("wipe_me"))
 async def wipe_me_command(m: Message):
     await m.answer("Удалить профиль и все записи? Это действие необратимо.", reply_markup=_confirm_kb())
 
-# --- Кнопка «Удалить профиль» ---
+# Кнопка «Удалить профиль»
 @router.callback_query(F.data == "wipe_confirm")
 async def wipe_confirm(cb: CallbackQuery):
     await cb.message.answer("Удалить профиль и все записи? Это действие необратимо.", reply_markup=_confirm_kb())
     await cb.answer()
 
-# --- Подтверждение/отмена удаления ---
+# Подтверждение/отмена удаления
 @router.callback_query(F.data.in_({"wipe_no", "wipe_yes"}))
 async def wipe_actions(cb: CallbackQuery, state: FSMContext):
     if cb.data == "wipe_no":
@@ -49,7 +49,6 @@ async def wipe_actions(cb: CallbackQuery, state: FSMContext):
         await cb.answer()
         return
 
-    # wipe_yes
     with session_scope() as s:
         u = s.query(User).filter_by(tg_id=cb.from_user.id).first()
         if u:
