@@ -15,9 +15,13 @@ from app.storage.models import User
 
 router = Router(name="settings")
 
+# ===== Inline-клавиатуры =====
+
 def _settings_kb() -> InlineKeyboardMarkup:
+    """Мини-меню настроек — не дублируем прямое удаление профиля."""
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🗑 Удалить профиль", callback_data="wipe_confirm")],
+        [InlineKeyboardButton(text="🧹 Стереть профиль…", callback_data="wipe_confirm")],
+        [InlineKeyboardButton(text="⬅️ В меню", callback_data="settings_back")],
     ])
 
 def _confirm_kb() -> InlineKeyboardMarkup:
@@ -26,12 +30,27 @@ def _confirm_kb() -> InlineKeyboardMarkup:
         InlineKeyboardButton(text="Отмена", callback_data="wipe_no"),
     ]])
 
-# ====== Меню «Настройки» ======
+# ===== Handlers =====
+
+# Открыть «Настройки»
 @router.message(F.text == BTN_SETTINGS)
 async def open_settings(m: Message):
-    await m.answer("Настройки профиля:", reply_markup=_settings_kb())
+    txt = (
+        "⚙️ *Настройки*\n\n"
+        "Здесь будут собираться пользовательские опции.\n"
+        "Сейчас доступно:\n"
+        "• Стереть профиль и данные\n"
+        "• Вернуться в меню"
+    )
+    await m.answer(txt, reply_markup=_settings_kb(), parse_mode="Markdown")
 
-# ✅ обработчик **кнопки** из обычной клавиатуры «🗑 Удалить профиль»
+# Кнопка «⬅️ В меню»
+@router.callback_query(F.data == "settings_back")
+async def settings_back(cb: CallbackQuery):
+    await cb.message.answer("Готово. Вот меню:", reply_markup=main_menu())
+    await cb.answer()
+
+# Большая кнопка внизу «🗑 Удалить профиль» — сразу к подтверждению
 @router.message(F.text == BTN_WIPE)
 async def wipe_me_button(m: Message):
     await m.answer("Удалить профиль и все записи? Это действие необратимо.", reply_markup=_confirm_kb())
@@ -41,12 +60,13 @@ async def wipe_me_button(m: Message):
 async def wipe_me_command(m: Message):
     await m.answer("Удалить профиль и все записи? Это действие необратимо.", reply_markup=_confirm_kb())
 
-# ====== Колбэки подтверждения ======
+# Нажали «Стереть профиль…» из мини-меню — показать подтверждение
 @router.callback_query(F.data == "wipe_confirm")
 async def wipe_confirm(cb: CallbackQuery):
     await cb.message.answer("Удалить профиль и все записи? Это действие необратимо.", reply_markup=_confirm_kb())
     await cb.answer()
 
+# Подтверждение/отмена удаления
 @router.callback_query(F.data.in_({"wipe_no", "wipe_yes"}))
 async def wipe_actions(cb: CallbackQuery, state: FSMContext):
     if cb.data == "wipe_no":
