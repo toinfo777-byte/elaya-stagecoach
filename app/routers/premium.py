@@ -1,5 +1,5 @@
 from aiogram import Router, F
-from aiogram.filters import Command
+from aiogram.filters import Command, StateFilter
 from aiogram.types import (
     Message, CallbackQuery,
     InlineKeyboardMarkup, InlineKeyboardButton
@@ -13,21 +13,19 @@ from app.storage.models import User, Lead
 
 router = Router(name="premium")
 
-# ---------- UI ----------
 def premium_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="Оставить контакт", callback_data="lead_start")],
         [InlineKeyboardButton(text="📣 Что нового в канале", url="https://t.me/elaya_theatre")]
     ])
 
-# ---------- FSM ----------
 class LeadForm(StatesGroup):
     email = State()
     note = State()
 
-# ---------- Handlers ----------
-@router.message(Command("premium"))
-@router.message(lambda m: isinstance(m.text, str) and "Расширенная версия" in m.text)
+# Вход в премиум (в любом состоянии + фаззи по тексту)
+@router.message(StateFilter("*"), Command("premium"))
+@router.message(StateFilter("*"), lambda m: isinstance(m.text, str) and "Расширен" in m.text)
 async def premium_entry(m: Message):
     text = (
         "⭐ Расширенная версия (stub)\n\n"
@@ -49,14 +47,12 @@ async def lead_email(m: Message, state: FSMContext):
     email = None if (m.text or "").strip() == "-" else (m.text or "").strip()
     await state.update_data(email=email)
     await state.set_state(LeadForm.note)
-    await m.answer("Любой комментарий/предпочитаемый мессенджер (телеграм @, телефон и т.п.) — по желанию. "
-                   "Или отправьте «-».")
+    await m.answer("Любой комментарий/предпочитаемый мессенджер — по желанию. Или отправьте «-».")
 
 @router.message(LeadForm.note)
 async def lead_note(m: Message, state: FSMContext):
     data = await state.get_data()
     note = None if (m.text or "").strip() == "-" else (m.text or "").strip()
-
     tg_contact = f"@{m.from_user.username}" if m.from_user.username else str(m.from_user.id)
 
     with session_scope() as s:
@@ -66,19 +62,14 @@ async def lead_note(m: Message, state: FSMContext):
             s.add(u)
             s.flush()
 
-        payload_note = []
+        payload = []
         if data.get("email"):
-            payload_note.append(f"email={data['email']}")
+            payload.append(f"email={data['email']}")
         if note:
-            payload_note.append(f"note={note}")
-        final_note = "; ".join(payload_note) if payload_note else None
+            payload.append(f"note={note}")
+        final_note = "; ".join(payload) if payload else None
 
-        lead = Lead(
-            user_id=u.id,
-            channel="telegram",
-            contact=tg_contact,
-            note=final_note,
-        )
+        lead = Lead(user_id=u.id, channel="telegram", contact=tg_contact, note=final_note)
         s.add(lead)
 
     await state.clear()
