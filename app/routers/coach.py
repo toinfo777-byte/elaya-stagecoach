@@ -36,6 +36,9 @@ _MENU_TEXTS: set[str] = {
     "🎭 Мини-кастинг",
     "🔐 Политика",
     "💬 Помощь",
+    "⚙️ Настройки",
+    "⭐ Расширенная версия",
+    "🗑 Удалить профиль",
 }
 
 def _has_bot_command(entities: Iterable[MessageEntity] | None) -> bool:
@@ -118,7 +121,9 @@ async def coach_toggle(m: Message):
         await m.answer("🔔 Групповой режим этого чата **включён**.")
 
 # ===== пассивное слушание =====
-@router.message(F.text)
+# ВАЖНО: исключаем тексты меню на уровне фильтра,
+# чтобы этот хендлер их вообще не перехватывал.
+@router.message(StateFilter("*"), F.text & ~F.text.in_(_MENU_TEXTS))
 async def passive_listen(m: Message, state: FSMContext):
     if _MAINTENANCE:
         return
@@ -128,7 +133,7 @@ async def passive_listen(m: Message, state: FSMContext):
             return
 
     txt = (m.text or "").strip()
-    if not txt or txt in _MENU_TEXTS:
+    if not txt:
         return
     if _has_bot_command(m.entities) or txt.startswith("/"):
         return
