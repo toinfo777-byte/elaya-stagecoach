@@ -1,12 +1,30 @@
 from __future__ import annotations
 
+import os
 from contextlib import contextmanager
 from datetime import datetime
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.orm import declarative_base
+from sqlalchemy.engine.url import make_url
 
 from app.config import settings
 from app.storage.models import Base, User, Event
+
+
+# 👇 ДОБАВЛЕНО: гарантируем, что папка для SQLite существует
+def _ensure_sqlite_dir(db_url: str):
+    try:
+        u = make_url(db_url)
+        if u.drivername == "sqlite" and u.database:
+            os.makedirs(os.path.dirname(u.database), exist_ok=True)
+    except Exception:
+        # не мешаем запуску, даже если проверка упала
+        pass
+
+
+# вызвать до инициализации движка
+_ensure_sqlite_dir(settings.db_url)
 
 engine = create_engine(settings.db_url, future=True, pool_pre_ping=True)
 SessionLocal = sessionmaker(bind=engine, expire_on_commit=False, autoflush=False, autocommit=False)
