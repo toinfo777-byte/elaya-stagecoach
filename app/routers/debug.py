@@ -1,22 +1,22 @@
 # app/routers/debug.py
-import logging
-from aiogram import Router
+from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery
 
-router = Router(name="debug")
-log = logging.getLogger("debug")
+router = Router()
+router.name = "debug"
 
-# Логируем любое входящее сообщение (не мешаем остальным хендлерам)
 @router.message()
-async def _debug_any_message(m: Message) -> None:
-    log.info("MSG: from=%s chat=%s text=%r", m.from_user.id if m.from_user else None, m.chat.id, m.text)
+async def any_message(m: Message):
+    # ничему не мешаем — просто лог для диагностики
+    text = (m.text or "").strip()
+    m.bot.logger.info("DBG MSG from %s: %r", m.from_user.id if m.from_user else "?", text)
 
-# Логируем любые callback’и (клики по инлайн-клавиатуре)
 @router.callback_query()
-async def _debug_any_callback(c: CallbackQuery) -> None:
-    log.info("CB:  from=%s chat=%s data=%r", c.from_user.id if c.from_user else None, c.message.chat.id if c.message else None, c.data)
-    # отвечаем коротко, чтобы Telegram убирал «часики»
+async def any_callback(cb: CallbackQuery):
+    data = (cb.data or "").strip()
+    cb.bot.logger.info("DBG CB from %s: %r", cb.from_user.id if cb.from_user else "?", data)
+    # обязательно отвечаем, чтобы Telegram убирал «часики»
     try:
-        await c.answer(cache_time=0)
-    except Exception as e:
-        log.warning("Callback answer failed: %s", e)
+        await cb.answer()
+    except Exception:
+        pass
