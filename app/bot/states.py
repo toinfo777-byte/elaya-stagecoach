@@ -1,6 +1,5 @@
 # app/bot/states.py
-from aiogram.fsm.state import StatesGroup, State
+from aiogram.fsm.state import State, StatesGroup
 
-class FeedbackStates(StatesGroup):
-    # ждём короткий текст отзыва
-    wait_text = State()
+class CoachStates(StatesGroup):
+    wait_feeling = State()   # ждём одно слово после таймера
