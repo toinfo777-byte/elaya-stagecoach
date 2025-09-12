@@ -1,4 +1,3 @@
-# app/bot/handlers/feedback.py
 from aiogram import Router, F
 from aiogram.types import CallbackQuery, Message
 from aiogram.fsm.context import FSMContext
@@ -10,38 +9,48 @@ from app.storage.repo import session_scope, log_event
 router = Router(name="feedback2")
 
 
-# ---- 1) Оценка эмодзи: 🔥/👌/😐 -------------------------------------------
-@router.callback_query(F.data.startswith("fb:rate:"))
+# утилита: понять тип колбэка и значение
+def _parse_rate(data: str) -> str | None:
+    # принимает: "fb:rate:hot", "feedback:rate:ok", "rate:meh"
+    if not data:
+        return None
+    if data.startswith(("fb:rate:", "feedback:rate:", "rate:")):
+        return data.split(":")[-1]  # hot|ok|meh
+    return None
+
+
+def _is_text_cb(data: str) -> bool:
+    # принимает: "fb:text", "feedback:text", "text_feedback", "rate:text" (на всякий на будущее)
+    return (
+        data in {"fb:text", "feedback:text", "text_feedback"}
+        or data.endswith(":text")
+    )
+
+
+# ---- 1) клик на оценку 🔥/👌/😐 ---------------------------------------------
+@router.callback_query(F.data.func(lambda d: _parse_rate(d) is not None))
 async def on_feedback_rate(cq: CallbackQuery, state: FSMContext):
-    # data: "fb:rate:hot|ok|meh"
-    try:
-        _, _, rate = cq.data.split(":", 2)
-    except Exception:
-        await cq.answer("Что-то пошло не так…", show_alert=False)
+    rate = _parse_rate(cq.data)
+    if not rate:
+        await cq.answer("Что-то пошло не так…")
         return
 
-    # логируем событие
     with session_scope() as s:
-        tg_id = cq.from_user.id
-        # у вас есть user_id? Если нужно — найдёте по tg_id в логере
         log_event(s, user_id=None, name="feedback_added", payload={"kind": rate, "src": "inline"})
 
-    # быстрый ответ на клик, чтобы “часики” исчезли
-    await cq.answer("Спасибо за отзыв!", show_alert=False)
-
-    # можно мягко подтвердить сообщением (не меняя вашу разметку)
+    await cq.answer("Спасибо за отзыв!")          # снять «часики»
     await cq.message.answer("Принято. Спасибо! 🙌")
 
 
-# ---- 2) Запрос “1 фраза” ---------------------------------------------------
-@router.callback_query(F.data == "fb:text")
+# ---- 2) запрос текста ✍️ ---------------------------------------------------
+@router.callback_query(F.data.func(_is_text_cb))
 async def on_feedback_text_request(cq: CallbackQuery, state: FSMContext):
     await state.set_state(FeedbackStates.wait_text)
-    await cq.answer()  # снимаем "часики"
+    await cq.answer()
     await cq.message.answer("Напишите короткую фразу-отзыв одним сообщением.")
 
 
-# ---- 3) Приём текста в состоянии wait_text ---------------------------------
+# ---- 3) приём текста --------------------------------------------------------
 @router.message(FeedbackStates.wait_text)
 async def on_feedback_text_submit(msg: Message, state: FSMContext):
     text = (msg.text or "").strip()
@@ -56,8 +65,7 @@ async def on_feedback_text_submit(msg: Message, state: FSMContext):
     await msg.answer("Спасибо! Ваш отзыв сохранён. 🙏")
 
 
-# ---- 4) (опционально) показать клавиатуру ещё раз --------------------------
-# Если где-то нужно пересоздать инлайн-клаву:
+# ---- 4) хелпер для показа клавы ещё раз (если нужно где-то вызвать) --------
 async def send_feedback_inline(to_message: Message):
     await to_message.answer(
         "Как прошёл этюд? Оцените или оставьте краткий отзыв:",
