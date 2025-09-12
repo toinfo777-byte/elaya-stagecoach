@@ -22,7 +22,7 @@ from app.routers.coach import router as coach_router               # наста�
 from app.routers.training import router as training_router         # тренировка
 from app.routers.casting import router as casting_router           # мини-кастинг
 from app.routers.progress import router as progress_router         # прогресс
-from app.routers.feedback import router as feedback_router         # отзывы (и метрика feedback_added)
+# from app.routers.feedback import router as feedback_router       # ⛔️ УБРАНО: старый роутер отзывов
 from app.routers.system import router as system_router             # /help, /privacy, /whoami, /version, /health
 from app.routers.settings import router as settings_router         # тех.настройки
 from app.routers.admin import router as admin_router               # админка
@@ -126,8 +126,8 @@ async def main():
         # наш новый обработчик отзывов (кнопки 🔥/👌/😐 + «1 фраза»)
         feedback2_router,
 
-        # существующий проектный роутер отзывов (если есть своя метрика/логика)
-        feedback_router,
+        # старый роутер отзывов отключён, чтобы не конфликтовать
+        # feedback_router,
 
         system_router,
         settings_router,
