@@ -3,7 +3,7 @@ import asyncio
 import logging
 from datetime import datetime, timedelta, timezone
 
-from aiogram import Bot, Dispatcher
+from aiogram import Bot, Dispatcher, BaseMiddleware
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.types import BotCommand, BotCommandScopeAllPrivateChats
 
@@ -40,10 +40,18 @@ from app.routers.debug import router as debug_router
 # Обслуживание SQLite
 from app.utils.maintenance import backup_sqlite, vacuum_sqlite
 
+
+# ===== ЛОГИ (усилено) =====
 logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
+    level=logging.DEBUG,  # подробные логи по умолчанию
+    format="%(asctime)s | %(levelname)-8s | %(name)s | %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
 )
+# тише самые «шумные» либы, если нужно — можно поднять до DEBUG
+logging.getLogger("aiogram").setLevel(logging.DEBUG)
+logging.getLogger("aiohttp").setLevel(logging.INFO)
+logging.getLogger("asyncio").setLevel(logging.INFO)
+
 log = logging.getLogger(__name__)
 
 
@@ -99,21 +107,38 @@ async def setup_commands(bot: Bot) -> None:
 
 
 # ====== простая прослойка: логируем КАЖДЫЙ апдейт ======
-from aiogram import BaseMiddleware
 class TraceAllMiddleware(BaseMiddleware):
     async def __call__(self, handler, event, data):
         try:
-            # Аккуратный лог, чтобы видеть хоть что-то по каждому апдейту
             etype = type(event).__name__
             preview = None
-            if hasattr(event, "text") and event.text:
+            if hasattr(event, "text") and getattr(event, "text"):
                 preview = event.text
-            elif hasattr(event, "data") and event.data:
+            elif hasattr(event, "data") and getattr(event, "data"):
                 preview = event.data
             log.info("UPDATE [%s]: %s", etype, preview)
         except Exception:
-            pass
+            log.exception("TraceAllMiddleware logging failed")
         return await handler(event, data)
+
+
+async def _log_bot_info(bot: Bot) -> None:
+    """Подробная диагностика при старте."""
+    try:
+        me = await bot.get_me()
+        wh = await bot.get_webhook_info()
+        log.info(
+            "Bot info: id=%s, username=@%s, name=%s",
+            me.id, me.username, me.first_name,
+        )
+        log.info(
+            "Webhook: url='%s', has_custom_certificate=%s, pending=%s, allowed=%s",
+            wh.url or "", getattr(wh, "has_custom_certificate", False),
+            getattr(wh, "pending_update_count", 0),
+            getattr(wh, "allowed_updates", None),
+        )
+    except Exception as e:
+        log.warning("Failed to read bot/webhook info: %s", e)
 
 
 # ====== main ======
@@ -169,6 +194,8 @@ async def main():
             await bot.delete_webhook(drop_pending_updates=False)
         except Exception as e:
             log.warning("delete_webhook failed: %s", e)
+
+        await _log_bot_info(bot)
 
         try:
             await setup_commands(bot)
