@@ -15,13 +15,13 @@ from app.storage.repo import init_db
 from app.routers.smoke import router as smoke_router               # /ping, /health
 from app.routers.apply import router as apply_router               # заявка
 from app.routers.deeplink import router as deeplink_router         # диплинки /start <payload>
-from app.routers.shortcuts import router as shortcuts_router       # шорткаты (/training, /casting, кнопки) В ЛЮБОМ состоянии
-from app.routers.onboarding import router as onboarding_router     # онбординг (/start)
+from app.routers.shortcuts import router as shortcuts_router       # /training, /casting и кнопки
+from app.routers.onboarding import router as onboarding_router     # /start
 from app.routers.coach import router as coach_router               # наставник
 from app.routers.training import router as training_router         # тренировка
 from app.routers.casting import router as casting_router           # мини-кастинг
 from app.routers.progress import router as progress_router         # прогресс
-from app.routers.feedback import router as feedback_router         # отзывы (и метрика feedback_added)
+from app.routers.feedback import router as feedback_router         # старые отзывы (если есть)
 from app.routers.system import router as system_router             # /help, /privacy, /whoami, /version, /health
 from app.routers.settings import router as settings_router         # тех.настройки
 from app.routers.admin import router as admin_router               # админка
@@ -36,11 +36,15 @@ from app.bot.handlers.feedback import router as feedback2_router
 # Обслуживание SQLite
 from app.utils.maintenance import backup_sqlite, vacuum_sqlite
 
+
+# ========= ЛОГИ =========
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
 )
 log = logging.getLogger(__name__)
+# включим подробный лог входящих апдейтов
+logging.getLogger("aiogram").setLevel(logging.DEBUG)
 
 
 # ====== фоновые задачи обслуживания БД ======
@@ -75,30 +79,31 @@ async def _vacuum_loop():
             log.exception("Vacuum failed: %s", e)
 
 
-# ====== меню команд ======
+# ====== (опционально) установка /команд ======
+# Можно включить позже, когда всё стабильно, чтобы исключить странности с BotCommand.
 async def setup_commands(bot: Bot) -> None:
-    commands: list[types.BotCommand] = [
-        types.BotCommand(command="start",     description="Начать"),
-        types.BotCommand(command="apply",     description="Путь лидера (заявка)"),
-        types.BotCommand(command="coach_on",  description="Включить наставника"),
-        types.BotCommand(command="coach_off", description="Выключить наставника"),
-        types.BotCommand(command="ask",       description="Спросить наставника"),
-        types.BotCommand(command="training",  description="Тренировка дня"),
-        types.BotCommand(command="casting",   description="Мини-кастинг"),
-        types.BotCommand(command="progress",  description="Мой прогресс"),
-        types.BotCommand(command="cancel",    description="Сбросить и открыть меню"),
-        types.BotCommand(command="help",      description="Справка"),
-        types.BotCommand(command="privacy",   description="Политика"),
-        types.BotCommand(command="version",   description="Версия"),
-    ]
-
     try:
+        commands: list[types.BotCommand] = [
+            types.BotCommand(command="start",     description="Начать"),
+            types.BotCommand(command="apply",     description="Путь лидера (заявка)"),
+            types.BotCommand(command="coach_on",  description="Включить наставника"),
+            types.BotCommand(command="coach_off", description="Выключить наставника"),
+            types.BotCommand(command="ask",       description="Спросить наставника"),
+            types.BotCommand(command="training",  description="Тренировка дня"),
+            types.BotCommand(command="casting",   description="Мини-кастинг"),
+            types.BotCommand(command="progress",  description="Мой прогресс"),
+            types.BotCommand(command="cancel",    description="Сбросить и открыть меню"),
+            types.BotCommand(command="help",      description="Справка"),
+            types.BotCommand(command="privacy",   description="Политика"),
+            types.BotCommand(command="version",   description="Версия"),
+        ]
         await bot.set_my_commands(
             commands=commands,
             scope=types.BotCommandScopeAllPrivateChats(),
         )
         log.info("Bot commands set successfully")
     except Exception as e:
+        # если тут что-то не так — просто логируем и идём дальше (бот не падает)
         log.warning("setup_commands failed: %s", e)
 
 
@@ -130,10 +135,10 @@ async def main():
         casting_router,
         progress_router,
 
-        # наш новый обработчик отзывов (кнопки 🔥/👌/😐 + «1 фраза»)
+        # Наш новый обработчик отзывов (кнопки 🔥/👌/😐 + «1 фраза»)
         feedback2_router,
 
-        # существующий проектный роутер отзывов (если есть своя метрика/логика)
+        # Существующий проектный роутер отзывов (если есть своя метрика/логика)
         feedback_router,
 
         system_router,
@@ -148,12 +153,15 @@ async def main():
         log.info("Included router: %s", getattr(r, "name", r))
 
     async with bot:
+        # убираем вебхук и не дропаем очередь
         try:
             await bot.delete_webhook(drop_pending_updates=False)
         except Exception as e:
             log.warning("delete_webhook failed: %s", e)
 
-        await setup_commands(bot)
+        # ⛔️ ВРЕМЕННО ВЫКЛЮЧЕНО, чтобы точно не мешало запуску.
+        # Раскомментируй строку ниже, когда убедимся, что всё ок.
+        # await setup_commands(bot)
 
         # фоновые задачи
         asyncio.create_task(_backup_loop())
