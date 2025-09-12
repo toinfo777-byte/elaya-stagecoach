@@ -11,31 +11,33 @@ from app.middlewares.error_handler import ErrorsMiddleware
 from app.middlewares.source_tags import SourceTagsMiddleware
 from app.storage.repo import init_db
 
-# ===== РОУТЕРЫ (явные импорты и порядок важен) =====
-from app.routers.smoke import router as smoke_router               # /ping, /health
-from app.routers.apply import router as apply_router               # заявка
-from app.routers.deeplink import router as deeplink_router         # диплинки /start <payload>
-from app.routers.shortcuts import router as shortcuts_router       # /training, /casting и кнопки
-from app.routers.onboarding import router as onboarding_router     # /start
-from app.routers.coach import router as coach_router               # наставник
-from app.routers.training import router as training_router         # тренировка
-from app.routers.casting import router as casting_router           # мини-кастинг
-from app.routers.progress import router as progress_router         # прогресс
-from app.routers.feedback import router as feedback_router         # старые отзывы (если есть)
-from app.routers.system import router as system_router             # /help, /privacy, /whoami, /version, /health
-from app.routers.settings import router as settings_router         # тех.настройки
-from app.routers.admin import router as admin_router               # админка
-from app.routers.premium import router as premium_router           # плата/заглушки
-from app.routers.metrics import router as metrics_router           # ✅ /metrics (админы)
-from app.routers.cancel import router as cancel_router             # глобальная отмена /cancel
-from app.routers.menu import router as menu_router                 # меню (всегда последним)
+# ===== РОУТЕРЫ =====
+from app.routers.smoke import router as smoke_router
+from app.routers.apply import router as apply_router
+from app.routers.deeplink import router as deeplink_router
+from app.routers.shortcuts import router as shortcuts_router
+from app.routers.onboarding import router as onboarding_router
+from app.routers.coach import router as coach_router
+from app.routers.training import router as training_router
+from app.routers.casting import router as casting_router
+from app.routers.progress import router as progress_router
+from app.routers.feedback import router as feedback_router
+from app.routers.system import router as system_router
+from app.routers.settings import router as settings_router
+from app.routers.admin import router as admin_router
+from app.routers.premium import router as premium_router
+from app.routers.metrics import router as metrics_router
+from app.routers.cancel import router as cancel_router
+from app.routers.menu import router as menu_router
 
-# ⬇️ НОВОЕ: универсальный обработчик отзывов (кнопки 🔥/👌/😐 + «1 фраза»)
+# новый универсальный обработчик отзывов (кнопки 🔥/👌/😐 + «1 фраза»)
 from app.bot.handlers.feedback import router as feedback2_router
+
+# диагностический роутер (только логирование апдейтов)
+from app.routers.debug import router as debug_router
 
 # Обслуживание SQLite
 from app.utils.maintenance import backup_sqlite, vacuum_sqlite
-
 
 # ========= ЛОГИ =========
 logging.basicConfig(
@@ -43,9 +45,7 @@ logging.basicConfig(
     format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
 )
 log = logging.getLogger(__name__)
-# включим подробный лог входящих апдейтов
-logging.getLogger("aiogram").setLevel(logging.DEBUG)
-
+logging.getLogger("aiogram").setLevel(logging.DEBUG)  # детальные логи апдейтов
 
 # ====== фоновые задачи обслуживания БД ======
 async def _sleep_until_utc(hour: int, minute: int = 0, dow: int | None = None):
@@ -58,7 +58,6 @@ async def _sleep_until_utc(hour: int, minute: int = 0, dow: int | None = None):
             target += timedelta(days=1)
     await asyncio.sleep((target - now).total_seconds())
 
-
 async def _backup_loop():
     while True:
         await _sleep_until_utc(2, 0)  # ежедневно 02:00 UTC
@@ -67,7 +66,6 @@ async def _backup_loop():
             log.info("Backup done: %s", path)
         except Exception as e:
             log.exception("Backup failed: %s", e)
-
 
 async def _vacuum_loop():
     while True:
@@ -78,9 +76,7 @@ async def _vacuum_loop():
         except Exception as e:
             log.exception("Vacuum failed: %s", e)
 
-
-# ====== (опционально) установка /команд ======
-# Можно включить позже, когда всё стабильно, чтобы исключить странности с BotCommand.
+# (опционально) установка /команд — отключено, чтобы не мешало запуску
 async def setup_commands(bot: Bot) -> None:
     try:
         commands: list[types.BotCommand] = [
@@ -103,9 +99,7 @@ async def setup_commands(bot: Bot) -> None:
         )
         log.info("Bot commands set successfully")
     except Exception as e:
-        # если тут что-то не так — просто логируем и идём дальше (бот не падает)
         log.warning("setup_commands failed: %s", e)
-
 
 # ====== main ======
 async def main():
@@ -118,49 +112,46 @@ async def main():
     dp = Dispatcher(storage=MemoryStorage())
 
     # middlewares
-    dp.message.middleware(SourceTagsMiddleware())      # источник first/last_source
+    dp.message.middleware(SourceTagsMiddleware())
     dp.callback_query.middleware(SourceTagsMiddleware())
-    dp.message.middleware(ErrorsMiddleware())          # единый перехват ошибок
+    dp.message.middleware(ErrorsMiddleware())
     dp.callback_query.middleware(ErrorsMiddleware())
 
     # ПОРЯДОК ВАЖЕН!
     for r in (
-        smoke_router,        # быстрые проверки
+        smoke_router,
         apply_router,
-        deeplink_router,     # диплинки должны идти РАНО
-        shortcuts_router,    # /training, /casting и кнопки — в любом состоянии
-        onboarding_router,   # /start попадает сюда раньше coach
+        deeplink_router,
+        shortcuts_router,
+        onboarding_router,
         coach_router,
         training_router,
         casting_router,
         progress_router,
 
-        # Наш новый обработчик отзывов (кнопки 🔥/👌/😐 + «1 фраза»)
-        feedback2_router,
-
-        # Существующий проектный роутер отзывов (если есть своя метрика/логика)
-        feedback_router,
+        feedback2_router,    # новый обработчик отзывов
+        feedback_router,     # проектный (если есть своя логика/метрики)
 
         system_router,
         settings_router,
         admin_router,
         premium_router,
-        metrics_router,      # ✅ метрики до cancel/menu
-        cancel_router,       # глобальная отмена до меню
+        metrics_router,
+        cancel_router,
+
+        debug_router,        # <— логируем любые апдейты, оставить перед меню
         menu_router,         # меню — строго последним
     ):
         dp.include_router(r)
         log.info("Included router: %s", getattr(r, "name", r))
 
     async with bot:
-        # убираем вебхук и не дропаем очередь
         try:
             await bot.delete_webhook(drop_pending_updates=False)
         except Exception as e:
             log.warning("delete_webhook failed: %s", e)
 
-        # ⛔️ ВРЕМЕННО ВЫКЛЮЧЕНО, чтобы точно не мешало запуску.
-        # Раскомментируй строку ниже, когда убедимся, что всё ок.
+        # Оставляем выключенным ради стабильности
         # await setup_commands(bot)
 
         # фоновые задачи
@@ -169,10 +160,9 @@ async def main():
 
         await dp.start_polling(
             bot,
-            allowed_updates=dp.resolve_used_update_types(),
+            allowed_updates=None,  # забираем вообще все типы апдейтов
             polling_timeout=30,
         )
-
 
 if __name__ == "__main__":
     asyncio.run(main())
