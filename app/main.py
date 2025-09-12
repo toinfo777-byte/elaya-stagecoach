@@ -15,14 +15,13 @@ from app.storage.repo import init_db
 from app.routers.smoke import router as smoke_router               # /ping, /health
 from app.routers.apply import router as apply_router               # заявка
 from app.routers.deeplink import router as deeplink_router         # диплинки /start <payload>
-from app.routers.shortcuts import router as shortcuts_router       # шорткаты (/training, /casting, кнопки) в ЛЮБОМ состоянии
+from app.routers.shortcuts import router as shortcuts_router       # шорткаты (/training, /casting, кнопки) В ЛЮБОМ состоянии
 from app.routers.onboarding import router as onboarding_router     # онбординг (/start)
 from app.routers.coach import router as coach_router               # наставник
 from app.routers.training import router as training_router         # тренировка
 from app.routers.casting import router as casting_router           # мини-кастинг
 from app.routers.progress import router as progress_router         # прогресс
-# ⬇️ новый универсальный обработчик отзывов (кнопки 🔥/👌/😐 + «1 фраза»)
-from app.bot.handlers.feedback import router as feedback2_router
+from app.routers.feedback import router as feedback_router         # отзывы (и метрика feedback_added)
 from app.routers.system import router as system_router             # /help, /privacy, /whoami, /version, /health
 from app.routers.settings import router as settings_router         # тех.настройки
 from app.routers.admin import router as admin_router               # админка
@@ -31,9 +30,11 @@ from app.routers.metrics import router as metrics_router           # ✅ /metric
 from app.routers.cancel import router as cancel_router             # глобальная отмена /cancel
 from app.routers.menu import router as menu_router                 # меню (всегда последним)
 
+# ⬇️ НОВОЕ: универсальный обработчик отзывов (кнопки 🔥/👌/😐 + «1 фраза»)
+from app.bot.handlers.feedback import router as feedback2_router
+
 # Обслуживание SQLite
 from app.utils.maintenance import backup_sqlite, vacuum_sqlite
-
 
 logging.basicConfig(
     level=logging.INFO,
@@ -76,27 +77,29 @@ async def _vacuum_loop():
 
 # ====== меню команд ======
 async def setup_commands(bot: Bot) -> None:
-    # Описываем команды простыми dict'ами и валидируем их pydantic'ом.
-    raw = [
-        {"command": "start",     "description": "Начать"},
-        {"command": "apply",     "description": "Путь лидера (заявка)"},
-        {"command": "coach_on",  "description": "Включить наставника"},
-        {"command": "coach_off", "description": "Выключить наставника"},
-        {"command": "ask",       "description": "Спросить наставника"},
-        {"command": "training",  "description": "Тренировка дня"},
-        {"command": "casting",   "description": "Мини-кастинг"},
-        {"command": "progress",  "description": "Мой прогресс"},
-        {"command": "cancel",    "description": "Сбросить и открыть меню"},
-        {"command": "help",      "description": "Справка"},
-        {"command": "privacy",   "description": "Политика"},
-        {"command": "version",   "description": "Версия"},
+    commands: list[types.BotCommand] = [
+        types.BotCommand(command="start",     description="Начать"),
+        types.BotCommand(command="apply",     description="Путь лидера (заявка)"),
+        types.BotCommand(command="coach_on",  description="Включить наставника"),
+        types.BotCommand(command="coach_off", description="Выключить наставника"),
+        types.BotCommand(command="ask",       description="Спросить наставника"),
+        types.BotCommand(command="training",  description="Тренировка дня"),
+        types.BotCommand(command="casting",   description="Мини-кастинг"),
+        types.BotCommand(command="progress",  description="Мой прогресс"),
+        types.BotCommand(command="cancel",    description="Сбросить и открыть меню"),
+        types.BotCommand(command="help",      description="Справка"),
+        types.BotCommand(command="privacy",   description="Политика"),
+        types.BotCommand(command="version",   description="Версия"),
     ]
-    cmds = [types.BotCommand.model_validate(item) for item in raw]
 
-    await bot.set_my_commands(
-        commands=cmds,
-        scope=types.BotCommandScopeAllPrivateChats(),
-    )
+    try:
+        await bot.set_my_commands(
+            commands=commands,
+            scope=types.BotCommandScopeAllPrivateChats(),
+        )
+        log.info("Bot commands set successfully")
+    except Exception as e:
+        log.warning("setup_commands failed: %s", e)
 
 
 # ====== main ======
@@ -127,8 +130,11 @@ async def main():
         casting_router,
         progress_router,
 
-        # наш новый обработчик отзывов
+        # наш новый обработчик отзывов (кнопки 🔥/👌/😐 + «1 фраза»)
         feedback2_router,
+
+        # существующий проектный роутер отзывов (если есть своя метрика/логика)
+        feedback_router,
 
         system_router,
         settings_router,
@@ -147,10 +153,7 @@ async def main():
         except Exception as e:
             log.warning("delete_webhook failed: %s", e)
 
-        try:
-            await setup_commands(bot)
-        except Exception as e:
-            log.warning("setup_commands failed: %s", e)
+        await setup_commands(bot)
 
         # фоновые задачи
         asyncio.create_task(_backup_loop())
