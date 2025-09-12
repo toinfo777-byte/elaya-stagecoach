@@ -1,79 +1,70 @@
 # app/bot/handlers/feedback.py
-from __future__ import annotations
-import logging
-
 from aiogram import Router, F
-from aiogram.types import CallbackQuery, Message
+from aiogram.types import CallbackQuery, Message, ReplyKeyboardMarkup, KeyboardButton
 from aiogram.fsm.context import FSMContext
 
 from app.bot.states import FeedbackStates
 from app.bot.keyboards.feedback import feedback_inline_kb
+from app.storage.repo import session_scope, log_event
 
-log = logging.getLogger("feedback2")
-router = Router(name="feedback2")
+router = Router()
+router.name = "feedback2"
 
+# Простая клавиатура «В меню» — шлёт /cancel (у тебя это открывает меню)
+def menu_kb() -> ReplyKeyboardMarkup:
+    return ReplyKeyboardMarkup(
+        keyboard=[[KeyboardButton(text="/cancel")]],
+        resize_keyboard=True,
+        one_time_keyboard=True,
+    )
 
-# ---- helpers -------------------------------------------------
-def _parse_rate(data: str | None) -> str | None:
-    if not data:
-        return None
-    # принимаем любые варианты: "fb:rate:hot", "feedback:rate:ok", "rate:meh"
-    if ":rate:" in data:
-        return data.split(":")[-1]
-    if data.startswith("rate:") and data.count(":") == 1:
-        return data.split(":")[1]
-    return None
-
-def _is_text_cb(data: str | None) -> bool:
-    if not data:
-        return False
-    # "fb:text", "feedback:text", "text_feedback", любые *:text
-    return data.endswith(":text") or data in {"fb:text", "feedback:text", "text_feedback"}
-
-
-# ---- обработчики ---------------------------------------------
-@router.callback_query(F.data.func(lambda d: _parse_rate(d) is not None))
-async def on_feedback_rate(cq: CallbackQuery, state: FSMContext):
-    # логируем, чтобы видеть в логах факт нажатия
-    log.info("feedback rate click: %s", cq.data)
+# 1) Поймать клик на оценку (🔥/👌/😐)
+@router.callback_query(F.data.startswith("fb:rate:"))
+async def on_feedback_rate(cb: CallbackQuery, state: FSMContext):
+    # fb:rate:hot | ok | meh
     try:
-        await cq.answer("Спасибо за отзыв! 👍", show_alert=False)
+        _, _, rate = (cb.data or "").split(":", 2)
     except Exception:
-        pass
+        rate = "unknown"
+
+    # логируем событие (не ломаем основной поток)
     try:
-        await cq.message.answer("Принято. Спасибо! 🙌")
+        with session_scope() as s:
+            uid = cb.from_user.id if cb.from_user else None
+            log_event(s, user_id=uid, name="feedback_rate", payload={"rate": rate})
     except Exception:
         pass
 
-
-@router.callback_query(F.data.func(_is_text_cb))
-async def on_feedback_text_request(cq: CallbackQuery, state: FSMContext):
-    log.info("feedback text requested: %s", cq.data)
-    try:
-        await state.set_state(FeedbackStates.wait_text)
-        await cq.answer()
-        await cq.message.answer("Напишите короткую фразу-отзыв одним сообщением.")
-    except Exception:
-        pass
+    await cb.answer("Спасибо за отклик!")
+    await cb.message.answer(
+        "Хочешь добавить короткий комментарий? Напиши 1 фразу и я сохраню.\n"
+        "Или нажми /cancel чтобы вернуться в меню.",
+        reply_markup=menu_kb(),
+    )
+    await state.set_state(FeedbackStates.wait_text)
 
 
-@router.message(FeedbackStates.wait_text)
-async def on_feedback_text_submit(msg: Message, state: FSMContext):
+# 2) Кнопка «✍️ 1 фраза»
+@router.callback_query(F.data == "fb:phrase")
+async def on_feedback_phrase(cb: CallbackQuery, state: FSMContext):
+    await cb.answer()
+    await cb.message.answer(
+        "Напиши, пожалуйста, 1 фразу — что было ценного/что улучшить.",
+        reply_markup=menu_kb(),
+    )
+    await state.set_state(FeedbackStates.wait_text)
+
+
+# 3) Пришёл текст «1 фраза»
+@router.message(FeedbackStates.wait_text, F.text.len() > 0)
+async def save_feedback_text(msg: Message, state: FSMContext):
     text = (msg.text or "").strip()
-    if not text:
-        await msg.answer("Пришлите, пожалуйста, обычный текст без вложений.")
-        return
-    log.info("feedback text received: %s", text)
-    await state.clear()
-    await msg.answer("Спасибо! Ваш отзыв сохранён. 🙏")
-
-
-# Фолбэк: если вдруг прилетит любой колбэк, начинающийся с fb:
-@router.callback_query(F.data.func(lambda d: isinstance(d, str) and d.startswith("fb:")))
-async def on_feedback_fallback(cq: CallbackQuery):
-    log.info("feedback fallback handled: %s", cq.data)
     try:
-        await cq.answer("Принято!", show_alert=False)
-        await cq.message.answer("Спасибо! 🙌")
+        with session_scope() as s:
+            uid = msg.from_user.id if msg.from_user else None
+            log_event(s, user_id=uid, name="feedback_text", payload={"text": text})
     except Exception:
         pass
+
+    await msg.answer("Сохранил. Спасибо! 🙌", reply_markup=None)
+    await state.clear()
