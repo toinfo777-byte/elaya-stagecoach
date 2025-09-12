@@ -2,21 +2,25 @@
 from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery
 
-router = Router()
-router.name = "debug"
+import logging
+log = logging.getLogger(__name__)
+
+router = Router(name="debug")
 
 @router.message()
-async def any_message(m: Message):
-    # ничему не мешаем — просто лог для диагностики
-    text = (m.text or "").strip()
-    m.bot.logger.info("DBG MSG from %s: %r", m.from_user.id if m.from_user else "?", text)
+async def debug_all_messages(m: Message):
+    log.info("DBG message: chat=%s user=%s text=%r",
+             m.chat.id, m.from_user.id if m.from_user else None, m.text)
+    # ничего не отвечаем, просто логируем
 
 @router.callback_query()
-async def any_callback(cb: CallbackQuery):
-    data = (cb.data or "").strip()
-    cb.bot.logger.info("DBG CB from %s: %r", cb.from_user.id if cb.from_user else "?", data)
-    # обязательно отвечаем, чтобы Telegram убирал «часики»
+async def debug_all_callbacks(cq: CallbackQuery):
+    log.info("DBG callback: chat=%s user=%s data=%r",
+             cq.message.chat.id if cq.message else None,
+             cq.from_user.id if cq.from_user else None,
+             cq.data)
+    # обязательно отвечаем на callback, чтобы «крутилка» не висела
     try:
-        await cb.answer()
+        await cq.answer("ok")   # короткий ACK
     except Exception:
         pass
