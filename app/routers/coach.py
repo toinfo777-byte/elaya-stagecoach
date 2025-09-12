@@ -1,244 +1,68 @@
 # app/routers/coach.py
-from __future__ import annotations
-
-import asyncio
-import time
-from datetime import datetime, timedelta
-from typing import Iterable
-
 from aiogram import Router, F
-from aiogram.enums import ChatAction
-from aiogram.filters import Command, StateFilter
-from aiogram.types import Message, CallbackQuery, MessageEntity
+from aiogram.types import Message, CallbackQuery
 from aiogram.fsm.context import FSMContext
+from datetime import datetime, timedelta, timezone
 
-from app.config import settings
-from app.keyboards.coach import timer_kb
-from app.services.coach_rules import pick_drill_by_keywords
-from app.storage.repo import session_scope, log_event          # ✅ метрики
-from app.storage.models import User
+from app.bot.states import CoachStates
 
 router = Router(name="coach")
 
-# --- флаги и состояния ---
-_COACH_USERS: dict[int, dict] = {}      # user_id -> {"until": dt, "last": monotonic_ts}
-_ALLOWED_CHATS: set[int] = set()        # чаты, где включён групповой режим
-_MAINTENANCE: bool = False              # быстрый выключатель
-_GROUPS_DISABLED: bool = False          # глобально запретить групповой режим
+# Хелпер: сохранить «последний шаг коуча выполнен»
+async def _mark_feeling_saved(state: FSMContext) -> None:
+    data = await state.storage.get_data(bot=state.bot, key=state.key)
+    data = dict(data or {})
+    data["coach_last"] = "feeling_saved"
+    data["coach_last_ts"] = datetime.now(timezone.utc).timestamp()
+    await state.storage.set_data(bot=state.bot, key=state.key, data=data)
 
-_TTL_MIN_DEFAULT = 15
-_RATE_SEC_DEFAULT = 5
-
-_MENU_TEXTS: set[str] = {
-    "🎯 Тренировка дня",
-    "📈 Мой прогресс",
-    "Путь лидера",
-    "🎭 Мини-кастинг",
-    "🔐 Политика",
-    "💬 Помощь",
-    "⚙️ Настройки",
-    "⭐ Расширенная версия",
-    "🗑 Удалить профиль",
-}
-
-def _has_bot_command(entities: Iterable[MessageEntity] | None) -> bool:
-    if not entities:
+# Хелпер: проверка — недавно уже сохраняли чувство?
+async def _recently_saved(state: FSMContext, within: int = 180) -> bool:
+    data = await state.storage.get_data(bot=state.bot, key=state.key)
+    ts = (data or {}).get("coach_last_ts")
+    if not ts:
         return False
-    return any(getattr(e, "type", None) == "bot_command" for e in entities)
+    return (datetime.now(timezone.utc).timestamp() - float(ts)) < within and \
+           (data or {}).get("coach_last") == "feeling_saved"
 
-def _coach_on(uid: int):
-    ttl_min = getattr(settings, "coach_ttl_min", _TTL_MIN_DEFAULT)
-    _COACH_USERS[uid] = {
-        "until": datetime.utcnow() + timedelta(minutes=ttl_min),
-        "last": 0.0,
-    }
-
-# ===== ПУБЛИЧНАЯ функция (используется в deeplink и командах) =====
-async def coach_on(m: Message):
-    if _MAINTENANCE:
-        await m.answer("🔧 Идут техработы. Попробуйте позже.")
-        return
-    _coach_on(m.from_user.id)
-
-    # ✅ метрика: coach_on
-    try:
-        with session_scope() as s:
-            u = s.query(User).filter_by(tg_id=m.from_user.id).first()
-            if u:
-                log_event(s, u.id, "coach_on", {})
-                s.commit()
-    except Exception:
-        pass
-
-    await m.answer(
-        "🤝 Личный режим наставника включён на 15 минут. "
-        "Сформулируйте коротко проблему — отвечу и предложу этюд."
+# Старт мини-шага коуча (пример: вы его зовёте в нужном месте вашего сценария)
+@router.message(F.text == "/coach_on")
+async def coach_on(msg: Message, state: FSMContext):
+    await msg.answer(
+        "Коротко: попробуй это — Пауза как правда (4-2-6-2).\n"
+        "Шаги: Вдох 4 → Пауза 2 → Выдох 6 → Пауза 2.\n"
+        "Признак: Что произошло после паузы?\n"
+        "Запусти таймер и отметь ощущение одним словом.\n\n"
+        "⏱ Таймер 60 сек"
     )
+    await state.set_state(CoachStates.wait_feeling)
 
-# ===== команды =====
-@router.message(StateFilter("*"), Command("coach_on"))
-async def cmd_on(m: Message):
-    await coach_on(m)
+# Принимаем ОДНО слово после таймера
+@router.message(CoachStates.wait_feeling, F.text)
+async def coach_feeling(msg: Message, state: FSMContext):
+    text = (msg.text or "").strip()
 
-@router.message(StateFilter("*"), Command("coach_off"))
-async def cmd_off(m: Message):
-    _COACH_USERS.pop(m.from_user.id, None)
-    await m.answer("👋 Личный режим наставника выключен.")
-
-@router.message(StateFilter("*"), Command("coach_status"))
-async def cmd_status(m: Message):
-    uid = m.from_user.id
-    st = _COACH_USERS.get(uid)
-    personal = "включён до " + st["until"].strftime("%H:%M UTC") if st and datetime.utcnow() < st["until"] else "выключен"
-    if m.chat.type in {"group", "supergroup"}:
-        group = "включён" if m.chat.id in _ALLOWED_CHATS and not _GROUPS_DISABLED else "выключен"
-        await m.answer(f"📊 Статус наставника:\n• Личный режим: {personal}\n• Групповой режим чата: {group}")
-    else:
-        await m.answer(f"📊 Статус наставника:\n• Личный режим: {personal}")
-
-@router.message(StateFilter("*"), Command("ask"))
-@router.message(StateFilter("*"), F.text.regexp(r"^/вопрос\s+.+"))
-async def ask_cmd(m: Message):
-    if _MAINTENANCE:
-        return await m.answer("🔧 Идут техработы. Попробуйте позже.")
-    text = m.text.split(maxsplit=1)[1] if " " in m.text else ""
-    await _handle_question(m, text)
-
-@router.message(
-    StateFilter("*"),
-    F.chat.type.in_({"group", "supergroup"}),
-    Command("coach_toggle")
-)
-async def coach_toggle(m: Message):
-    if _MAINTENANCE or _GROUPS_DISABLED:
-        return await m.answer("🔕 Групповой режим сейчас недоступен.")
-    cid = m.chat.id
-    if cid in _ALLOWED_CHATS:
-        _ALLOWED_CHATS.remove(cid)
-        await m.answer("🔕 Групповой режим этого чата **выключён**.")
-    else:
-        _ALLOWED_CHATS.add(cid)
-        await m.answer("🔔 Групповой режим этого чата **включён**.")
-
-# ===== пассивное слушание =====
-# ВАЖНО: исключаем тексты меню на уровне фильтра,
-# чтобы этот хендлер их вообще не перехватывал.
-@router.message(StateFilter("*"), F.text & ~F.text.in_(_MENU_TEXTS))
-async def passive_listen(m: Message, state: FSMContext):
-    if _MAINTENANCE:
+    # простая валидация «одно короткое слово»
+    if not text or len(text.split()) > 2 or len(text) > 32:
+        await msg.answer("Одним коротким словом, пожалуйста 🙂")
         return
 
-    if m.chat.type in {"group", "supergroup"}:
-        if _GROUPS_DISABLED or m.chat.id not in _ALLOWED_CHATS:
-            return
+    # тут можно сохранить в БД/метрики
+    # save_feeling(user_id=msg.from_user.id, feeling=text)  # <-- если нужно
 
-    txt = (m.text or "").strip()
-    if not txt:
-        return
-    if _has_bot_command(m.entities) or txt.startswith("/"):
-        return
+    await _mark_feeling_saved(state)
+    await state.clear()
 
-    uid = m.from_user.id
-    st = _COACH_USERS.get(uid)
-    if not st:
-        return
-    if datetime.utcnow() > st["until"]:
-        _COACH_USERS.pop(uid, None)
-        return await m.answer("⏳ Сессия наставника завершилась. Включить снова: /coach_on")
+    await msg.answer("Готово! Сохранил 👍\nЕсли хочешь — продолжим или возвращайся в меню: /menu")
 
-    rate_sec = getattr(settings, "coach_rate_sec", _RATE_SEC_DEFAULT)
-    now = time.monotonic()
-    if now - st["last"] < rate_sec:
-        return
-    st["last"] = now
-
-    await _handle_question(m, txt)
-
-# ===== служебные =====
-async def _send_typing(bot, chat_id: int, stop_event: asyncio.Event):
-    try:
-        while not stop_event.is_set():
-            await bot.send_chat_action(chat_id, ChatAction.TYPING)
-            await asyncio.sleep(5.5)
-    except Exception:
-        pass
-
-async def _handle_question(m: Message, q: str):
-    if not q.strip():
-        return await m.answer("Сформулируй коротко, по сути. Например: «зажим в горле».")
-    stop = asyncio.Event()
-    typing_task = asyncio.create_task(_send_typing(m.bot, m.chat.id, stop))
-    try:
-        drill = pick_drill_by_keywords(q)
-        title = drill["title"]
-        steps = drill["steps"][:4]
-        sign = drill.get("check_question", "Что изменится?")
-        reply = (
-            f"Коротко: попробуй это — {title}.\n"
-            f"Шаги: " + " → ".join(steps) + ".\n"
-            f"Признак: {sign}\n"
-            f"Запусти таймер и отмечай ощущение одним словом."
+# Если пользователь по инерции присылает ещё одно сообщение в течение 3 минут,
+# ответим мягко, вместо того чтобы улететь в общий фоллбек.
+@router.message(F.text)
+async def coach_post_saved_soft_guard(msg: Message, state: FSMContext):
+    if await _recently_saved(state):
+        await msg.answer(
+            "Я уже записал твоё ощущение 👌\n"
+            "Начать ещё раз — /coach_on, открыть меню — /menu"
         )
-        try:
-            with session_scope() as s:
-                u = s.query(User).filter_by(tg_id=m.from_user.id).first()
-                log_event(s, u.id if u else None, "coach_answer", {"q": q, "drill_id": drill.get("id")})
-        except Exception:
-            pass
-        await m.answer(reply, reply_markup=timer_kb())
-    except Exception:
-        await m.answer("Ой, что-то пошло не так. Повтори шаг или вернись в меню: /menu 🙏")
-        raise
-    finally:
-        stop.set()
-        try:
-            await typing_task
-        except Exception:
-            pass
-
-@router.callback_query(F.data == "coach_timer_60")
-async def coach_timer(cb: CallbackQuery):
-    msg = await cb.message.answer("⏳ 60 сек.")
-    for left in (45, 30, 15, 5):
-        await asyncio.sleep(60 - left if left == 45 else 15 if left in (30, 15) else 10)
-        await msg.edit_text(f"⏳ {left} сек.")
-    await asyncio.sleep(5)
-    await msg.edit_text("⏱ Готово! Как ощущение? Одно слово.")
-    await cb.answer()
-
-# ===== админ-команды быстрых флагов =====
-def _is_admin(uid: int) -> bool:
-    admin_ids = getattr(settings, "admin_ids", []) or []
-    return uid in admin_ids
-
-@router.message(StateFilter("*"), Command("maint_on"))
-async def maint_on(m: Message):
-    if not _is_admin(m.from_user.id):
         return
-    global _MAINTENANCE
-    _MAINTENANCE = True
-    await m.answer("🔧 Режим техработ включён. Бот отвечает только на базовые команды.")
-
-@router.message(StateFilter("*"), Command("maint_off"))
-async def maint_off(m: Message):
-    if not _is_admin(m.from_user.id):
-        return
-    global _MAINTENANCE
-    _MAINTENANCE = False
-    await m.answer("✅ Техработы выключены.")
-
-@router.message(StateFilter("*"), Command("coach_groups_off"))
-async def groups_off(m: Message):
-    if not _is_admin(m.from_user.id):
-        return
-    global _GROUPS_DISABLED
-    _GROUPS_DISABLED = True
-    await m.answer("🔕 Глобально отключён групповой режим наставника.")
-
-@router.message(StateFilter("*"), Command("coach_groups_on"))
-async def groups_on(m: Message):
-    if not _is_admin(m.from_user.id):
-        return
-    global _GROUPS_DISABLED
-    _GROUPS_DISABLED = False
-    await m.answer("🔔 Глобально включён групповой режим наставника.")
+    # Ничего не делаем — пускай обработают остальные роутеры (меню и т.п.)
