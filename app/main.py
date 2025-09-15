@@ -21,6 +21,7 @@ from app.routers.reply_shortcuts import router as reply_shortcuts_router
 from app.routers.onboarding import router as onboarding_router     # /start
 from app.routers.coach import router as coach_router               # наставник
 from app.routers.training import router as training_router         # тренировка
+from app.bot.handlers.feedback import router as feedback2_router
 from app.routers.casting import router as casting_router           # мини-кастинг
 from app.routers.progress import router as progress_router         # прогресс
 from app.routers.feedback import router as feedback_router         # старый проектный фидбек (если есть)
