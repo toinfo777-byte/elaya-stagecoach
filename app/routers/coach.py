@@ -1,49 +1,44 @@
 # app/routers/coach.py
-from datetime import datetime, timedelta, timezone
-
 from aiogram import Router, F
 from aiogram.types import Message
 from aiogram.fsm.context import FSMContext
+from datetime import datetime, timezone
 
 from app.bot.states import CoachStates
 
 router = Router(name="coach")
 
 
-def _utc_ts() -> float:
+# ===== Вспомогательное =====
+def _now_ts() -> float:
     return datetime.now(timezone.utc).timestamp()
 
 
-# ===== helpers ===============================================================
-
 async def _mark_feeling_saved(state: FSMContext) -> None:
     """
-    Отмечаем, что шаг коуча выполнен недавно (без обращения к state.bot).
+    Помечаем, что чувство сохранено только что.
     """
-    # get_data/update_data — корректные методы для Aiogram 3
     data = await state.get_data()
     data = dict(data or {})
     data["coach_last"] = "feeling_saved"
-    data["coach_last_ts"] = _utc_ts()
-    await state.update_data(**data)
+    data["coach_last_ts"] = _now_ts()
+    await state.set_data(data)
 
 
-async def _recently_saved(state: FSMContext, within_sec: int = 180) -> bool:
+async def _recently_saved(state: FSMContext, within: int = 180) -> bool:
     """
-    Проверяем, сохраняли ли чувство в последние within_sec секунд.
+    Возвращает True, если чувство сохраняли в пределах `within` секунд.
     """
     data = await state.get_data()
     if not data:
         return False
-    ts = float(data.get("coach_last_ts") or 0)
+    ts = data.get("coach_last_ts")
     if not ts:
         return False
-    is_recent = (_utc_ts() - ts) < within_sec
-    return is_recent and data.get("coach_last") == "feeling_saved"
+    return (_now_ts() - float(ts)) < within and data.get("coach_last") == "feeling_saved"
 
 
-# ===== handlers ==============================================================
-
+# ===== Хендлеры коуча =====
 @router.message(F.text == "/coach_on")
 async def coach_on(msg: Message, state: FSMContext):
     await msg.answer(
@@ -60,26 +55,32 @@ async def coach_on(msg: Message, state: FSMContext):
 async def coach_feeling(msg: Message, state: FSMContext):
     text = (msg.text or "").strip()
 
-    # простая валидация «одно короткое слово»
+    # Простая валидация: одно короткое слово
     if not text or len(text.split()) > 2 or len(text) > 32:
         await msg.answer("Одним коротким словом, пожалуйста 🙂")
         return
 
-    # тут можно сохранить в БД/метрики, если нужно
+    # Здесь можно писать в БД/метрики при необходимости
     # save_feeling(user_id=msg.from_user.id, feeling=text)
 
     await _mark_feeling_saved(state)
     await state.clear()
+
     await msg.answer("Готово! Сохранил 👍\nЕсли хочешь — начни заново: /coach_on или вернись в меню: /menu")
 
 
-# Мягкий ответ только на ПЛОСКИЙ текст (не команды), если недавно уже сохранили
-@router.message(F.text & ~F.text.startswith("/"))
+# ===== Мягкий гард (работает ТОЛЬКО если недавно сохраняли) =====
+@router.message(F.text)
 async def coach_post_saved_soft_guard(msg: Message, state: FSMContext):
+    """
+    Отвечаем мягко лишь в течение нескольких минут после сохранения.
+    В остальных случаях не мешаем другим роутерам.
+    """
     if await _recently_saved(state):
         await msg.answer(
             "Я уже записал твоё ощущение 👌\n"
             "Начать ещё раз — /coach_on, открыть меню — /menu"
         )
         return
-    # иначе не вмешиваемся — дальше обработают другие роутеры
+    # Если недавно ничего не сохраняли — ничего не делаем:
+    # событие уйдёт дальше по другим роутерам (меню, help и т.п.)
