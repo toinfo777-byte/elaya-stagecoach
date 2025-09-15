@@ -28,6 +28,16 @@ from app.routers.menu import (
 
 router = Router(name="shortcuts")
 
+# ───────────────────────────────────────────────────────────────────────────────
+# Алиасы для совместимости с deeplink.py
+# (deeplink импортирует start_training_flow / start_casting_flow)
+async def start_training_flow(m: Message, state: FSMContext) -> None:
+    await training_entry(m, state)
+
+async def start_casting_flow(m: Message, state: FSMContext) -> None:
+    await casting_entry(m, state)
+# ───────────────────────────────────────────────────────────────────────────────
+
 # ===== команды, которые должны работать в ЛЮБОМ состоянии =====
 @router.message(StateFilter("*"), Command("help"))
 async def sc_help_cmd(m: Message):
@@ -41,7 +51,7 @@ async def sc_privacy_cmd(m: Message):
 async def sc_progress_cmd(m: Message):
     await _send_progress(m)
 
-# 🔧 ДОБАВЛЕНО: ловим /training и /casting ещё ДО онбординга
+# Ловим /training и /casting ещё ДО онбординга
 @router.message(StateFilter("*"), Command("training"))
 async def sc_training_cmd(m: Message, state: FSMContext):
     await training_entry(m, state)
