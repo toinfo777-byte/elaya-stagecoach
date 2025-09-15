@@ -1,6 +1,8 @@
+# app/routers/onboarding.py
 from __future__ import annotations
 
 from datetime import datetime
+
 from aiogram import Router, F
 from aiogram.filters import CommandStart, Command
 from aiogram.fsm.context import FSMContext
@@ -57,10 +59,12 @@ async def cancel_anywhere(msg: Message, state: FSMContext):
     await state.clear()
     await msg.answer("Анкета сброшена. Возвращаю в меню.", reply_markup=main_menu())
 
+
 @router.message(~StateFilter(None), Command("menu"))
 async def menu_anywhere(msg: Message, state: FSMContext):
     await state.clear()
     await msg.answer("Готово. Вот меню:", reply_markup=main_menu())
+
 
 @router.message(~StateFilter(None), CommandStart())
 async def restart_anywhere(msg: Message, state: FSMContext):
@@ -82,17 +86,20 @@ async def set_name(msg: Message, state: FSMContext):
     await msg.answer(ONBOARD_TZ_PROMPT)
     await state.set_state(Onboarding.tz)
 
+
 @router.message(Onboarding.tz, ~F.text.startswith("/"))
 async def set_tz(msg: Message, state: FSMContext):
     await state.update_data(tz=(msg.text or "").strip())
     await msg.answer(ONBOARD_GOAL_PROMPT)
     await state.set_state(Onboarding.goal)
 
+
 @router.message(Onboarding.goal, ~F.text.startswith("/"))
 async def set_goal(msg: Message, state: FSMContext):
     await state.update_data(goal=(msg.text or "").strip())
     await msg.answer(ONBOARD_EXP_PROMPT)
     await state.set_state(Onboarding.exp)
+
 
 @router.message(Onboarding.exp, ~F.text.startswith("/"))
 async def set_exp(msg: Message, state: FSMContext):
@@ -103,6 +110,7 @@ async def set_exp(msg: Message, state: FSMContext):
     await state.update_data(exp=exp)
     await msg.answer(CONSENT + "\n\nНапишите «Согласен».")
     await state.set_state(Onboarding.consent)
+
 
 @router.message(Onboarding.consent, ~F.text.startswith("/"))
 async def finalize(msg: Message, state: FSMContext):
