@@ -23,35 +23,28 @@ from app.routers.coach import router as coach_router               # наста�
 from app.routers.training import router as training_router         # тренировка
 from app.routers.casting import router as casting_router           # мини-кастинг
 from app.routers.progress import router as progress_router         # прогресс
-from app.routers.feedback import router as feedback_router         # старый проектный фидбек (если есть)
-from app.routers.feedback_demo import router as feedback_demo_router
-from app.routers.feedback_any import router as feedback_any_router
-from app.bot.handlers.feedback import router as feedback2_router
+# ⚠️ старый feedback_router не подключаем
+from app.bot.handlers.feedback import router as feedback2_router   # новый универсальный обработчик отзывов
+from app.routers.feedback_demo import router as feedback_demo_router  # демо-команда для показа клавиатуры
 from app.routers.system import router as system_router             # /help, /privacy, /whoami, /version, /health
 from app.routers.settings import router as settings_router         # тех.настройки
 from app.routers.admin import router as admin_router               # админка
 from app.routers.premium import router as premium_router           # плата/заглушки
 from app.routers.metrics import router as metrics_router           # ✅ /metrics (админы)
 from app.routers.cancel import router as cancel_router             # глобальная отмена /cancel
+from app.routers.debug import router as debug_router               # диагностический — всё в логи
 from app.routers.menu import router as menu_router                 # меню (строго последним)
-
-# ⬇️ НОВОЕ: универсальный обработчик отзывов (кнопки 🔥/👌/😐 + «1 фраза»)
-from app.bot.handlers.feedback import router as feedback2_router
-
-# ⬇️ НОВОЕ: диагностический роутер — шлёт всё в логи
-from app.routers.debug import router as debug_router
 
 # Обслуживание SQLite
 from app.utils.maintenance import backup_sqlite, vacuum_sqlite
 
 
-# ===== ЛОГИ (усилено) =====
+# ===== ЛОГИ =====
 logging.basicConfig(
-    level=logging.DEBUG,  # подробные логи по умолчанию
+    level=logging.DEBUG,
     format="%(asctime)s | %(levelname)-8s | %(name)s | %(message)s",
     datefmt="%Y-%m-%d %H:%M:%S",
 )
-# тише самые «шумные» либы, если нужно — можно поднять до DEBUG
 logging.getLogger("aiogram").setLevel(logging.DEBUG)
 logging.getLogger("aiohttp").setLevel(logging.INFO)
 logging.getLogger("asyncio").setLevel(logging.INFO)
@@ -106,6 +99,7 @@ async def setup_commands(bot: Bot) -> None:
         BotCommand(command="help",      description="Справка"),
         BotCommand(command="privacy",   description="Политика"),
         BotCommand(command="version",   description="Версия"),
+        BotCommand(command="feedback_demo", description="Показать клавиатуру отзывов"),
     ]
     await bot.set_my_commands(cmds, scope=BotCommandScopeAllPrivateChats())
 
@@ -127,14 +121,10 @@ class TraceAllMiddleware(BaseMiddleware):
 
 
 async def _log_bot_info(bot: Bot) -> None:
-    """Подробная диагностика при старте."""
     try:
         me = await bot.get_me()
         wh = await bot.get_webhook_info()
-        log.info(
-            "Bot info: id=%s, username=@%s, name=%s",
-            me.id, me.username, me.first_name,
-        )
+        log.info("Bot info: id=%s, username=@%s, name=%s", me.id, me.username, me.first_name)
         log.info(
             "Webhook: url='%s', has_custom_certificate=%s, pending=%s, allowed=%s",
             wh.url or "", getattr(wh, "has_custom_certificate", False),
@@ -156,44 +146,38 @@ async def main():
     dp = Dispatcher(storage=MemoryStorage())
 
     # middlewares
-    dp.update.middleware(TraceAllMiddleware())         # ⬅️ лог любого апдейта
-    dp.message.middleware(SourceTagsMiddleware())      # источник first/last_source
+    dp.update.middleware(TraceAllMiddleware())
+    dp.message.middleware(SourceTagsMiddleware())
     dp.callback_query.middleware(SourceTagsMiddleware())
-    dp.message.middleware(ErrorsMiddleware())          # единый перехват ошибок
+    dp.message.middleware(ErrorsMiddleware())
     dp.callback_query.middleware(ErrorsMiddleware())
 
-    # ПОРЯДОК ВАЖЕН!
+    # порядок важен
     for r in (
-        smoke_router,        # быстрые проверки
+        smoke_router,
         apply_router,
-        deeplink_router,     # диплинки должны идти РАНО
-        shortcuts_router,    # /training, /casting и кнопки — в любом состоянии
-        onboarding_router,   # /start попадает сюда раньше coach
+        deeplink_router,
+        shortcuts_router,
+        onboarding_router,
         coach_router,
         training_router,
         casting_router,
         progress_router,
-
-        # наш новый обработчик отзывов (кнопки 🔥/👌/😐 + «1 фраза»)
-        feedback2_router,
-
-        # существующий проектный роутер отзывов
-        feedback_router,
-
+        feedback2_router,       # новый обработчик отзывов
+        feedback_demo_router,   # команда /feedback_demo
         system_router,
         settings_router,
         admin_router,
         premium_router,
-        metrics_router,      # ✅ метрики до cancel/menu
-        cancel_router,       # глобальная отмена до меню
-        debug_router,        # ⬅️ диагностический — перед меню
-        menu_router,         # меню — строго последним
+        metrics_router,
+        cancel_router,
+        debug_router,
+        menu_router,
     ):
         dp.include_router(r)
         log.info("Included router: %s", getattr(r, "name", r))
 
     async with bot:
-        # На всякий случай выключим вебхук (мы на long polling)
         try:
             await bot.delete_webhook(drop_pending_updates=False)
         except Exception as e:
@@ -206,15 +190,10 @@ async def main():
         except Exception as e:
             log.warning("setup_commands failed: %s", e)
 
-        # фоновые задачи
         asyncio.create_task(_backup_loop())
         asyncio.create_task(_vacuum_loop())
 
-        # ⬇️ ВАЖНО: НЕ ограничиваем allowed_updates — пусть приходят все
-        await dp.start_polling(
-            bot,
-            polling_timeout=30,
-        )
+        await dp.start_polling(bot, polling_timeout=30)
 
 
 if __name__ == "__main__":
