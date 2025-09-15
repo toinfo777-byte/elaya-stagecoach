@@ -1,31 +1,46 @@
 # app/routers/coach.py
+from datetime import datetime, timezone
+
 from aiogram import Router, F
-from aiogram.types import Message, CallbackQuery
+from aiogram.types import Message
 from aiogram.fsm.context import FSMContext
-from datetime import datetime, timedelta, timezone
 
 from app.bot.states import CoachStates
 
 router = Router(name="coach")
 
-# Хелпер: сохранить «последний шаг коуча выполнен»
-async def _mark_feeling_saved(state: FSMContext) -> None:
-    data = await state.storage.get_data(bot=state.bot, key=state.key)
-    data = dict(data or {})
-    data["coach_last"] = "feeling_saved"
-    data["coach_last_ts"] = datetime.now(timezone.utc).timestamp()
-    await state.storage.set_data(bot=state.bot, key=state.key, data=data)
+# ===== Хелперы =====
 
-# Хелпер: проверка — недавно уже сохраняли чувство?
-async def _recently_saved(state: FSMContext, within: int = 180) -> bool:
-    data = await state.storage.get_data(bot=state.bot, key=state.key)
-    ts = (data or {}).get("coach_last_ts")
+_RECENT_WINDOW_SEC = 180  # 3 мин — окно, в которое мягко игнорим повторные ответы
+
+
+async def _mark_feeling_saved(state: FSMContext) -> None:
+    """
+    Отмечаем, что шаг коуча успешно выполнен недавно.
+    В aiogram v3 работаем напрямую через FSMContext.
+    """
+    now_ts = int(datetime.now(timezone.utc).timestamp())
+    # частичное обновление данных состояния
+    await state.update_data(
+        coach_last="feeling_saved",
+        coach_last_ts=now_ts,
+    )
+
+
+async def _recently_saved(state: FSMContext, within: int = _RECENT_WINDOW_SEC) -> bool:
+    """
+    True, если в пределах окна already saved.
+    """
+    data = await state.get_data()
+    ts = data.get("coach_last_ts")
     if not ts:
         return False
-    return (datetime.now(timezone.utc).timestamp() - float(ts)) < within and \
-           (data or {}).get("coach_last") == "feeling_saved"
+    now_ts = int(datetime.now(timezone.utc).timestamp())
+    return (now_ts - int(ts)) < within and data.get("coach_last") == "feeling_saved"
 
-# Старт мини-шага коуча (пример: вы его зовёте в нужном месте вашего сценария)
+
+# ===== Хэндлеры =====
+
 @router.message(F.text == "/coach_on")
 async def coach_on(msg: Message, state: FSMContext):
     await msg.answer(
@@ -37,7 +52,7 @@ async def coach_on(msg: Message, state: FSMContext):
     )
     await state.set_state(CoachStates.wait_feeling)
 
-# Принимаем ОДНО слово после таймера
+
 @router.message(CoachStates.wait_feeling, F.text)
 async def coach_feeling(msg: Message, state: FSMContext):
     text = (msg.text or "").strip()
@@ -48,15 +63,16 @@ async def coach_feeling(msg: Message, state: FSMContext):
         return
 
     # тут можно сохранить в БД/метрики
-    # save_feeling(user_id=msg.from_user.id, feeling=text)  # <-- если нужно
+    # save_feeling(user_id=msg.from_user.id, feeling=text)
 
     await _mark_feeling_saved(state)
     await state.clear()
 
     await msg.answer("Готово! Сохранил 👍\nЕсли хочешь — продолжим или возвращайся в меню: /menu")
 
-# Если пользователь по инерции присылает ещё одно сообщение в течение 3 минут,
-# ответим мягко, вместо того чтобы улететь в общий фоллбек.
+
+# Мягкий гард: если юзер прислал ещё сообщение в течение окна после сохранения,
+# отвечаем мягко, а не валимся в общий фолбэк.
 @router.message(F.text)
 async def coach_post_saved_soft_guard(msg: Message, state: FSMContext):
     if await _recently_saved(state):
@@ -65,4 +81,4 @@ async def coach_post_saved_soft_guard(msg: Message, state: FSMContext):
             "Начать ещё раз — /coach_on, открыть меню — /menu"
         )
         return
-    # Ничего не делаем — пускай обработают остальные роутеры (меню и т.п.)
+    # Ничего не делаем — другие роутеры (меню и т.п.) подхватят
