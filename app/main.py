@@ -24,6 +24,7 @@ from app.routers.training import router as training_router         # трени�
 from app.routers.casting import router as casting_router           # мини-кастинг
 from app.routers.progress import router as progress_router         # прогресс
 from app.routers.feedback import router as feedback_router         # старый проектный фидбек (если есть)
+from app.routers.feedback_demo import router as feedback_demo_router
 from app.bot.handlers.feedback import router as feedback2_router
 from app.routers.system import router as system_router             # /help, /privacy, /whoami, /version, /health
 from app.routers.settings import router as settings_router         # тех.настройки
