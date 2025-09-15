@@ -33,79 +33,63 @@ router = Router(name="shortcuts")
 async def sc_help_cmd(m: Message):
     await m.answer(HELP_TEXT)
 
-
 @router.message(StateFilter("*"), Command("privacy"))
 async def sc_privacy_cmd(m: Message):
     await m.answer(PRIVACY_TEXT)
 
-
 @router.message(StateFilter("*"), Command("progress"))
 async def sc_progress_cmd(m: Message):
     await _send_progress(m)
-
 
 # 🔧 ДОБАВЛЕНО: ловим /training и /casting ещё ДО онбординга
 @router.message(StateFilter("*"), Command("training"))
 async def sc_training_cmd(m: Message, state: FSMContext):
     await training_entry(m, state)
 
-
 @router.message(StateFilter("*"), Command("casting"))
 async def sc_casting_cmd(m: Message, state: FSMContext):
     await casting_entry(m, state)
-
 
 # ===== кнопки меню в любом состоянии =====
 @router.message(StateFilter("*"), F.text == BTN_TRAIN)
 async def sc_training_btn(m: Message, state: FSMContext):
     await training_entry(m, state)
 
-
 @router.message(StateFilter("*"), F.text == BTN_CASTING)
 async def sc_casting_btn(m: Message, state: FSMContext):
     await casting_entry(m, state)
-
 
 @router.message(StateFilter("*"), F.text == BTN_PRIVACY)
 async def sc_privacy_text(m: Message):
     await m.answer(PRIVACY_TEXT)
 
-
 @router.message(StateFilter("*"), F.text == BTN_HELP)
 async def sc_help_text(m: Message):
     await m.answer(HELP_TEXT)
-
 
 @router.message(StateFilter("*"), F.text == BTN_PROGRESS)
 async def sc_progress_text_exact(m: Message):
     await _send_progress(m)
 
-
-# «фаззи» подстраховки по текстам (на случай иных эмодзи/пробелов)
+# «фаззи» подстраховки
 @router.message(StateFilter("*"), lambda m: isinstance(m.text, str) and "прогресс" in m.text.lower())
 async def sc_progress_text_fuzzy(m: Message):
     await _send_progress(m)
-
 
 @router.message(StateFilter("*"), lambda m: isinstance(m.text, str) and "трениров" in m.text.lower())
 async def sc_training_text_fuzzy(m: Message, state: FSMContext):
     await training_entry(m, state)
 
-
 @router.message(StateFilter("*"), lambda m: isinstance(m.text, str) and "кастинг" in m.text.lower())
 async def sc_casting_text_fuzzy(m: Message, state: FSMContext):
     await casting_entry(m, state)
-
 
 # ===== Реализация «Мой прогресс» =====
 async def _send_progress(m: Message):
     with session_scope() as s:
         u = s.query(User).filter_by(tg_id=m.from_user.id).first()
         if not u:
-            await m.answer(
-                "Сначала пройди /start, а затем вернись в «Мой прогресс».",
-                reply_markup=main_menu(),
-            )
+            await m.answer("Сначала пройди /start, а затем вернись в «Мой прогресс».", reply_markup=main_menu())
             return
 
         streak = u.streak or 0
@@ -120,7 +104,6 @@ async def _send_progress(m: Message):
         else:
             runs_7d = q.count()
 
-        # «источник» из meta_json (если есть)
         src_txt = ""
         try:
             meta = dict(u.meta_json or {}) if hasattr(u, "meta_json") else {}
