@@ -2,31 +2,27 @@
 from aiogram import Router, F
 from aiogram.types import Message
 from aiogram.fsm.context import FSMContext
-from aiogram.exceptions import SkipHandler
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 
 from app.bot.states import CoachStates
 
 router = Router(name="coach")
 
-# --- helpers ---------------------------------------------------------------
-
+# Помечаем, что чувство сохранено (кладём отметку в FSM-данные)
 async def _mark_feeling_saved(state: FSMContext) -> None:
-    data = await state.storage.get_data(bot=state.bot, key=state.key)
-    data = dict(data or {})
-    data["coach_last"] = "feeling_saved"
-    data["coach_last_ts"] = datetime.now(timezone.utc).timestamp()
-    await state.storage.set_data(bot=state.bot, key=state.key, data=data)
+    await state.update_data(
+        coach_last="feeling_saved",
+        coach_last_ts=datetime.now(timezone.utc).timestamp(),
+    )
 
+# Проверяем, что недавно (в пределах within секунд) сохраняли чувство
 async def _recently_saved(state: FSMContext, within: int = 180) -> bool:
-    data = await state.storage.get_data(bot=state.bot, key=state.key)
-    ts = (data or {}).get("coach_last_ts")
+    data = await state.get_data()
+    ts = data.get("coach_last_ts")
     if not ts:
         return False
-    fresh = (datetime.now(timezone.utc).timestamp() - float(ts)) < within
-    return fresh and (data or {}).get("coach_last") == "feeling_saved"
-
-# --- flow ------------------------------------------------------------------
+    return (datetime.now(timezone.utc).timestamp() - float(ts)) < within and \
+           data.get("coach_last") == "feeling_saved"
 
 @router.message(F.text == "/coach_on")
 async def coach_on(msg: Message, state: FSMContext):
@@ -46,20 +42,22 @@ async def coach_feeling(msg: Message, state: FSMContext):
         await msg.answer("Одним коротким словом, пожалуйста 🙂")
         return
 
-    # тут можно сохранить в БД/метрики
+    # TODO: сохраните «чувство» при необходимости
     await _mark_feeling_saved(state)
-    await state.clear()
 
+    # Выходим из состояния, НО данные не чистим — отметка останется
+    await state.set_state(None)
     await msg.answer("Готово! Сохранил 👍\nЕсли хочешь — начни заново: /coach_on или вернись в меню: /menu")
 
-# ВАЖНО: этот обработчик НЕ должен «съедать» все сообщения.
+# Мягкая защита на 3 минуты после сохранения:
+# если пользователь по инерции продолжает писать, просто подскажем,
+# а все остальные сообщения/кнопки НЕ перехватываем.
 @router.message(F.text)
 async def coach_post_saved_soft_guard(msg: Message, state: FSMContext):
-    if await _recently_saved(state):
-        await msg.answer(
-            "Я уже записал твоё ощущение 👌\n"
-            "Начать ещё раз — /coach_on, открыть меню — /menu"
-        )
+    # Команды не трогаем — их обработают дальше
+    if msg.text and msg.text.startswith("/"):
         return
-    # пропускаем дальше к остальным роутерам (меню/шорткаты и т.д.)
-    raise SkipHandler()
+    # Если недавно сохраняли — мягкое подсказочное сообщение
+    if await _recently_saved(state):
+        await msg.answer("Я уже записал твоё ощущение 👌\nНачать ещё раз — /coach_on, открыть меню — /menu")
+    # Иначе ничего не делаем — пусть обработают остальные роутеры
