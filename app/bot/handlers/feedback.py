@@ -1,105 +1,76 @@
-# app/bot/handlers/feedback.py
 from __future__ import annotations
 
-from aiogram import Router, F, html
-from aiogram.types import (
-    CallbackQuery,
-    InlineKeyboardMarkup,
-    InlineKeyboardButton,
-    Message,
-)
-from aiogram.fsm.state import StatesGroup, State
+from aiogram import Router, F
+from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.fsm.context import FSMContext
+from aiogram.exceptions import SkipHandler
 
-from app.utils.tg_safe import safe_answer, safe_edit_text, safe_edit_reply_markup
-
-import logging
-log = logging.getLogger(__name__)
+from app.bot.states import FeedbackStates
 
 router = Router(name="feedback2")
 
-
-# ---------- ВСПОМОГАТЕЛЬНОЕ ----------
-
-class FB(StatesGroup):
-    waiting_phrase = State()
-
-
-def _kb_feedback() -> InlineKeyboardMarkup:
-    # 🔥/👌/😐 + «1 фраза»
+# ----- Кнопки «оценить/фраза» -----
+def feedback_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [
             InlineKeyboardButton(text="🔥", callback_data="fb:rate:hot"),
-            InlineKeyboardButton(text="👌", callback_data="fb:rate:ok"),
+            InlineKeyboardButton(text="👌", callback_data="fb:rate:good"),
             InlineKeyboardButton(text="😐", callback_data="fb:rate:meh"),
         ],
         [InlineKeyboardButton(text="✍ 1 фраза", callback_data="fb:phrase")],
     ])
 
+# Вспомогательно: набор текстов «нижних» кнопок, чтобы их не блокировать в состоянии отзыва
+PASS_THROUGH_TEXTS: set[str] = {
+    "Меню", "Тренировка дня", "Мой прогресс", "Путь лидера",
+    "Мини-кастинг", "Политика", "Настройки", "Расширенная версия",
+    "Удалить профиль", "Помощь",
+}
 
-async def ask_short_review(msg: Message) -> None:
-    await msg.answer(
-        "Как прошёл этюд? Оцените или оставьте краткий отзыв:",
-        reply_markup=_kb_feedback(),
+# ===== Хэндлеры =====
+
+# 1) Оценка-эмодзи — показываем тост "Ок" и благодарим. Состояние НЕ включаем.
+@router.callback_query(F.data.startswith("fb:rate:"))
+async def on_rate(cb: CallbackQuery, state: FSMContext) -> None:
+    # короткий тост (без всплывающего окна)
+    await cb.answer("Ок")
+    # здесь можно логировать/сохранять оценку (cb.from_user.id, cb.data)
+    await cb.message.answer("Спасибо! Принял 👍")
+    # состояние не трогаем — ничего не блокируется
+
+# 2) «✍ 1 фраза» — просим текст и переходим в состояние ожидания фразы
+@router.callback_query(F.data == "fb:phrase")
+async def on_phrase_start(cb: CallbackQuery, state: FSMContext) -> None:
+    await cb.answer()
+    await state.set_state(FeedbackStates.wait_phrase)
+    await cb.message.answer(
+        "Напишите коротко (1–2 предложения). "
+        "Если передумали — нажмите любую кнопку меню внизу или /cancel."
     )
 
+# 3) Пришёл текст от пользователя — сохраняем и выходим из состояния
+@router.message(FeedbackStates.wait_phrase, F.text)
+async def phrase_received(msg: Message, state: FSMContext) -> None:
+    text = (msg.text or "").strip()
 
-# ---------- ХЭНДЛЕРЫ КОЛЛБЭКОВ ----------
+    # Если человек нажал «нижнюю кнопку» или набрал команду — снимаем состояние и пропускаем дальше
+    if text in PASS_THROUGH_TEXTS or text.startswith("/"):
+        await state.clear()
+        raise SkipHandler  # важно: разрешаем обработать это другими роутерами (меню и т.д.)
 
-@router.callback_query(F.data.startswith("fb:rate:"))
-async def on_feedback_rate(cb: CallbackQuery, state: FSMContext) -> None:
-    """
-    Обрабатываем оценку по кнопке 🔥/👌/😐
-    """
-    rate = cb.data.split(":", 2)[-1]  # hot | ok | meh
-    await safe_answer(cb)  # игнорируем возможный 'query is too old'
+    # Лёгкая валидация
+    if len(text) < 2:
+        await msg.answer("Чуть подробнее, пожалуйста 🙂")
+        return
+    if len(text) > 600:
+        await msg.answer("Получилось длинновато. Сократите, пожалуйста, до 1–2 предложений.")
+        return
 
-    # лог + здесь можно записать в БД/метрику
-    try:
-        user_id = cb.from_user.id if cb.from_user else None
-        log.info("FEEDBACK RATE: user=%s rate=%s", user_id, rate)
-        # TODO: тут сохранение в БД/метрики (если нужно)
-    except Exception as e:
-        log.exception("save rate failed: %s", e)
-
-    # Пытаемся отредактировать исходное сообщение,
-    # если нельзя — просто шлём новое.
-    txt = f"Спасибо! Оценка: {html.bold(rate)} записана."
-    edited = await safe_edit_text(cb.message, txt)
-    if edited is None:
-        await cb.message.answer(txt)
-
-
-@router.callback_query(F.data == "fb:phrase")
-async def on_feedback_phrase_start(cb: CallbackQuery, state: FSMContext) -> None:
-    """
-    Просим короткую фразу-отзыв и ставим стейт.
-    """
-    await safe_answer(cb)
-
-    prompt = "Введите краткую фразу-отзыв одним сообщением:"
-    edited = await safe_edit_text(cb.message, prompt)
-    if edited is None:
-        await cb.message.answer(prompt)
-
-    await state.set_state(FB.waiting_phrase)
-
-
-# ---------- ХЭНДЛЕР ВВОДА ФРАЗЫ ----------
-
-@router.message(FB.waiting_phrase)
-async def on_feedback_phrase_text(msg: Message, state: FSMContext) -> None:
-    phrase = (msg.text or "").strip()
-
-    # лог + сохранить в БД/метрику при необходимости
-    try:
-        log.info("FEEDBACK PHRASE: user=%s phrase=%r", msg.from_user.id, phrase)
-        # TODO: тут сохранение фразы
-    except Exception as e:
-        log.exception("save phrase failed: %s", e)
-
-    await msg.answer("Спасибо! Отзыв записан 🙏")
+    # TODO: сохранить отзыв (msg.from_user.id, text) в БД/метрики
     await state.clear()
+    await msg.answer("Спасибо за отзыв! 💛")
 
-    # Предложим снова стандартные кнопки для удобства
-    await ask_short_review(msg)
+# 4) Нечитаемый контент в состоянии отзыва (стикер/голос и т.п.)
+@router.message(FeedbackStates.wait_phrase)
+async def phrase_non_text(msg: Message, state: FSMContext) -> None:
+    await msg.answer("Мне нужен короткий текст. Можете также выйти в меню любой кнопкой внизу.")
