@@ -17,6 +17,7 @@ from app.routers.smoke import router as smoke_router               # /ping, /hea
 from app.routers.apply import router as apply_router               # заявка
 from app.routers.deeplink import router as deeplink_router         # диплинки /start <payload>
 from app.routers.shortcuts import router as shortcuts_router       # /training, /casting, кнопки (в любом состоянии)
+from app.routers.reply_shortcuts import router as reply_shortcuts_router
 from app.routers.onboarding import router as onboarding_router     # /start
 from app.routers.coach import router as coach_router               # наставник
 from app.routers.training import router as training_router         # тренировка
