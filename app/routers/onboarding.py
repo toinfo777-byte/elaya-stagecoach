@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 from datetime import datetime
-
 from aiogram import Router, F
 from aiogram.filters import CommandStart, Command
 from aiogram.fsm.context import FSMContext
@@ -42,7 +41,6 @@ def extract_start_payload(text: str | None) -> str | None:
     return None
 
 
-# ── /start запускает онбординг ТОЛЬКО если нет активного состояния
 @router.message(StateFilter(None), CommandStart())
 async def start(msg: Message, state: FSMContext):
     payload = extract_start_payload(msg.text)
@@ -53,39 +51,32 @@ async def start(msg: Message, state: FSMContext):
     await state.set_state(Onboarding.name)
 
 
-# ── Разрешённые команды "сквозь анкету"
 @router.message(~StateFilter(None), Command("cancel"))
 async def cancel_anywhere(msg: Message, state: FSMContext):
     await state.clear()
     await msg.answer("Анкета сброшена. Возвращаю в меню.", reply_markup=main_menu())
-
 
 @router.message(~StateFilter(None), Command("menu"))
 async def menu_anywhere(msg: Message, state: FSMContext):
     await state.clear()
     await msg.answer("Готово. Вот меню:", reply_markup=main_menu())
 
-
 @router.message(~StateFilter(None), CommandStart())
 async def restart_anywhere(msg: Message, state: FSMContext):
-    # повторный /start перезапускает онбординг
     await state.clear()
     await start(msg, state)
 
 
-# ── Если в анкете и прилетела другая команда — подскажем, что делать
 @router.message(~StateFilter(None), F.text.startswith("/"))
 async def in_form_but_command(msg: Message):
     await msg.answer("Вы сейчас заполняете короткую анкету. Напишите ответ или /cancel, чтобы выйти.")
 
 
-# ── Шаги анкеты: принимаем ТОЛЬКО обычный текст (не команды)
 @router.message(Onboarding.name, ~F.text.startswith("/"))
 async def set_name(msg: Message, state: FSMContext):
     await state.update_data(name=(msg.text or "").strip())
     await msg.answer(ONBOARD_TZ_PROMPT)
     await state.set_state(Onboarding.tz)
-
 
 @router.message(Onboarding.tz, ~F.text.startswith("/"))
 async def set_tz(msg: Message, state: FSMContext):
@@ -93,13 +84,11 @@ async def set_tz(msg: Message, state: FSMContext):
     await msg.answer(ONBOARD_GOAL_PROMPT)
     await state.set_state(Onboarding.goal)
 
-
 @router.message(Onboarding.goal, ~F.text.startswith("/"))
 async def set_goal(msg: Message, state: FSMContext):
     await state.update_data(goal=(msg.text or "").strip())
     await msg.answer(ONBOARD_EXP_PROMPT)
     await state.set_state(Onboarding.exp)
-
 
 @router.message(Onboarding.exp, ~F.text.startswith("/"))
 async def set_exp(msg: Message, state: FSMContext):
@@ -110,7 +99,6 @@ async def set_exp(msg: Message, state: FSMContext):
     await state.update_data(exp=exp)
     await msg.answer(CONSENT + "\n\nНапишите «Согласен».")
     await state.set_state(Onboarding.consent)
-
 
 @router.message(Onboarding.consent, ~F.text.startswith("/"))
 async def finalize(msg: Message, state: FSMContext):
