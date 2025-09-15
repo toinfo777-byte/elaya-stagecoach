@@ -1,73 +1,87 @@
 # app/bot/handlers/feedback.py
 from aiogram import Router, F
-from aiogram.types import CallbackQuery, Message
-from aiogram.utils.keyboard import InlineKeyboardBuilder
-from aiogram.filters import Command
+from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.fsm.context import FSMContext
 
 from app.bot.states import FeedbackStates
 
-router = Router(name="feedback2")
+router = Router(name="feedback2_router")
 
-# ---------- КЛАВИАТУРА ОЦЕНОК ----------
-def make_feedback_kb() -> "InlineKeyboardMarkup":
-    kb = InlineKeyboardBuilder()
-    kb.button(text="🔥", callback_data="fb:rate:fire")
-    kb.button(text="👌", callback_data="fb:rate:ok")
-    kb.button(text="😐", callback_data="fb:rate:meh")
-    kb.adjust(3)
+# =========================
+# Клавиатуры
+# =========================
 
-    kb.button(text="✍ 1 фраза", callback_data="fb:phrase")
-    kb.adjust(3, 1)
-    return kb.as_markup()
+def build_feedback_kb() -> InlineKeyboardMarkup:
+    """
+    🔥 / 👌 / 😐  +  ✍ 1 фраза
+    """
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="🔥", callback_data="fb:rate:hot"),
+            InlineKeyboardButton(text="👌", callback_data="fb:rate:ok"),
+            InlineKeyboardButton(text="😐", callback_data="fb:rate:meh"),
+        ],
+        [InlineKeyboardButton(text="✍ 1 фраза", callback_data="fb:phrase")],
+    ])
 
-# ---------- HANDLERS: ОЦЕНКА ----------
-@router.callback_query(F.data.startswith("fb:rate:"))
-async def on_rate(cb: CallbackQuery):
-    # здесь можно записать метрику/в БД
-    # пример: kind = cb.data.split(":")[2]  # fire|ok|meh
-    try:
-        await cb.answer("Спасибо! Принял 👍", show_alert=False)
-    except Exception:
-        # если что-то не так — просто молча отвечаем
-        await cb.answer()
-
-# ---------- HANDLERS: ЗАПРОС ФРАЗЫ ----------
-@router.callback_query(F.data == "fb:phrase")
-async def on_phrase_request(cb: CallbackQuery, state):
-    # переводим в состояние «ждём фразу»
-    await state.set_state(FeedbackStates.wait_phrase)
-    await cb.answer()  # убираем "часики"
-    await cb.message.answer(
-        "Напишите короткую фразу-отзыв одним сообщением.\n"
-        "Можно отменить командой /cancel."
+async def send_feedback_keyboard(message: Message) -> None:
+    """
+    Показать универсальную клавиатуру отзывов рядом с любым сообщением.
+    Вызывайте из тренировки/любого места:
+        await send_feedback_keyboard(message)
+    """
+    await message.answer(
+        "Как прошёл этюд? Оцените или оставьте короткий отзыв:",
+        reply_markup=build_feedback_kb(),
     )
 
-# Пришёл текст в состоянии ожидания — сохраняем
+# =========================
+# Хендлеры рейтинга
+# =========================
+
+@router.callback_query(F.data.startswith("fb:rate:"))
+async def on_feedback_rate(call: CallbackQuery):
+    # Здесь можете положить в БД/метрики, по желанию
+    # value = call.data.split(":")[-1]  # hot/ok/meh
+    await call.answer("Спасибо! Принял 👍", show_alert=False)
+
+    # Ничего «не поднимаем», просто выходим — этого достаточно,
+    # чтобы другие хендлеры не мешали (у нас узкий фильтр F.data.startswith).
+
+
+# =========================
+# Хендлер «1 фраза»
+# =========================
+
+@router.callback_query(F.data == "fb:phrase")
+async def feedback_phrase_start(call: CallbackQuery, state: FSMContext):
+    # Входим в состояние ожидания фразы
+    await state.set_state(FeedbackStates.wait_phrase)
+    await call.message.answer(
+        "Напишите одну короткую фразу об этом этюде. Если передумали — отправьте /cancel."
+    )
+    await call.answer()  # закрыть «часики»
+
+
 @router.message(FeedbackStates.wait_phrase, F.text)
-async def on_phrase_text(msg: Message, state):
+async def feedback_phrase_take(msg: Message, state: FSMContext):
     text = (msg.text or "").strip()
-    if len(text) < 2:
-        await msg.answer("Слишком коротко. Напишите пару слов, пожалуйста.")
-        return
-    if len(text) > 400:
-        await msg.answer("Очень длинно. Укоротите до 400 символов 🙏")
+    if not text:
+        await msg.answer("Пусто 🙈 Напишите короткую фразу или /cancel.")
         return
 
-    # TODO: сохраните в вашу БД/метрики при необходимости
-    # save_feedback_phrase(user_id=msg.from_user.id, phrase=text)
+    # Здесь сохраните куда нужно (БД/метрики)
+    # save_short_feedback(user_id=msg.from_user.id, text=text)
 
     await state.clear()
-    await msg.answer("Сохранил! Спасибо за фидбек ✨")
+    await msg.answer("Принял! Спасибо 🙌")
 
-# Любой нетекст в состоянии — просим текст
-@router.message(FeedbackStates.wait_phrase)
-async def on_phrase_non_text(msg: Message):
-    await msg.answer("Нужен именно текст одним сообщением. Или /cancel.")
 
-# ---------- ДЕМО-КОМАНДА ДЛЯ ПРОВЕРКИ ----------
-@router.message(Command("feedback_demo"))
-async def feedback_demo(msg: Message):
-    await msg.answer(
-        "Как прошёл этюд? Оцените или оставьте короткий отзыв:",
-        reply_markup=make_feedback_kb(),
-    )
+# =========================
+# Отмена ожидания фразы
+# =========================
+
+@router.message(FeedbackStates.wait_phrase, F.text.in_({"/cancel", "cancel"}))
+async def feedback_phrase_cancel(msg: Message, state: FSMContext):
+    await state.clear()
+    await msg.answer("Окей, отменил. Можете продолжать. /menu")
