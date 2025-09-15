@@ -19,34 +19,53 @@ PROMPT_TEXT = (
 )
 OK_SAVED = "Спасибо! Принял 📝"
 
+# Набор «оценок», которые могут приходить текстом (reply-клава)
+RATE_TEXTS = {"🔥", "👌", "😐"}
+
 def _is_short_phrase(text: str) -> bool:
     t = (text or "").strip()
     return 3 <= len(t) <= 120 and not t.startswith("/")
 
-# ===== Оценки (🔥/👌/😐) — ловим максимально широко =====
+# ===== ОЦЕНКИ — inline callback В ЛЮБОМ ФОРМАТЕ =====
 def _is_rate_cb(data: str | None) -> bool:
+    """
+    Ловим callback_data самых разных видов:
+      - 'fb:rate:hot' / 'rate:ok' / 'training:rate:meh'
+      - 'feedback:hot' / 'hot' / 'ok' / 'meh'
+      - даже если прислали эмодзи в callback_data: '🔥' / '👌' / '😐'
+    """
     if not data:
         return False
     d = data.lower()
-    # совпадем и с "fb:rate:hot", и с "rate:ok", и с "training:rate:meh", и т.п.
-    if "rate" in d and any(k in d for k in ("hot", "ok", "meh", "good", "bad", "1", "2", "3")):
+    if d in ("hot", "ok", "meh", "rate", "good", "bad", "like", "dislike"):
+        return True
+    if any(k in d for k in ("rate", "fb:rate", "feedback", "fb", "grade", "score")) and \
+       any(k in d for k in ("hot", "ok", "meh", "good", "bad", "1", "2", "3", "like", "dislike")):
+        return True
+    # если кто-то прислал эмодзи в callback_data
+    if any(sym in d for sym in ("🔥", "👌", "😐")):
         return True
     return False
 
 @router.callback_query(F.data.func(_is_rate_cb))
-async def fb_rate_any(cq: CallbackQuery):
-    # TODO: здесь можно сохранить оценку в БД/метрики (разбор значения из cq.data)
+async def fb_rate_inline(cq: CallbackQuery):
+    # TODO: парсинг и сохранение оценки из cq.data при необходимости
     try:
         await cq.answer("Спасибо! Принял 👍", show_alert=False)
     except Exception:
         pass
 
-# ===== Запрос фразы =====
+# ===== ОЦЕНКИ — если кнопки приходят ТЕКСТОМ (reply-клавиатура) =====
+@router.message(StateFilter("*"), F.text.in_(RATE_TEXTS))
+async def fb_rate_text(msg: Message):
+    # TODO: сохранить текстовую оценку, если нужно
+    await msg.answer("Спасибо! Принял 👍")
+
+# ===== ЗАПРОС «ФРАЗЫ» =====
 def _is_phrase_cb(data: str | None) -> bool:
     if not data:
         return False
     d = data.lower()
-    # поддержим разные варианты callback_data
     return any(k in d for k in ("fb:phrase", "phrase", "comment", "text"))
 
 # 1) Inline-кнопка «фраза»
