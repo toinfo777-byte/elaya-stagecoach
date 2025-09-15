@@ -23,41 +23,30 @@ from app.routers.coach import router as coach_router               # наста�
 from app.routers.training import router as training_router         # тренировка
 from app.routers.casting import router as casting_router           # мини-кастинг
 from app.routers.progress import router as progress_router         # прогресс
-from app.routers.feedback import router as feedback_router         # старый проектный фидбек (если есть)
+from app.routers.feedback import router as feedback2_router        # ✅ новый универсальный фидбек
+from app.routers.feedback import kb as feedback_kb_mod             # (экспорт клавы, если нужно из сценариев)
+from app.routers.feedback_demo import router as feedback_demo_router  # демо
+from app.routers.feedback_old import router as feedback_router     # если у вас есть старый проектный
 from app.routers.system import router as system_router             # /help, /privacy, /whoami, /version, /health
 from app.routers.settings import router as settings_router         # тех.настройки
 from app.routers.admin import router as admin_router               # админка
 from app.routers.premium import router as premium_router           # плата/заглушки
-from app.routers.metrics import router as metrics_router           # ✅ /metrics (админы)
+from app.routers.metrics import router as metrics_router           # /metrics (админы)
 from app.routers.cancel import router as cancel_router             # глобальная отмена /cancel
 from app.routers.menu import router as menu_router                 # меню (строго последним)
+from app.routers.debug import router as debug_router               # диагностический
 
-# ⬇️ НОВОЕ: универсальный обработчик отзывов (🔥/👌/😐 + «✍ 1 фраза»)
-from app.bot.handlers.feedback import router as feedback2_router
-
-# ⬇️ НОВОЕ: демонстрационный роутер (команда /feedback_demo)
-from app.routers.feedback_demo import router as feedback_demo_router
-
-# ⬇️ НОВОЕ: диагностический роутер — шлёт всё в логи
-from app.routers.debug import router as debug_router
-
-# Обслуживание SQLite
-from app.utils.maintenance import backup_sqlite, vacuum_sqlite
-
-
-# ===== ЛОГИ (усилено) =====
+# ===== ЛОГИ =====
 logging.basicConfig(
-    level=logging.DEBUG,
+    level=logging.INFO,
     format="%(asctime)s | %(levelname)-8s | %(name)s | %(message)s",
     datefmt="%Y-%m-%d %H:%M:%S",
 )
-logging.getLogger("aiogram").setLevel(logging.DEBUG)
-logging.getLogger("aiohttp").setLevel(logging.INFO)
-logging.getLogger("asyncio").setLevel(logging.INFO)
 log = logging.getLogger(__name__)
+logging.getLogger("aiogram").setLevel(logging.INFO)
 
 
-# ====== фоновые задачи обслуживания БД ======
+# ===== служебные фоновые задачи для SQLite (опционально) =====
 async def _sleep_until_utc(hour: int, minute: int = 0, dow: int | None = None):
     now = datetime.now(timezone.utc).replace(second=0, microsecond=0)
     target = now.replace(hour=hour, minute=minute)
@@ -70,33 +59,32 @@ async def _sleep_until_utc(hour: int, minute: int = 0, dow: int | None = None):
 
 
 async def _backup_loop():
+    from app.utils.maintenance import backup_sqlite
     while True:
         await _sleep_until_utc(2, 0)  # ежедневно 02:00 UTC
         try:
             path = backup_sqlite()
             log.info("Backup done: %s", path)
-        except Exception as e:
-            log.exception("Backup failed: %s", e)
+        except Exception:
+            log.exception("Backup failed")
 
 
 async def _vacuum_loop():
+    from app.utils.maintenance import vacuum_sqlite
     while True:
         await _sleep_until_utc(2, 5, dow=6)  # вс 02:05 UTC
         try:
             vacuum_sqlite()
             log.info("Vacuum done")
-        except Exception as e:
-            log.exception("Vacuum failed: %s", e)
+        except Exception:
+            log.exception("Vacuum failed")
 
 
-# ====== меню команд ======
+# ===== команды в меню =====
 async def setup_commands(bot: Bot) -> None:
     cmds = [
         BotCommand(command="start",     description="Начать"),
         BotCommand(command="apply",     description="Путь лидера (заявка)"),
-        BotCommand(command="coach_on",  description="Включить наставника"),
-        BotCommand(command="coach_off", description="Выключить наставника"),
-        BotCommand(command="ask",       description="Спросить наставника"),
         BotCommand(command="training",  description="Тренировка дня"),
         BotCommand(command="casting",   description="Мини-кастинг"),
         BotCommand(command="progress",  description="Мой прогресс"),
@@ -108,19 +96,15 @@ async def setup_commands(bot: Bot) -> None:
     await bot.set_my_commands(cmds, scope=BotCommandScopeAllPrivateChats())
 
 
-# ====== простая прослойка: логируем КАЖДЫЙ апдейт ======
+# ===== простая трассировка апдейтов =====
 class TraceAllMiddleware(BaseMiddleware):
     async def __call__(self, handler, event, data):
         try:
             etype = type(event).__name__
-            preview = None
-            if hasattr(event, "text") and getattr(event, "text"):
-                preview = event.text
-            elif hasattr(event, "data") and getattr(event, "data"):
-                preview = event.data
+            preview = getattr(event, "text", None) or getattr(event, "data", None)
             log.info("UPDATE [%s]: %s", etype, preview)
         except Exception:
-            log.exception("TraceAllMiddleware logging failed")
+            pass
         return await handler(event, data)
 
 
@@ -128,17 +112,13 @@ async def _log_bot_info(bot: Bot) -> None:
     try:
         me = await bot.get_me()
         wh = await bot.get_webhook_info()
-        log.info("Bot info: id=%s, username=@%s, name=%s", me.id, me.username, me.first_name)
-        log.info(
-            "Webhook: url='%s', has_custom_certificate=%s, pending=%s, allowed=%s",
-            wh.url or "", getattr(wh, "has_custom_certificate", False),
-            getattr(wh, "pending_update_count", 0), getattr(wh, "allowed_updates", None),
-        )
+        log.info("Bot info: id=%s, @%s", me.id, me.username)
+        log.info("Webhook: url='%s', pending=%s", wh.url or "", getattr(wh, "pending_update_count", 0))
     except Exception as e:
-        log.warning("Failed to read bot/webhook info: %s", e)
+        log.warning("get_me/webhook failed: %s", e)
 
 
-# ====== main ======
+# ===== main =====
 async def main():
     if not settings.bot_token:
         raise RuntimeError("BOT_TOKEN is empty. Set it in .env")
@@ -155,27 +135,22 @@ async def main():
     dp.message.middleware(ErrorsMiddleware())
     dp.callback_query.middleware(ErrorsMiddleware())
 
-    # ПОРЯДОК ВАЖЕН!
+    # ВАЖНО: порядок include_router
     for r in (
         smoke_router,
         apply_router,
-        deeplink_router,
-        shortcuts_router,
+        deeplink_router,        # диплинки очень рано
+        shortcuts_router,       # /training, /casting и кнопки — в любом состоянии
         reply_shortcuts_router,
-        onboarding_router,
+        onboarding_router,      # /start анкета
         coach_router,
         training_router,
         casting_router,
         progress_router,
 
-        # старый проектный фидбек (если есть) — можно оставить
-        feedback_router,
-
-        # демо «новой» клавиатуры
-        feedback_demo_router,
-
-        # универсальный новый обработчик отзывов
-        feedback2_router,
+        feedback2_router,       # новый универсальный фидбек (🔥/👌/😐/фраза)
+        feedback_demo_router,   # демо-кнопка /feedback_demo
+        feedback_router,        # если есть «старый» проектный — ниже
 
         system_router,
         settings_router,
@@ -184,7 +159,7 @@ async def main():
         metrics_router,
         cancel_router,
         debug_router,
-        menu_router,
+        menu_router,            # меню — строго последним
     ):
         dp.include_router(r)
         log.info("Included router: %s", getattr(r, "name", r))
@@ -202,8 +177,9 @@ async def main():
         except Exception as e:
             log.warning("setup_commands failed: %s", e)
 
-        asyncio.create_task(_backup_loop())
-        asyncio.create_task(_vacuum_loop())
+        # фоны (по желанию)
+        # asyncio.create_task(_backup_loop())
+        # asyncio.create_task(_vacuum_loop())
 
         await dp.start_polling(bot, polling_timeout=30)
 
