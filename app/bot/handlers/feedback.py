@@ -1,53 +1,66 @@
 # app/bot/handlers/feedback.py
 from aiogram import Router, F
-from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.types import CallbackQuery, Message
 from aiogram.fsm.context import FSMContext
 
 from app.bot.states import FeedbackStates
+from app.bot.ui.feedback import build_feedback_kb, send_feedback_prompt
 
 router = Router(name="feedback2")
 
-# ----- Клавиатура оценок -----
-def feedback_kb() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [
-            InlineKeyboardButton(text="🔥", callback_data="fb:hot"),
-            InlineKeyboardButton(text="👌", callback_data="fb:ok"),
-            InlineKeyboardButton(text="😐", callback_data="fb:meh"),
-        ],
-        [InlineKeyboardButton(text="✍ 1 фраза", callback_data="fb:text")],
-    ])
+# ==== ХЕЛПЕРЫ СХЕМЫ СОХРАНЕНИЯ (пока — в память FSM; при желании смените на БД) ====
 
-# ----- Хелпер: показать «оценки» где угодно -----
-async def prompt_feedback(message: Message, text: str = "Как прошёл этюд? Оцените или оставьте краткий отзыв:") -> None:
-    await message.answer(text, reply_markup=feedback_kb())
+async def _save_reaction(user_id: int, kind: str) -> None:
+    # TODO: замените на реальную запись в БД/метрики
+    # пример: repo.feedback.add_reaction(user_id=user_id, kind=kind)
+    pass
 
-# ====== HANDLERS ======
+async def _save_phrase(user_id: int, text: str) -> None:
+    # TODO: замените на реальную запись в БД/метрики
+    # пример: repo.feedback.add_phrase(user_id=user_id, text=text)
+    pass
 
-# Быстрые реакции
+
+# ==== ПОКАЗ КЛАВИАТУРЫ «ГДЕ УГОДНО» (для команд/кнопок, если понадобится) ====
+
+@router.message(F.text == "/feedback")   # опционально: команда чтобы вызвать блок вручную
+async def feedback_entry(msg: Message):
+    await send_feedback_prompt(msg)
+
+
+# ==== ОБРАБОТЧИКИ КНОПОК ОЦЕНКИ ====
+
 @router.callback_query(F.data.in_({"fb:hot", "fb:ok", "fb:meh"}))
-async def on_quick_mark(cb: CallbackQuery):
-    mark = {"fb:hot": "🔥", "fb:ok": "👌", "fb:meh": "😐"}[cb.data]
-    # TODO: здесь можно записать оценку в БД/метрики
-    await cb.answer("Спасибо!")
-    # опционально — аккуратно обновить сообщение/написать новое
-    # await cb.message.edit_reply_markup(reply_markup=None)
+async def on_feedback_reaction(cb: CallbackQuery):
+    kind_map = {"fb:hot": "hot", "fb:ok": "ok", "fb:meh": "meh"}
+    kind = kind_map.get(cb.data)
+    await _save_reaction(cb.from_user.id, kind)
+    await cb.answer("Сохранено ✅", show_alert=False)
 
-# Вход в режим «одна фраза»
-@router.callback_query(F.data == "fb:text")
-async def on_text_request(cb: CallbackQuery, state: FSMContext):
-    await cb.answer()  # закрыть «окно»
-    await cb.message.answer("Напишите короткий отзыв одной фразой. Чтобы отменить — /cancel")
-    await state.set_state(FeedbackStates.wait_text)
+@router.callback_query(F.data == "fb:phrase")
+async def on_feedback_phrase(cb: CallbackQuery, state: FSMContext):
+    await cb.answer()  # закрыть «часики»
+    await cb.message.answer("Напишите короткую фразу-отзыв одним сообщением (до 200 символов).")
+    await state.set_state(FeedbackStates.wait_phrase)
 
-# Приём одной фразы
-@router.message(FeedbackStates.wait_text, F.text)
-async def on_text_received(msg: Message, state: FSMContext):
+
+# ==== ПРИЁМ «1 ФРАЗЫ» ====
+
+@router.message(FeedbackStates.wait_phrase, F.text)
+async def on_feedback_phrase_text(msg: Message, state: FSMContext):
     text = (msg.text or "").strip()
-    if not text or len(text) > 300:
-        await msg.answer("Слишком длинно. Попробуйте одной короткой фразой (до 300 символов).")
+    if not text:
+        await msg.answer("Пусто 🤔 Напишите короткую фразу (можно одним-двумя предложениями).")
+        return
+    if len(text) > 200:
+        await msg.answer("Давайте короче (до 200 символов), пожалуйста 🙂")
         return
 
-    # TODO: сохранить отзыв (user_id=msg.from_user.id, text=text)
+    await _save_phrase(msg.from_user.id, text)
     await state.clear()
-    await msg.answer("Спасибо за отзыв! 🙌")
+    await msg.answer("Спасибо! Сохранил отзыв ✍️")
+
+# на всякий случай: если пришёл не текст — напомним
+@router.message(FeedbackStates.wait_phrase)
+async def on_feedback_phrase_nontext(msg: Message):
+    await msg.answer("Нужен обычный текст 🙂 Напишите короткую фразу-отзыв.")
