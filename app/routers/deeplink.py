@@ -1,50 +1,37 @@
 # app/routers/deeplink.py
 from __future__ import annotations
 
-from aiogram import Router, F
-from aiogram.filters import CommandStart, CommandObject
+from aiogram import Router
+from aiogram.filters import StateFilter
 from aiogram.types import Message
-from aiogram.fsm.context import FSMContext
+
+# Пытаемся импортировать из shortcuts (совместимость),
+# если нет — берём прямые entry-функции.
+try:
+    from app.routers.shortcuts import start_training_flow as _train_flow
+    from app.routers.shortcuts import start_casting_flow as _cast_flow
+except Exception:
+    from app.routers.training import training_entry as _train_flow
+    from app.routers.casting import casting_entry as _cast_flow
 
 router = Router(name="deeplink")
 
+def _payload(text: str | None) -> str | None:
+    if not text:
+        return None
+    parts = text.split(maxsplit=1)
+    if len(parts) == 2 and parts[0].startswith("/start"):
+        return parts[1].strip()
+    return None
 
-# ВАЖНО: мы не дублируем логику тренировки/кастинга,
-# а вызываем те же функции, что и обычные команды /training и /casting.
-# Ниже импортируйте ровно те функции, которыми сейчас запускаются сценарии.
-# Если у вас запуск делается прямо внутри обработчика, см. комментарий в shortcuts.py (п.2).
-from app.routers.shortcuts import start_training_flow, start_casting_flow
+# Точный матч по payload → обрабатываем здесь.
+@router.message(StateFilter("*"), lambda m: (_payload(m.text) or "").startswith("go_training"))
+async def deeplink_training(m: Message, **kwargs):
+    # передаём state через kwargs, если есть
+    state = kwargs.get("state")
+    await _train_flow(m, state)
 
-
-async def _handle_start_payload(msg: Message, state: FSMContext, payload: str | None) -> bool:
-    """
-    Вернёт True, если payload распознан и сценарий запущен.
-    """
-    if not payload:
-        return False
-
-    p = payload.strip().lower()
-
-    # допускаем хвосты меток: go_training_post_0915 и т.п.
-    if p.startswith("go_training"):
-        await msg.answer("Запускаю тренировку…")
-        await start_training_flow(msg, state)  # << тот же entrypoint, что и /training
-        return True
-
-    if p.startswith("go_casting"):
-        await msg.answer("Запускаю мини-кастинг…")
-        await start_casting_flow(msg, state)  # << тот же entrypoint, что и /casting
-        return True
-
-    return False
-
-
-@router.message(CommandStart())
-async def start_with_payload(msg: Message, command: CommandObject, state: FSMContext):
-    payload = (command.args or "").strip() if command else ""
-    handled = await _handle_start_payload(msg, state, payload)
-    if handled:
-        return
-
-    # Fallback — обычный старт без payload → дайте привет/меню как у вас принято
-    await msg.answer("Привет! Напиши /menu, чтобы начать.")
+@router.message(StateFilter("*"), lambda m: (_payload(m.text) or "").startswith("go_casting"))
+async def deeplink_casting(m: Message, **kwargs):
+    state = kwargs.get("state")
+    await _cast_flow(m, state)
