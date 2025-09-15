@@ -28,15 +28,15 @@ from app.routers.menu import (
 
 router = Router(name="shortcuts")
 
-# ───────────────────────────────────────────────────────────────────────────────
-# Алиасы для совместимости с deeplink.py
-# (deeplink импортирует start_training_flow / start_casting_flow)
+# ─────────────────────────────────────────────────────────────
+# Алиасы для совместимости со старым deeplink.py
+# (он импортирует эти имена)
 async def start_training_flow(m: Message, state: FSMContext) -> None:
     await training_entry(m, state)
 
 async def start_casting_flow(m: Message, state: FSMContext) -> None:
     await casting_entry(m, state)
-# ───────────────────────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────
 
 # ===== команды, которые должны работать в ЛЮБОМ состоянии =====
 @router.message(StateFilter("*"), Command("help"))
@@ -94,7 +94,7 @@ async def sc_training_text_fuzzy(m: Message, state: FSMContext):
 async def sc_casting_text_fuzzy(m: Message, state: FSMContext):
     await casting_entry(m, state)
 
-# ===== Реализация «Мой прогресс» =====
+# ===== «Мой прогресс» =====
 async def _send_progress(m: Message):
     with session_scope() as s:
         u = s.query(User).filter_by(tg_id=m.from_user.id).first()
