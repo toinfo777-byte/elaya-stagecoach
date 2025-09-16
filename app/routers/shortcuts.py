@@ -30,7 +30,7 @@ from app.routers.menu import (
 router = Router(name="shortcuts")
 
 
-# ===== команды, которые должны работать в ЛЮБОМ состоянии =====
+# ===== Глобальные команды (работают в любом состоянии) =====
 @router.message(StateFilter("*"), Command("help"))
 async def sc_help_cmd(m: Message):
     await m.answer(HELP_TEXT)
@@ -46,7 +46,6 @@ async def sc_progress_cmd(m: Message):
     await _send_progress(m)
 
 
-# 🔧 ДОБАВЛЕНО: ловим /training и /casting ещё ДО онбординга
 @router.message(StateFilter("*"), Command("training"))
 async def sc_training_cmd(m: Message, state: FSMContext):
     await training_entry(m, state)
@@ -57,16 +56,17 @@ async def sc_casting_cmd(m: Message, state: FSMContext):
     await casting_entry(m, state)
 
 
-# 🔧 Путь лидера — из любого состояния (без импорта функций из apply.py)
+# Путь лидера — без кросс-импортов функций
 @router.message(StateFilter("*"), Command("apply"))
 async def sc_apply_cmd(m: Message, state: FSMContext):
     await state.set_state(ApplyStates.wait_text)
     await m.answer(
-        "Путь лидера: короткая заявка.\n\nНапишите, чего хотите достичь — одним сообщением."
+        "Путь лидера: короткая заявка.\n\n"
+        "Напишите, чего хотите достичь — одним сообщением."
     )
 
 
-# ===== кнопки меню в любом состоянии =====
+# ===== Кнопки из основного меню (в любом состоянии) =====
 @router.message(StateFilter("*"), F.text == BTN_TRAIN)
 async def sc_training_btn(m: Message, state: FSMContext):
     await training_entry(m, state)
@@ -81,7 +81,8 @@ async def sc_casting_btn(m: Message, state: FSMContext):
 async def sc_apply_btn(m: Message, state: FSMContext):
     await state.set_state(ApplyStates.wait_text)
     await m.answer(
-        "Путь лидера: короткая заявка.\n\nНапишите, чего хотите достичь — одним сообщением."
+        "Путь лидера: короткая заявка.\n\n"
+        "Напишите, чего хотите достичь — одним сообщением."
     )
 
 
@@ -100,27 +101,18 @@ async def sc_progress_text_exact(m: Message):
     await _send_progress(m)
 
 
-# «фаззи» подстраховки по текстам (на случай иных эмодзи/пробелов)
-@router.message(
-    StateFilter("*"),
-    lambda m: isinstance(m.text, str) and "прогресс" in m.text.lower(),
-)
+# ===== «Фаззи» ловушки на случай чужих эмодзи/пробелов =====
+@router.message(StateFilter("*"), lambda m: isinstance(m.text, str) and "прогресс" in m.text.lower())
 async def sc_progress_text_fuzzy(m: Message):
     await _send_progress(m)
 
 
-@router.message(
-    StateFilter("*"),
-    lambda m: isinstance(m.text, str) and "трениров" in m.text.lower(),
-)
+@router.message(StateFilter("*"), lambda m: isinstance(m.text, str) and "трениров" in m.text.lower())
 async def sc_training_text_fuzzy(m: Message, state: FSMContext):
     await training_entry(m, state)
 
 
-@router.message(
-    StateFilter("*"),
-    lambda m: isinstance(m.text, str) and "кастинг" in m.text.lower(),
-)
+@router.message(StateFilter("*"), lambda m: isinstance(m.text, str) and "кастинг" in m.text.lower())
 async def sc_casting_text_fuzzy(m: Message, state: FSMContext):
     await casting_entry(m, state)
 
@@ -140,9 +132,7 @@ async def _send_progress(m: Message):
         q = s.query(DrillRun).filter(DrillRun.user_id == u.id)
 
         mapper = sqla_inspect(DrillRun)
-        dt_col = next(
-            (c for c in mapper.columns if isinstance(c.type, (DateTime, Date))), None
-        )
+        dt_col = next((c for c in mapper.columns if isinstance(c.type, (DateTime, Date))), None)
 
         if dt_col is not None:
             since = datetime.utcnow() - timedelta(days=7)
