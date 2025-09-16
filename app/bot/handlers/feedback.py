@@ -3,8 +3,10 @@ from __future__ import annotations
 
 import logging
 import re
+from typing import Optional
+
 from aiogram import Router, F
-from aiogram.types import CallbackQuery, Message
+from aiogram.types import CallbackQuery, Message, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.fsm.context import FSMContext
 from aiogram.filters import Command
 
@@ -24,24 +26,24 @@ RATE_ALERT_TEXT = {
     "meh": "😐 Принял. Спасибо!",
 }
 
-# ---------- эвристики распознавания действий из callback_data ----------
+# ---------- эвристики распознавания из callback_data ----------
 
-_RE_NUM = re.compile(r"(?<!\d)([123])(?!\d)")  # одиночные цифры 1/2/3 без соседних цифр
+_RE_NUM = re.compile(r"(?<!\d)([123])(?!\d)")
 
 def _norm(s: str | None) -> str:
     return (s or "").strip().lower()
 
-def _detect_phrase(data: str) -> bool:
+def _detect_phrase_by_data(data: str) -> bool:
     s = _norm(data)
     return any(k in s for k in (
         "fb:phrase", "phrase", "one_phrase", "comment", "review", "note", "text",
         "фраз", "текст",
     ))
 
-def _detect_rate(data: str) -> str | None:
+def _detect_rate_by_data(data: str) -> Optional[str]:
     s = _norm(data)
 
-    # явные слова/эмодзи
+    # слова/эмодзи
     if any(k in s for k in ("rate:hot", "fb:hot", "hot", "fire", "🔥", "r_hot", "rate-hot")):
         return "hot"
     if any(k in s for k in ("rate:ok", "fb:ok", "ok", "👌", "thumb", "👍", "good")):
@@ -49,13 +51,11 @@ def _detect_rate(data: str) -> str | None:
     if any(k in s for k in ("rate:meh", "fb:meh", "meh", "neutral", "😐", "so_so", "bad")):
         return "meh"
 
-    # числовые коды
+    # числа/коды
     m = _RE_NUM.search(s)
     if m:
-        # 1 = hot, 2 = ok, 3 = meh — самая частая мапа
         return {"1": "hot", "2": "ok", "3": "meh"}.get(m.group(1))
 
-    # альтернативные форматы r1, r_2, rate_3, fb-2 и т.п.
     for pat, val in (
         (r"(?:^|[^a-z])r[:_\-]?1(?!\d)", "hot"),
         (r"(?:^|[^a-z])r[:_\-]?2(?!\d)", "ok"),
@@ -72,54 +72,78 @@ def _detect_rate(data: str) -> str | None:
 
     return None
 
+# ---------- fallback: определяем по клавиатуре (текст/позиция) ----------
+
+def _detect_rate_by_markup(cq: CallbackQuery) -> Optional[str]:
+    rm: InlineKeyboardMarkup | None = getattr(getattr(cq, "message", None), "reply_markup", None)
+    if not rm or not isinstance(rm, InlineKeyboardMarkup):
+        return None
+
+    for r_idx, row in enumerate(rm.inline_keyboard or []):
+        for c_idx, btn in enumerate(row or []):
+            if not isinstance(btn, InlineKeyboardButton):
+                continue
+            if btn.callback_data == cq.data:
+                txt = (btn.text or "").strip()
+                # по тексту кнопки
+                if "🔥" in txt or "огонь" in txt.lower():
+                    return "hot"
+                if "👌" in txt or "👍" in txt or "ok" in txt.lower():
+                    return "ok"
+                if "😐" in txt or "нейтр" in txt.lower():
+                    return "meh"
+                # по позиции (первая строка: 0/1/2)
+                if r_idx == 0 and c_idx in (0, 1, 2):
+                    return {0: "hot", 1: "ok", 2: "meh"}[c_idx]
+                # ничего не распознали
+                return None
+    return None
+
+def _is_phrase_button_by_markup(cq: CallbackQuery) -> bool:
+    rm: InlineKeyboardMarkup | None = getattr(getattr(cq, "message", None), "reply_markup", None)
+    if not rm or not isinstance(rm, InlineKeyboardMarkup):
+        return False
+    for row in rm.inline_keyboard or []:
+        for btn in row or []:
+            if getattr(btn, "callback_data", None) == cq.data:
+                txt = (btn.text or "").lower()
+                return any(k in txt for k in ("фраз", "phrase", "comment", "review", "text"))
+    return False
+
 # ----------------------------- обработчики -----------------------------
 
 @router.callback_query()
-async def universal_feedback_handler(cq: CallbackQuery, state: FSMContext):
-    """Единая точка входа: распознаём действие и отвечаем.
-    НИКОГДА не оставляем крутилку висеть.
-    """
+async def feedback_any(cq: CallbackQuery, state: FSMContext):
     data = cq.data or ""
     try:
-        log.info("FB callback from %s: %r", getattr(cq.from_user, "id", "?"), data)
+        log.info("FB callback user=%s data=%r", getattr(cq.from_user, "id", "?"), data)
     except Exception:
         pass
 
-    # 0) мгновенно гасим крутилку
-    try:
-        await cq.answer("Ок")
-    except Exception:
-        pass
-
-    # 1) фраза?
-    if _detect_phrase(data):
+    # 1) «фраза»
+    if _detect_phrase_by_data(data) or _is_phrase_button_by_markup(cq):
         await state.set_state(FeedbackStates.wait_phrase)
+        await cq.answer()  # просто погасить крутилку
         await cq.message.answer(PROMPT_TEXT)
         return
 
-    # 2) оценка?
-    rate = _detect_rate(data)
+    # 2) оценка
+    rate = _detect_rate_by_data(data) or _detect_rate_by_markup(cq)
     if rate:
-        # TODO: здесь можно сохранить оценку в БД
-        try:
-            await cq.answer(RATE_ALERT_TEXT.get(rate, "Принято"), show_alert=False)
-        except Exception:
-            # тост мог уже быть, это не критично
-            pass
+        # TODO: сохранить оценку (rate) в БД
+        await cq.answer(RATE_ALERT_TEXT.get(rate, "Принято"), show_alert=False)
         return
 
-    # 3) неизвестная кнопка — спокойно подтверждаем
-    # (доп. действий не требуется)
-    return
+    # 3) прочее — тихо подтверждаем
+    await cq.answer()  # без текста
 
 
 @router.message(FeedbackStates.wait_phrase, ~F.text.startswith("/"))
 async def fb_phrase_text(msg: Message, state: FSMContext):
     phrase = (msg.text or "").strip()
-    # TODO: сохранить phrase в БД, привязав к текущему этюду/пользователю
+    # TODO: сохранить phrase в БД
     await state.clear()
     await msg.answer("Спасибо! Принял ✍️")
-
 
 @router.message(FeedbackStates.wait_phrase, Command("cancel"))
 async def fb_phrase_cancel(msg: Message, state: FSMContext):
