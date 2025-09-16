@@ -1,9 +1,8 @@
 # app/routers/system.py
 from __future__ import annotations
-from aiogram import Router, F
+from aiogram import Router
 from aiogram.filters import Command
 from aiogram.types import Message
-from app.routers.menu import main_menu
 
 router = Router(name="system")
 
@@ -19,15 +18,20 @@ HELP_TEXT = (
     "/cancel — сбросить состояние\n"
     "/privacy — политика конфиденциальности\n"
     "/version — версия бота\n"
-    "/health — проверка статуса"
+    "/health — проверка статуса\n"
 )
 
-PRIVACY_TEXT = "🔐 Политика конфиденциальности… (ваш текст)."
+PRIVACY_TEXT = (
+    "<b>Политика</b>\n\n"
+    "Мы храним минимум данных, необходимые для работы тренера и подсчёта прогресса. "
+    "Команда <code>/wipe_me</code> удалит профиль и записи. "
+    "Подробная политика — ваша ссылка/текст."
+)
 
 @router.message(Command("help"))
 async def help_cmd(m: Message):
-    await m.answer(HELP_TEXT, reply_markup=main_menu())
+    await m.answer(HELP_TEXT)
 
 @router.message(Command("privacy"))
 async def privacy_cmd(m: Message):
-    await m.answer(PRIVACY_TEXT, reply_markup=main_menu())
+    await m.answer(PRIVACY_TEXT)
