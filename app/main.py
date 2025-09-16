@@ -6,6 +6,7 @@ import logging
 from aiogram import Bot, Dispatcher
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.types import BotCommand, BotCommandScopeAllPrivateChats
+from aiogram.client.default import DefaultBotProperties  # <<< ВАЖНО: aiogram 3.7+
 
 from app.config import settings
 from app.middlewares.error_handler import ErrorsMiddleware
@@ -26,19 +27,11 @@ from app.routers.deeplink import router as deeplink_router
 from app.routers.feedback import router as feedback_router
 
 
-# ---------- Надёжное получение токена ----------
 def resolve_bot_token() -> str:
-    """
-    Пытаемся достать токен из settings или переменных окружения.
-    Поддерживаем несколько возможных имён поля, чтобы не падать.
-    """
+    """Пытаемся достать токен из settings или из ENV."""
     candidates_from_settings = [
-        "BOT_TOKEN",
-        "TG_BOT_TOKEN",
-        "TELEGRAM_BOT_TOKEN",
-        "TOKEN",
-        "bot_token",
-        "telegram_bot_token",
+        "BOT_TOKEN", "TG_BOT_TOKEN", "TELEGRAM_BOT_TOKEN", "TOKEN",
+        "bot_token", "telegram_bot_token",
     ]
     for name in candidates_from_settings:
         if hasattr(settings, name):
@@ -46,30 +39,18 @@ def resolve_bot_token() -> str:
             if isinstance(val, str) and val.strip():
                 return val.strip()
 
-    # env fallback
-    env_candidates = [
-        "BOT_TOKEN",
-        "TG_BOT_TOKEN",
-        "TELEGRAM_BOT_TOKEN",
-        "TOKEN",
-    ]
-    for name in env_candidates:
+    for name in ["BOT_TOKEN", "TG_BOT_TOKEN", "TELEGRAM_BOT_TOKEN", "TOKEN"]:
         val = os.getenv(name)
         if isinstance(val, str) and val.strip():
             return val.strip()
 
     raise RuntimeError(
-        "BOT token not found. "
-        "Set it in app.config.settings (e.g. settings.BOT_TOKEN) "
-        "or provide an env var BOT_TOKEN."
+        "BOT token not found. Provide settings.BOT_TOKEN (или переменную окружения BOT_TOKEN)."
     )
 
 
-# ---------- слэш-команды ----------
 async def setup_commands(bot: Bot) -> None:
     cmds = [
-        # /start из меню намеренно не показываем (путает), но можно включить при желании
-        # BotCommand(command="start",     description="Начать"),
         BotCommand(command="apply",     description="Путь лидера (заявка)"),
         BotCommand(command="training",  description="Тренировка дня"),
         BotCommand(command="casting",   description="Мини-кастинг"),
@@ -83,12 +64,14 @@ async def setup_commands(bot: Bot) -> None:
     await bot.set_my_commands(cmds, scope=BotCommandScopeAllPrivateChats())
 
 
-# ---------- запуск ----------
 async def main() -> None:
     logging.basicConfig(level=logging.INFO)
 
     token = resolve_bot_token()
-    bot = Bot(token=token, parse_mode="HTML")
+
+    # >>> aiogram 3.7+: задаём parse_mode через default=DefaultBotProperties
+    bot = Bot(token=token, default=DefaultBotProperties(parse_mode="HTML"))
+
     dp = Dispatcher(storage=MemoryStorage())
     dp.message.middleware(ErrorsMiddleware())
 
@@ -111,11 +94,11 @@ async def main() -> None:
     # Команды
     await setup_commands(bot)
 
-    # Обслуживание SQLite (безопасные no-op на Postgres)
+    # Обслуживание SQLite (safe no-op на Postgres)
     await backup_sqlite()
     await vacuum_sqlite()
 
-    # Поехали
+    # Старт
     await dp.start_polling(bot)
 
 
