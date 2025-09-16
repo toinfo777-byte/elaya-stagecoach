@@ -1,151 +1,92 @@
 # app/bot/handlers/feedback.py
 from __future__ import annotations
 
-import logging
-import re
-from typing import Optional
-
 from aiogram import Router, F
-from aiogram.types import CallbackQuery, Message, InlineKeyboardMarkup, InlineKeyboardButton
-from aiogram.fsm.context import FSMContext
 from aiogram.filters import Command
+from aiogram.fsm.context import FSMContext
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery, Message
 
+# если у тебя класс состояний уже создан в app/bot/states.py — используем его
+# (в твоём репозитории он назывался FeedbackStates с полем wait_phrase)
 from app.bot.states import FeedbackStates
 
-router = Router(name="feedback2")
-log = logging.getLogger(__name__)
+router = Router(name="feedback_v2")
 
-PROMPT_TEXT = (
-    "Напишите одну короткую фразу об этом этюде. "
-    "Если передумали — отправьте /cancel."
-)
-
-RATE_ALERT_TEXT = {
-    "hot": "🔥 Принял. Спасибо!",
-    "ok":  "👌 Принял. Спасибо!",
-    "meh": "😐 Принял. Спасибо!",
-}
-
-# ---------- эвристики распознавания из callback_data ----------
-
-_RE_NUM = re.compile(r"(?<!\d)([123])(?!\d)")
-
-def _norm(s: str | None) -> str:
-    return (s or "").strip().lower()
-
-def _detect_phrase_by_data(data: str) -> bool:
-    s = _norm(data)
-    return any(k in s for k in (
-        "fb:phrase", "phrase", "one_phrase", "comment", "review", "note", "text",
-        "фраз", "текст",
-    ))
-
-def _detect_rate_by_data(data: str) -> Optional[str]:
-    s = _norm(data)
-
-    # слова/эмодзи
-    if any(k in s for k in ("rate:hot", "fb:hot", "hot", "fire", "🔥", "r_hot", "rate-hot")):
-        return "hot"
-    if any(k in s for k in ("rate:ok", "fb:ok", "ok", "👌", "thumb", "👍", "good")):
-        return "ok"
-    if any(k in s for k in ("rate:meh", "fb:meh", "meh", "neutral", "😐", "so_so", "bad")):
-        return "meh"
-
-    # числа/коды
-    m = _RE_NUM.search(s)
-    if m:
-        return {"1": "hot", "2": "ok", "3": "meh"}.get(m.group(1))
-
-    for pat, val in (
-        (r"(?:^|[^a-z])r[:_\-]?1(?!\d)", "hot"),
-        (r"(?:^|[^a-z])r[:_\-]?2(?!\d)", "ok"),
-        (r"(?:^|[^a-z])r[:_\-]?3(?!\d)", "meh"),
-        (r"rate[:_\-]?1(?!\d)", "hot"),
-        (r"rate[:_\-]?2(?!\d)", "ok"),
-        (r"rate[:_\-]?3(?!\d)", "meh"),
-        (r"fb[:_\-]?1(?!\d)", "hot"),
-        (r"fb[:_\-]?2(?!\d)", "ok"),
-        (r"fb[:_\-]?3(?!\d)", "meh"),
-    ):
-        if re.search(pat, s):
-            return val
-
-    return None
-
-# ---------- fallback: определяем по клавиатуре (текст/позиция) ----------
-
-def _detect_rate_by_markup(cq: CallbackQuery) -> Optional[str]:
-    rm: InlineKeyboardMarkup | None = getattr(getattr(cq, "message", None), "reply_markup", None)
-    if not rm or not isinstance(rm, InlineKeyboardMarkup):
-        return None
-
-    for r_idx, row in enumerate(rm.inline_keyboard or []):
-        for c_idx, btn in enumerate(row or []):
-            if not isinstance(btn, InlineKeyboardButton):
-                continue
-            if btn.callback_data == cq.data:
-                txt = (btn.text or "").strip()
-                # по тексту кнопки
-                if "🔥" in txt or "огонь" in txt.lower():
-                    return "hot"
-                if "👌" in txt or "👍" in txt or "ok" in txt.lower():
-                    return "ok"
-                if "😐" in txt or "нейтр" in txt.lower():
-                    return "meh"
-                # по позиции (первая строка: 0/1/2)
-                if r_idx == 0 and c_idx in (0, 1, 2):
-                    return {0: "hot", 1: "ok", 2: "meh"}[c_idx]
-                # ничего не распознали
-                return None
-    return None
-
-def _is_phrase_button_by_markup(cq: CallbackQuery) -> bool:
-    rm: InlineKeyboardMarkup | None = getattr(getattr(cq, "message", None), "reply_markup", None)
-    if not rm or not isinstance(rm, InlineKeyboardMarkup):
-        return False
-    for row in rm.inline_keyboard or []:
-        for btn in row or []:
-            if getattr(btn, "callback_data", None) == cq.data:
-                txt = (btn.text or "").lower()
-                return any(k in txt for k in ("фраз", "phrase", "comment", "review", "text"))
-    return False
-
-# ----------------------------- обработчики -----------------------------
-
-@router.callback_query()
-async def feedback_any(cq: CallbackQuery, state: FSMContext):
-    data = cq.data or ""
-    try:
-        log.info("FB callback user=%s data=%r", getattr(cq.from_user, "id", "?"), data)
-    except Exception:
-        pass
-
-    # 1) «фраза»
-    if _detect_phrase_by_data(data) or _is_phrase_button_by_markup(cq):
-        await state.set_state(FeedbackStates.wait_phrase)
-        await cq.answer()  # просто погасить крутилку
-        await cq.message.answer(PROMPT_TEXT)
-        return
-
-    # 2) оценка
-    rate = _detect_rate_by_data(data) or _detect_rate_by_markup(cq)
-    if rate:
-        # TODO: сохранить оценку (rate) в БД
-        await cq.answer(RATE_ALERT_TEXT.get(rate, "Принято"), show_alert=False)
-        return
-
-    # 3) прочее — тихо подтверждаем
-    await cq.answer()  # без текста
+# ---- callback constants
+FB_FIRE = "fb_fire"
+FB_OK = "fb_ok"
+FB_NEUTRAL = "fb_neutral"
+FB_PHRASE = "fb_phrase"
 
 
+# ---- keyboard factory
+def make_feedback_keyboard() -> InlineKeyboardMarkup:
+    """
+    Клавиатура отзывов. ВАЖНО: порядок callback_data совпадает с порядком кнопок.
+    """
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(text="🔥", callback_data=FB_FIRE),
+                InlineKeyboardButton(text="👌", callback_data=FB_OK),
+                InlineKeyboardButton(text="😐", callback_data=FB_NEUTRAL),
+            ],
+            [InlineKeyboardButton(text="✍️ 1 фраза", callback_data=FB_PHRASE)],
+        ]
+    )
+
+
+# ---- emoji handlers (короткий отклик без смены состояния)
+@router.callback_query(F.data == FB_FIRE)
+async def on_fb_fire(cq: CallbackQuery) -> None:
+    # Короткий toast-ответ; show_alert=False, чтобы не всплывало большим модальным окном
+    await cq.answer("🔥 Принял. Спасибо!", show_alert=False)
+
+
+@router.callback_query(F.data == FB_OK)
+async def on_fb_ok(cq: CallbackQuery) -> None:
+    await cq.answer("👌 Принял. Спасибо!", show_alert=False)
+
+
+@router.callback_query(F.data == FB_NEUTRAL)
+async def on_fb_neutral(cq: CallbackQuery) -> None:
+    await cq.answer("😐 Принял. Спасибо!", show_alert=False)
+
+
+# ---- phrase flow
+@router.callback_query(F.data == FB_PHRASE)
+async def on_fb_phrase(cq: CallbackQuery, state: FSMContext) -> None:
+    # Сообщение в чат + переводим в состояние ожидания фразы
+    await cq.message.answer(
+        "Напишите одну короткую фразу об этом этюде. Если передумали — отправьте /cancel."
+    )
+    await state.set_state(FeedbackStates.wait_phrase)
+    # обязательно закрываем спиннер callback’а
+    await cq.answer()
+
+
+# Пользователь прислал текст фразы
 @router.message(FeedbackStates.wait_phrase, ~F.text.startswith("/"))
-async def fb_phrase_text(msg: Message, state: FSMContext):
+async def on_fb_phrase_text(msg: Message, state: FSMContext) -> None:
     phrase = (msg.text or "").strip()
-    # TODO: сохранить phrase в БД
-    await state.clear()
-    await msg.answer("Спасибо! Принял ✍️")
+    if not phrase:
+        await msg.answer("Нужна короткая фраза — одно предложение. Попробуете ещё раз?")
+        return
 
-@router.message(FeedbackStates.wait_phrase, Command("cancel"))
-async def fb_phrase_cancel(msg: Message, state: FSMContext):
+    # здесь можно сохранить фразу в БД/метрики; пока просто отвечаем
+    await msg.answer("Супер, записал. Спасибо! 🎯")
     await state.clear()
-    await msg.answer("Отменил. Если что — нажмите «✍ 1 фраза» ещё раз.")
+
+
+# Отмена ввода фразы
+@router.message(FeedbackStates.wait_phrase, Command("cancel"))
+async def on_fb_phrase_cancel(msg: Message, state: FSMContext) -> None:
+    await state.clear()
+    await msg.answer("Ок, отменил ввод фразы.")
+
+
+# (опционально) защита от случайных коллбеков нашего пространства имён
+@router.callback_query(F.data.startswith("fb_"))
+async def on_fb_unknown(cq: CallbackQuery) -> None:
+    # Если вдруг прилетело что-то fb_* без хэндлера — просто вежливо ответим
+    await cq.answer("Принял 👍", show_alert=False)
