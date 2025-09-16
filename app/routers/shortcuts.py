@@ -1,4 +1,3 @@
-# app/routers/shortcuts.py
 from __future__ import annotations
 
 from datetime import datetime, timedelta
@@ -14,9 +13,12 @@ from sqlalchemy.sql.sqltypes import DateTime, Date
 from app.routers.system import PRIVACY_TEXT, HELP_TEXT
 from app.routers.training import training_entry
 from app.routers.casting import casting_entry
+from app.routers.apply import apply_entry
+from app.routers.premium import premium_entry
+
 from app.storage.repo import session_scope
 from app.storage.models import User, DrillRun
-from app.bot.states import ApplyStates
+
 from app.routers.menu import (
     BTN_TRAIN,
     BTN_PROGRESS,
@@ -24,108 +26,89 @@ from app.routers.menu import (
     BTN_CASTING,
     BTN_PRIVACY,
     BTN_HELP,
+    BTN_PREMIUM,
     main_menu,
 )
 
 router = Router(name="shortcuts")
 
-
-# ===== Глобальные команды (работают в любом состоянии) =====
+# ===== команды, которые должны работать в ЛЮБОМ состоянии =====
 @router.message(StateFilter("*"), Command("help"))
 async def sc_help_cmd(m: Message):
-    await m.answer(HELP_TEXT)
-
+    await m.answer(HELP_TEXT, parse_mode="Markdown", reply_markup=main_menu())
 
 @router.message(StateFilter("*"), Command("privacy"))
 async def sc_privacy_cmd(m: Message):
-    await m.answer(PRIVACY_TEXT)
-
+    await m.answer(PRIVACY_TEXT, parse_mode="Markdown", reply_markup=main_menu())
 
 @router.message(StateFilter("*"), Command("progress"))
 async def sc_progress_cmd(m: Message):
     await _send_progress(m)
 
-
 @router.message(StateFilter("*"), Command("training"))
 async def sc_training_cmd(m: Message, state: FSMContext):
     await training_entry(m, state)
-
 
 @router.message(StateFilter("*"), Command("casting"))
 async def sc_casting_cmd(m: Message, state: FSMContext):
     await casting_entry(m, state)
 
-
-# Путь лидера — без кросс-импортов функций
 @router.message(StateFilter("*"), Command("apply"))
 async def sc_apply_cmd(m: Message, state: FSMContext):
-    await state.set_state(ApplyStates.wait_text)
-    await m.answer(
-        "Путь лидера: короткая заявка.\n\n"
-        "Напишите, чего хотите достичь — одним сообщением."
-    )
+    await apply_entry(m, state)
 
+@router.message(StateFilter("*"), Command("premium"))
+async def sc_premium_cmd(m: Message):
+    await premium_entry(m)
 
-# ===== Кнопки из основного меню (в любом состоянии) =====
+# ===== кнопки меню в любом состоянии =====
 @router.message(StateFilter("*"), F.text == BTN_TRAIN)
 async def sc_training_btn(m: Message, state: FSMContext):
     await training_entry(m, state)
-
 
 @router.message(StateFilter("*"), F.text == BTN_CASTING)
 async def sc_casting_btn(m: Message, state: FSMContext):
     await casting_entry(m, state)
 
-
 @router.message(StateFilter("*"), F.text == BTN_APPLY)
 async def sc_apply_btn(m: Message, state: FSMContext):
-    await state.set_state(ApplyStates.wait_text)
-    await m.answer(
-        "Путь лидера: короткая заявка.\n\n"
-        "Напишите, чего хотите достичь — одним сообщением."
-    )
+    await apply_entry(m, state)
 
+@router.message(StateFilter("*"), F.text == BTN_PREMIUM)
+async def sc_premium_btn(m: Message):
+    await premium_entry(m)
 
 @router.message(StateFilter("*"), F.text == BTN_PRIVACY)
 async def sc_privacy_text(m: Message):
-    await m.answer(PRIVACY_TEXT)
-
+    await m.answer(PRIVACY_TEXT, parse_mode="Markdown", reply_markup=main_menu())
 
 @router.message(StateFilter("*"), F.text == BTN_HELP)
 async def sc_help_text(m: Message):
-    await m.answer(HELP_TEXT)
-
+    await m.answer(HELP_TEXT, parse_mode="Markdown", reply_markup=main_menu())
 
 @router.message(StateFilter("*"), F.text == BTN_PROGRESS)
 async def sc_progress_text_exact(m: Message):
     await _send_progress(m)
 
-
-# ===== «Фаззи» ловушки на случай чужих эмодзи/пробелов =====
+# «фаззи» подстраховки по текстам (на случай иных эмодзи/пробелов)
 @router.message(StateFilter("*"), lambda m: isinstance(m.text, str) and "прогресс" in m.text.lower())
 async def sc_progress_text_fuzzy(m: Message):
     await _send_progress(m)
-
 
 @router.message(StateFilter("*"), lambda m: isinstance(m.text, str) and "трениров" in m.text.lower())
 async def sc_training_text_fuzzy(m: Message, state: FSMContext):
     await training_entry(m, state)
 
-
 @router.message(StateFilter("*"), lambda m: isinstance(m.text, str) and "кастинг" in m.text.lower())
 async def sc_casting_text_fuzzy(m: Message, state: FSMContext):
     await casting_entry(m, state)
-
 
 # ===== Реализация «Мой прогресс» =====
 async def _send_progress(m: Message):
     with session_scope() as s:
         u = s.query(User).filter_by(tg_id=m.from_user.id).first()
         if not u:
-            await m.answer(
-                "Сначала пройди /start, а затем вернись в «Мой прогресс».",
-                reply_markup=main_menu(),
-            )
+            await m.answer("Сначала пройди /start, а затем вернись в «Мой прогресс».", reply_markup=main_menu())
             return
 
         streak = u.streak or 0
@@ -156,10 +139,10 @@ async def _send_progress(m: Message):
             pass
 
     txt = (
-        "📈 <b>Мой прогресс</b>\n\n"
-        f"• Стрик: <b>{streak}</b>\n"
-        f"• Этюдов за 7 дней: <b>{runs_7d}</b>"
+        "📈 *Мой прогресс*\n\n"
+        f"• Стрик: *{streak}*\n"
+        f"• Этюдов за 7 дней: *{runs_7d}*"
         f"{src_txt}\n\n"
         "Продолжай каждый день — тренировка дня в один клик 👇"
     )
-    await m.answer(txt, reply_markup=main_menu())
+    await m.answer(txt, reply_markup=main_menu(), parse_mode="Markdown")
