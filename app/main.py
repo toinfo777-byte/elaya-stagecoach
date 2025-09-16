@@ -3,85 +3,80 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import os
+from contextlib import suppress
 
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
-from aiogram.fsm.storage.memory import MemoryStorage
+from aiogram.enums import ParseMode
 
-# ===== РОУТЕРЫ (важен порядок!)
-from app.routers.smoke import router as smoke_router          # /ping, /health
-from app.routers.apply import router as apply_router          # заявка (Путь лидера)
-from app.routers.deeplink import router as deeplink_router    # /start <payload>
-from app.routers.shortcuts import router as shortcuts_router  # /training, /casting, кнопки в любом состоянии
-from app.routers.reply_shortcuts import router as reply_shortcuts_router  # если есть
-from app.routers.onboarding import router as onboarding_router            # /start
-from app.routers.training import router as training_router
-from app.routers.casting import router as casting_router
-from app.routers.progress import router as progress_router
-from app.bot.handlers.feedback import router as feedback2_router          # 🔥/👌/😐 и ✍ 1 фраза
-from app.routers.system import router as system_router
-from app.routers.settings import router as settings_router
-from app.routers.admin import router as admin_router
-from app.routers.premium import router as premium_router
-from app.routers.metrics import router as metrics_router
-from app.routers.cancel import router as cancel_router
-from app.routers.menu import router as menu_router
+from app.utils.config import settings
+from app.storage.repo import init_db  # синхронная инициализация
+from app.middlewares.error_handler import ErrorsMiddleware
+from app.middlewares.source_tags import SourceTagsMiddleware
 
-# База (если у вас sync SQLAlchemy — НЕ await)
-from app.storage.repo import init_db
+# ==== РОУТЕРЫ (очевидные импорты и порядок важен) ====
+from app.routers.smoke import router as smoke_router              # /ping, /health
+from app.routers.apply import router as apply_router              # заявка (Путь лидера)
+from app.routers.deeplink import router as deeplink_router        # диплинки /start <payload>
+from app.routers.shortcuts import router as shortcuts_router      # /training, /casting, кнопки (в любом состоянии)
+from app.routers.reply_shortcuts import router as reply_shortcuts_router
+from app.routers.onboarding import router as onboarding_router    # /start
+from app.routers.coach import router as coach_router              # наставник (если есть — можно отключить)
+from app.routers.training import router as training_router        # тренировка
+from app.routers.casting import router as casting_router          # мини-кастинг
+from app.routers.progress import router as progress_router        # прогресс
+# старый проектный фидбек можно не подключать
+from app.bot.handlers.feedback import router as feedback2_router  # 🔥/👌/😐 и ✍️ 1 фраза (универсально)
+from app.routers.system import router as system_router            # /help, /privacy, /whoami, /version, /health
+from app.routers.settings import router as settings_router        # тех.настройки
+from app.routers.admin import router as admin_router              # админка
+from app.routers.premium import router as premium_router          # плата/заглушки
+from app.routers.metrics import router as metrics_router          # /metrics (админы)
+from app.routers.cancel import router as cancel_router            # глобальная отмена /cancel
+from app.routers.menu import router as menu_router                # меню (строго последним)
 
 logging.basicConfig(level=logging.INFO)
 
-BOT_TOKEN = os.getenv("BOT_TOKEN") or os.getenv("TELEGRAM_BOT_TOKEN")
-
-
 async def main() -> None:
-    if not BOT_TOKEN:
-        raise RuntimeError("BOT_TOKEN is not set")
+    # ---- init DB (синхронная функция) ----
+    # внутри init_db() делается engine/metadata.create_all(...) без await
+    init_db()
 
-    # aiogram 3.7+: parse_mode через DefaultBotProperties
+    # ---- bot/dispatcher ----
+    token = settings.bot_token  # см. utils/config.py ниже
     bot = Bot(
-        token=BOT_TOKEN,
-        default=DefaultBotProperties(parse_mode="HTML"),
+        token=token,
+        default=DefaultBotProperties(parse_mode=ParseMode.HTML),
     )
-    dp = Dispatcher(storage=MemoryStorage())
+    dp = Dispatcher()
 
-    # БД (синхронная инициализация — без await)
-    try:
-        init_db()
-    except Exception as e:
-        logging.exception("init_db error: %s", e)
+    # ---- middlewares ----
+    dp.update.middleware(ErrorsMiddleware())
+    dp.update.middleware(SourceTagsMiddleware())
 
-    # ПОДКЛЮЧАЕМ РОУТЕРЫ В ЖЕСТКО ЗАДАННОМ ПОРЯДКЕ
-    # 1) всегда-ловящие команды/кнопки
+    # ---- routers ----
     dp.include_router(smoke_router)
-    dp.include_router(deeplink_router)         # обрабатывает /start payload
-    dp.include_router(shortcuts_router)        # /training, /casting, «Мой прогресс», кнопки меню
-
-    # 2) профильные сценарии
-    dp.include_router(onboarding_router)       # обычный /start (анкета)
+    dp.include_router(apply_router)
+    dp.include_router(deeplink_router)
+    dp.include_router(shortcuts_router)
+    dp.include_router(reply_shortcuts_router)
+    dp.include_router(onboarding_router)
+    dp.include_router(coach_router)
     dp.include_router(training_router)
     dp.include_router(casting_router)
-    dp.include_router(apply_router)
-
-    # 3) фидбек (эмодзи и «1 фраза»)
-    dp.include_router(feedback2_router)
-
-    # 4) прочее
     dp.include_router(progress_router)
-    dp.include_router(settings_router)
+    dp.include_router(feedback2_router)  # универсальный обработчик отзывов
     dp.include_router(system_router)
+    dp.include_router(settings_router)
     dp.include_router(admin_router)
     dp.include_router(premium_router)
     dp.include_router(metrics_router)
     dp.include_router(cancel_router)
-
-    # 5) всегда последним — меню (клавиатура)
     dp.include_router(menu_router)
 
-    await dp.start_polling(bot)
-
+    # ---- start polling ----
+    await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types())
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    with suppress(KeyboardInterrupt):
+        asyncio.run(main())
