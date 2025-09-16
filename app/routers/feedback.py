@@ -1,59 +1,49 @@
-# app/routers/feedback.py
 from __future__ import annotations
 
 from aiogram import Router, F
-from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.types import CallbackQuery, Message
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import StatesGroup, State
 
-router = Router(name="feedback2")
+from app.routers.menu import main_menu
 
-# состояние для «✍ 1 фраза»
-class FeedbackStates(StatesGroup):
-    wait_phrase = State()
+router = Router(name="feedback")
 
-# ==== клавиатура отзывов ====
-def kb() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [
-            InlineKeyboardButton(text="🔥", callback_data="fb:fire"),
-            InlineKeyboardButton(text="👌", callback_data="fb:ok"),
-            InlineKeyboardButton(text="😐", callback_data="fb:meh"),
-        ],
-        [InlineKeyboardButton(text="✍ 1 фраза", callback_data="fb:phrase")],
-    ])
+# На случай разных вариантов callback_data в старом/новом коде:
+EMOJI_DATAS = {
+    "🔥", "👌", "😐",
+    "fire", "ok", "meh", "like", "neutral", "dislike", "hot",
+    "fb_fire", "fb_ok", "fb_meh",
+}
 
-# ==== обработчики ====
-@router.callback_query(F.data.startswith("fb:"))
-async def on_feedback_buttons(cq: CallbackQuery, state: FSMContext):
-    action = cq.data.split(":", 1)[1]
-    if action == "phrase":
-        await state.set_state(FeedbackStates.wait_phrase)
-        await cq.message.answer("Напишите одну короткую фразу об этом этюде. Если передумали — отправьте /cancel.")
-        await cq.answer()
-        return
+PHRASE_DATAS = {"phrase", "fb_phrase", "fb:phrase", "✍️ 1 фраза"}
 
-    # простая фиксация реакции (при желании добавь запись в БД)
-    txt = {"fire": "🔥 Огонь!", "ok": "👌 Принято!", "meh": "😐 Ок"}[action]
-    await cq.answer("Спасибо! Принял 👍", show_alert=False)
-    # Можно ответом в чат (по желанию):
-    # await cq.message.answer(txt)
+class OnePhrase(StatesGroup):
+    awaiting = State()
 
-@router.message(FeedbackStates.wait_phrase, F.text)
-async def on_feedback_phrase(msg: Message, state: FSMContext):
-    phrase = (msg.text or "").strip()
-    if not phrase:
-        await msg.answer("Одной короткой фразой, пожалуйста 🙂")
-        return
+# ——— Эмодзи-оценки ———
+@router.callback_query(F.data.in_(EMOJI_DATAS))
+async def feedback_emoji(cq: CallbackQuery):
+    # короткий pop-up, чтобы не зашумлять чат
+    await cq.answer("Принял. Спасибо! 👍", show_alert=False)
 
-    # здесь можно сохранить в БД
-    # save_phrase(user_id=msg.from_user.id, phrase=phrase)
+# ——— «1 фраза» ———
+@router.callback_query(F.data.in_(PHRASE_DATAS))
+async def feedback_phrase_start(cq: CallbackQuery, state: FSMContext):
+    await cq.answer()
+    await cq.message.answer(
+        "Напишите одну короткую фразу об этом этюде. Если передумали — отправьте /cancel.",
+        reply_markup=main_menu()
+    )
+    await state.set_state(OnePhrase.awaiting)
 
+@router.message(OnePhrase.awaiting, ~F.text.startswith("/"))
+async def feedback_phrase_save(m: Message, state: FSMContext):
+    # здесь можно сохранить фразу в базу
     await state.clear()
-    await msg.answer("Готово! Сохранил 👍")
+    await m.answer("Спасибо! Сохранил ✍️", reply_markup=main_menu())
 
-# если в режиме ожидания фразы прилетит команда — выходим
-@router.message(FeedbackStates.wait_phrase, F.text.startswith("/"))
-async def on_feedback_phrase_cmd(msg: Message, state: FSMContext):
+@router.message(OnePhrase.awaiting, F.text == "/cancel")
+async def feedback_phrase_cancel(m: Message, state: FSMContext):
     await state.clear()
-    await msg.answer("Отменил. Возвращаюсь.")
+    await m.answer("Ок, без фразы. Возвращаю в меню.", reply_markup=main_menu())
