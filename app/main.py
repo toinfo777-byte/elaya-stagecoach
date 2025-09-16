@@ -6,7 +6,7 @@ import logging
 from aiogram import Bot, Dispatcher
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.types import BotCommand, BotCommandScopeAllPrivateChats
-from aiogram.client.default import DefaultBotProperties  # <<< ВАЖНО: aiogram 3.7+
+from aiogram.client.default import DefaultBotProperties
 
 from app.config import settings
 from app.middlewares.error_handler import ErrorsMiddleware
@@ -28,7 +28,7 @@ from app.routers.feedback import router as feedback_router
 
 
 def resolve_bot_token() -> str:
-    """Пытаемся достать токен из settings или из ENV."""
+    """Берем токен из settings или ENV."""
     candidates_from_settings = [
         "BOT_TOKEN", "TG_BOT_TOKEN", "TELEGRAM_BOT_TOKEN", "TOKEN",
         "bot_token", "telegram_bot_token",
@@ -45,7 +45,7 @@ def resolve_bot_token() -> str:
             return val.strip()
 
     raise RuntimeError(
-        "BOT token not found. Provide settings.BOT_TOKEN (или переменную окружения BOT_TOKEN)."
+        "BOT token not found. Укажите settings.BOT_TOKEN или переменную окружения BOT_TOKEN."
     )
 
 
@@ -69,14 +69,14 @@ async def main() -> None:
 
     token = resolve_bot_token()
 
-    # >>> aiogram 3.7+: задаём parse_mode через default=DefaultBotProperties
+    # aiogram 3.7+: parse_mode задаем через default
     bot = Bot(token=token, default=DefaultBotProperties(parse_mode="HTML"))
 
     dp = Dispatcher(storage=MemoryStorage())
     dp.message.middleware(ErrorsMiddleware())
 
-    # БД
-    await init_db()
+    # БД (СИНХРОННЫЙ вызов, без await)
+    init_db()
 
     # Роутеры
     dp.include_router(onboarding_router)
@@ -94,9 +94,13 @@ async def main() -> None:
     # Команды
     await setup_commands(bot)
 
-    # Обслуживание SQLite (safe no-op на Postgres)
-    await backup_sqlite()
-    await vacuum_sqlite()
+    # Обслуживание SQLite (если функции синхронные — тоже без await)
+    try:
+        backup_sqlite()
+        vacuum_sqlite()
+    except Exception:
+        # безопасно игнорируем на проде/postgres
+        pass
 
     # Старт
     await dp.start_polling(bot)
