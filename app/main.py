@@ -1,7 +1,7 @@
 # app/main.py
+import os
 import asyncio
 import logging
-from datetime import datetime, timedelta, timezone
 
 from aiogram import Bot, Dispatcher
 from aiogram.fsm.storage.memory import MemoryStorage
@@ -26,10 +26,50 @@ from app.routers.deeplink import router as deeplink_router
 from app.routers.feedback import router as feedback_router
 
 
-# ====== меню команд ======
+# ---------- Надёжное получение токена ----------
+def resolve_bot_token() -> str:
+    """
+    Пытаемся достать токен из settings или переменных окружения.
+    Поддерживаем несколько возможных имён поля, чтобы не падать.
+    """
+    candidates_from_settings = [
+        "BOT_TOKEN",
+        "TG_BOT_TOKEN",
+        "TELEGRAM_BOT_TOKEN",
+        "TOKEN",
+        "bot_token",
+        "telegram_bot_token",
+    ]
+    for name in candidates_from_settings:
+        if hasattr(settings, name):
+            val = getattr(settings, name)
+            if isinstance(val, str) and val.strip():
+                return val.strip()
+
+    # env fallback
+    env_candidates = [
+        "BOT_TOKEN",
+        "TG_BOT_TOKEN",
+        "TELEGRAM_BOT_TOKEN",
+        "TOKEN",
+    ]
+    for name in env_candidates:
+        val = os.getenv(name)
+        if isinstance(val, str) and val.strip():
+            return val.strip()
+
+    raise RuntimeError(
+        "BOT token not found. "
+        "Set it in app.config.settings (e.g. settings.BOT_TOKEN) "
+        "or provide an env var BOT_TOKEN."
+    )
+
+
+# ---------- слэш-команды ----------
 async def setup_commands(bot: Bot) -> None:
     cmds = [
-        BotCommand(command="start",     description="Начать"),
+        # /start из меню намеренно не показываем (путает), но можно включить при желании
+        # BotCommand(command="start",     description="Начать"),
         BotCommand(command="apply",     description="Путь лидера (заявка)"),
         BotCommand(command="training",  description="Тренировка дня"),
         BotCommand(command="casting",   description="Мини-кастинг"),
@@ -43,18 +83,19 @@ async def setup_commands(bot: Bot) -> None:
     await bot.set_my_commands(cmds, scope=BotCommandScopeAllPrivateChats())
 
 
-# ====== основной запуск ======
+# ---------- запуск ----------
 async def main() -> None:
     logging.basicConfig(level=logging.INFO)
 
-    bot = Bot(token=settings.BOT_TOKEN, parse_mode="HTML")
+    token = resolve_bot_token()
+    bot = Bot(token=token, parse_mode="HTML")
     dp = Dispatcher(storage=MemoryStorage())
     dp.message.middleware(ErrorsMiddleware())
 
-    # init db
+    # БД
     await init_db()
 
-    # регистрируем роутеры
+    # Роутеры
     dp.include_router(onboarding_router)
     dp.include_router(menu_router)
     dp.include_router(training_router)
@@ -67,14 +108,14 @@ async def main() -> None:
     dp.include_router(deeplink_router)
     dp.include_router(feedback_router)
 
-    # ставим команды
+    # Команды
     await setup_commands(bot)
 
-    # техобслуживание БД
+    # Обслуживание SQLite (безопасные no-op на Postgres)
     await backup_sqlite()
     await vacuum_sqlite()
 
-    # стартуем
+    # Поехали
     await dp.start_polling(bot)
 
 
