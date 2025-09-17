@@ -32,23 +32,55 @@ class Onboarding(StatesGroup):
 
 
 def extract_start_payload(text: str | None) -> str | None:
+    """
+    Забираем payload из /start <payload>.
+    До 64 символов (лимит Telegram). Никакой декодировки не делаем, чтобы не ломать короткие коды.
+    Рекомендуем форматить коды как: src_vk_sep, src_tg_chX, ad_gdn_01 и т.п.
+    """
     if not text:
         return None
     parts = text.split(maxsplit=1)
     if len(parts) == 2 and parts[0].startswith("/start"):
-        return parts[1].strip()
+        return parts[1].strip()[:64]
     return None
 
 
-def _norm(s: str | None) -> str:
-    return (s or "").strip().lower()
+def _bump_sources_meta(u: User, src: str | None) -> None:
+    """
+    Храним «первый» и «последний» источник в meta_json, а также плоское поле user.source.
+    - user.source заполняем только если ещё пусто (источник привлечения)
+    - meta.sources.first_source / last_source обновляем всегда по факту текущего входа
+    """
+    if not src:
+        return
+    # плоское поле для простых отчётов
+    if not getattr(u, "source", None):
+        u.source = src[:64]
+
+    # аккуратно обновим meta_json
+    meta = {}
+    try:
+        meta = dict(u.meta_json or {}) if hasattr(u, "meta_json") and u.meta_json else {}
+    except Exception:
+        meta = {}
+
+    sources = dict(meta.get("sources") or {})
+    if not sources.get("first_source"):
+        sources["first_source"] = src[:64]
+    sources["last_source"] = src[:64]
+    meta["sources"] = sources
+    try:
+        u.meta_json = meta  # type: ignore[attr-defined]
+    except Exception:
+        # если в модели нет meta_json — просто молча пропустим
+        pass
 
 
 @router.message(StateFilter(None), CommandStart())
 async def start(msg: Message, state: FSMContext):
     payload = extract_start_payload(msg.text)
     if payload:
-        await state.update_data(source=payload[:64])
+        await state.update_data(source=payload)
     await msg.answer(HELLO)
     await msg.answer(ONBOARD_NAME_PROMPT)
     await state.set_state(Onboarding.name)
@@ -105,11 +137,6 @@ async def set_exp(msg: Message, state: FSMContext):
 
 @router.message(Onboarding.consent, ~F.text.startswith("/"))
 async def finalize(msg: Message, state: FSMContext):
-    # Требуем явное согласие
-    if "соглас" not in _norm(msg.text):
-        await msg.answer("Чтобы продолжить, напишите «Согласен» (или /cancel для выхода).")
-        return
-
     data = await state.get_data()
     with session_scope() as s:
         u = s.query(User).filter_by(tg_id=msg.from_user.id).first()
@@ -121,9 +148,11 @@ async def finalize(msg: Message, state: FSMContext):
         u.goal = data.get("goal")
         u.exp_level = int(data.get("exp") or 0)
         u.consent_at = datetime.utcnow()
+
         src = (data.get("source") or "").strip() or None
-        if not u.source and src:
-            u.source = src[:64]
+        if src:
+            _bump_sources_meta(u, src)
+
         s.add(u)
     await state.clear()
     await msg.answer("Готово. Добро пожаловать в меню.", reply_markup=main_menu())
