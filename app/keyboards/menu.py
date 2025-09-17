@@ -20,10 +20,14 @@ def main_menu() -> ReplyKeyboardMarkup:
         [KeyboardButton(text=BTN_PRIVACY), KeyboardButton(text=BTN_HELP)],
         [KeyboardButton(text=BTN_PREMIUM), KeyboardButton(text=BTN_SETTINGS)],
     ]
+    # is_persistent помогает клиенту держать клавиатуру закреплённой
     return ReplyKeyboardMarkup(keyboard=rows, resize_keyboard=True, is_persistent=True)
 
 def get_bot_commands() -> list[BotCommand]:
-    """Список /команд в левом меню = соответствуют нижнему меню."""
+    """
+    Список команд для левого меню Telegram и для /help.
+    Полностью соответствует нижнему меню (без служебных /version и /cancel).
+    """
     return [
         BotCommand(command="menu", description="Открыть меню"),
         BotCommand(command="training", description="Тренировка дня"),
@@ -34,6 +38,4 @@ def get_bot_commands() -> list[BotCommand]:
         BotCommand(command="help", description="Помощь"),
         BotCommand(command="premium", description="Расширенная версия"),
         BotCommand(command="settings", description="Настройки"),
-        BotCommand(command="version", description="Версия бота"),
-        BotCommand(command="cancel", description="Сбросить состояние"),
     ]
