@@ -118,6 +118,7 @@ async def main() -> None:
     _include_router_safe(dp, "app.routers.settings")
     _include_router_safe(dp, "app.routers.admin")
     _include_router_safe(dp, "app.routers.metrics")
+    _include_router_safe(dp, "app.routers.analytics")  # отчёты по источникам
     _include_router_safe(dp, "app.routers.cancel")
     _include_router_safe(dp, "app.routers.feedback")
     _include_router_safe(dp, "app.routers.premium")
