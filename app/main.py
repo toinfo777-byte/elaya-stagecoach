@@ -1,3 +1,4 @@
+# app/main.py
 from __future__ import annotations
 
 import asyncio
@@ -8,6 +9,12 @@ from typing import Any, Callable
 
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
+from aiogram.types import (
+    BotCommandScopeDefault,
+    BotCommandScopeAllPrivateChats,
+    BotCommandScopeAllGroupChats,
+    BotCommandScopeAllChatAdministrators,
+)
 
 from app.keyboards.menu import get_bot_commands  # единый источник /команд
 
@@ -66,6 +73,33 @@ def _include_router_safe(dp: Dispatcher, dotted: str, attr: str = "router") -> N
         log.warning("Skip router %s: %s", dotted, e)
 
 
+async def _set_bot_commands_everywhere(bot: Bot) -> None:
+    """
+    Полностью синхронизируем список /команд с нашим нижним меню:
+    - чистим команды в базовых скоупах (на всякий случай);
+    - задаём один и тот же список во всех приватных скоупах.
+    Это влияет на «маленькое меню» Telegram в мобилке.
+    """
+    cmds = get_bot_commands()
+    scopes = [
+        BotCommandScopeDefault(),
+        BotCommandScopeAllPrivateChats(),
+        # ниже для порядка, чтобы вдруг в группах не всплывали старые команды
+        BotCommandScopeAllGroupChats(),
+        BotCommandScopeAllChatAdministrators(),
+    ]
+    for sc in scopes:
+        try:
+            await bot.delete_my_commands(scope=sc)
+        except Exception:
+            pass
+    for sc in scopes:
+        try:
+            await bot.set_my_commands(cmds, scope=sc)
+        except Exception as e:
+            log.warning("set_my_commands failed for %s: %s", sc, e)
+
+
 async def main() -> None:
     token = _resolve_token()
     bot = Bot(token=token, default=DefaultBotProperties(parse_mode="HTML"))
@@ -88,11 +122,8 @@ async def main() -> None:
     _include_router_safe(dp, "app.routers.feedback")
     _include_router_safe(dp, "app.routers.premium")
 
-    # /команды = строго из единого файла
-    try:
-        await bot.set_my_commands(get_bot_commands())
-    except Exception as e:
-        log.exception("set_my_commands failed: %s", e)
+    # Ставим команды во всех скоупах (для «маленького меню»)
+    await _set_bot_commands_everywhere(bot)
 
     log.info("Bot is starting polling…")
     await dp.start_polling(bot)
