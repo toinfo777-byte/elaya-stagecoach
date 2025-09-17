@@ -10,36 +10,31 @@ from aiogram.fsm.context import FSMContext
 from sqlalchemy import inspect as sqla_inspect
 from sqlalchemy.sql.sqltypes import DateTime, Date
 
-from app.routers.system import PRIVACY_TEXT, HELP_TEXT
 from app.routers.training import training_entry
 from app.routers.casting import casting_entry
 from app.routers.apply import apply_entry
-from app.routers.premium import premium_entry
+from app.routers.premium import premium_entry  # type: ignore
 
 from app.storage.repo import session_scope
 from app.storage.models import User, DrillRun
 
-from app.routers.menu import (
-    BTN_TRAIN,
-    BTN_PROGRESS,
-    BTN_APPLY,
-    BTN_CASTING,
-    BTN_PRIVACY,
-    BTN_HELP,
-    BTN_PREMIUM,
+from app.keyboards.menu import (
     main_menu,
+    BTN_TRAIN, BTN_PROGRESS, BTN_APPLY, BTN_CASTING, BTN_PRIVACY, BTN_HELP, BTN_PREMIUM,
 )
+from app.routers.system import PRIVACY_TEXT  # текст
+from app.routers.system import _build_help_text as HELP_TEXT_BUILDER
 
 router = Router(name="shortcuts")
 
 # ===== команды, которые должны работать в ЛЮБОМ состоянии =====
 @router.message(StateFilter("*"), Command("help"))
 async def sc_help_cmd(m: Message):
-    await m.answer(HELP_TEXT, parse_mode="Markdown", reply_markup=main_menu())
+    await m.answer(HELP_TEXT_BUILDER(), reply_markup=main_menu())
 
 @router.message(StateFilter("*"), Command("privacy"))
 async def sc_privacy_cmd(m: Message):
-    await m.answer(PRIVACY_TEXT, parse_mode="Markdown", reply_markup=main_menu())
+    await m.answer(PRIVACY_TEXT, reply_markup=main_menu())
 
 @router.message(StateFilter("*"), Command("progress"))
 async def sc_progress_cmd(m: Message):
@@ -80,17 +75,17 @@ async def sc_premium_btn(m: Message):
 
 @router.message(StateFilter("*"), F.text == BTN_PRIVACY)
 async def sc_privacy_text(m: Message):
-    await m.answer(PRIVACY_TEXT, parse_mode="Markdown", reply_markup=main_menu())
+    await m.answer(PRIVACY_TEXT, reply_markup=main_menu())
 
 @router.message(StateFilter("*"), F.text == BTN_HELP)
 async def sc_help_text(m: Message):
-    await m.answer(HELP_TEXT, parse_mode="Markdown", reply_markup=main_menu())
+    await m.answer(HELP_TEXT_BUILDER(), reply_markup=main_menu())
 
 @router.message(StateFilter("*"), F.text == BTN_PROGRESS)
 async def sc_progress_text_exact(m: Message):
     await _send_progress(m)
 
-# «фаззи» подстраховки по текстам (на случай иных эмодзи/пробелов)
+# «фаззи» подстраховки по текстам
 @router.message(StateFilter("*"), lambda m: isinstance(m.text, str) and "прогресс" in m.text.lower())
 async def sc_progress_text_fuzzy(m: Message):
     await _send_progress(m)
@@ -123,7 +118,6 @@ async def _send_progress(m: Message):
         else:
             runs_7d = q.count()
 
-        # «источник» из meta_json (если есть)
         src_txt = ""
         try:
             meta = dict(u.meta_json or {}) if hasattr(u, "meta_json") else {}
@@ -139,10 +133,10 @@ async def _send_progress(m: Message):
             pass
 
     txt = (
-        "📈 *Мой прогресс*\n\n"
-        f"• Стрик: *{streak}*\n"
-        f"• Этюдов за 7 дней: *{runs_7d}*"
+        "📈 <b>Мой прогресс</b>\n\n"
+        f"• Стрик: <b>{streak}</b>\n"
+        f"• Этюдов за 7 дней: <b>{runs_7d}</b>"
         f"{src_txt}\n\n"
         "Продолжай каждый день — тренировка дня в один клик 👇"
     )
-    await m.answer(txt, reply_markup=main_menu(), parse_mode="Markdown")
+    await m.answer(txt, reply_markup=main_menu())
