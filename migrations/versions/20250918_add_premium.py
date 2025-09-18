@@ -5,49 +5,57 @@ Revises:
 Create Date: 2025-09-18
 
 """
+from __future__ import annotations
+
 from alembic import op
 import sqlalchemy as sa
 
 
-# уникальный ID миграции (можешь поменять)
-revision: str = "20250918_add_premium"
-down_revision: str | None = None
-branch_labels: str | None = None
-depends_on: str | None = None
+# revision identifiers, used by Alembic.
+revision = "20250918_add_premium"
+down_revision = None
+branch_labels = None
+depends_on = None
 
 
 def upgrade() -> None:
-    # === Добавляем новые колонки в users ===
+    bind = op.get_bind()
+    dialect = bind.dialect.name
+    is_sqlite = dialect == "sqlite"
+
+    # --- users: уведомления по умолчанию ---
+    # Boolean default: sqlite -> 0/1, postgres -> false/true
+    bool_default = sa.text("0") if is_sqlite else sa.text("false")
+
     op.add_column(
         "users",
-        sa.Column("notify_enabled", sa.Boolean(), nullable=False, server_default=sa.text("false")),
+        sa.Column("notify_enabled", sa.Boolean(), nullable=False, server_default=bool_default),
     )
     op.add_column(
         "users",
-        sa.Column("notify_hour", sa.SmallInteger(), nullable=False, server_default="9"),
+        sa.Column("notify_hour", sa.SmallInteger(), nullable=False, server_default=sa.text("9")),
     )
 
-    # === Создаём таблицу premium_requests ===
+    # --- premium_requests: json/meta и дефолты под каждую БД ---
+    json_type = sa.Text() if is_sqlite else sa.JSON()
+    meta_default = sa.text("'{}'") if is_sqlite else sa.text("'{}'::jsonb")
+
     op.create_table(
         "premium_requests",
-        sa.Column("id", sa.BigInteger(), primary_key=True),
+        sa.Column("id", sa.BigInteger(), primary_key=True, nullable=False),
         sa.Column("user_id", sa.BigInteger(), nullable=False),
-        sa.Column("tg_username", sa.Text()),
-        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
-        sa.Column("status", sa.Text(), server_default="new", nullable=False),
-        sa.Column("meta", sa.JSON(), server_default=sa.text("'{}'::jsonb"), nullable=False),
+        sa.Column("tg_username", sa.Text(), nullable=True),
+        sa.Column("created_at", sa.DateTime(), nullable=False, server_default=sa.text("CURRENT_TIMESTAMP")),
+        sa.Column("status", sa.Text(), nullable=False, server_default=sa.text("'new'")),
+        sa.Column("meta", json_type, nullable=False, server_default=meta_default),
     )
 
-    op.create_index(
-        "idx_premium_requests_user_id",
-        "premium_requests",
-        ["user_id"],
-    )
+    op.create_index("idx_premium_requests_user_id", "premium_requests", ["user_id"])
 
 
 def downgrade() -> None:
-    # Откат миграции
     op.drop_index("idx_premium_requests_user_id", table_name="premium_requests")
     op.drop_table("premium_requests")
+
     op.drop_column("users", "notify_hour")
     op.drop_column("users", "notify_enabled")
