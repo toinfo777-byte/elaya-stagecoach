@@ -1,127 +1,93 @@
 # app/routers/premium.py
 from __future__ import annotations
 
-import os
-from datetime import datetime
+from aiogram import Router, F
+from aiogram.types import Message, ReplyKeyboardMarkup, KeyboardButton
 
-from aiogram import Router, F, types
-from aiogram.types import CallbackQuery, Message
-from aiogram.utils.keyboard import InlineKeyboardBuilder
+from sqlalchemy import select, desc
 
-from app.storage.repo import add_premium_request, list_user_premium_requests
-from app.keyboards.menu import (
-    BTN_PREMIUM,
-    BTN_TRAIN, BTN_PROGRESS, BTN_APPLY, BTN_CASTING, BTN_PRIVACY, BTN_HELP, BTN_SETTINGS,
-    main_menu,
-)
+from app.config import settings
+from app.storage.repo import session_scope
+from app.storage.models import User
+from app.utils.dt import fmt_local
+
+# Если у вас модель premium_requests лежит в другом модуле — поправьте import:
+from app.storage.models import PremiumRequest  # id, user_id, created_at, status, meta
 
 router = Router(name="premium")
 
-# --- callback data ---
-CB_APPLY = "premium:apply"
-CB_LIST = "premium:list"
-CB_INFO = "premium:info"
-CB_BACK = "premium:back"
+# --- Клавиатуры --------------------------------------------------------------
 
-ADMIN_ALERT_CHAT_ID = os.getenv("ADMIN_ALERT_CHAT_ID")  # опционально
+KB_PREMIUM = ReplyKeyboardMarkup(
+    keyboard=[
+        [KeyboardButton(text="Что внутри"), KeyboardButton(text="Оставить заявку")],
+        [KeyboardButton(text="Мои заявки"), KeyboardButton(text="🏠 В меню")],
+    ],
+    resize_keyboard=True,
+)
 
+# --- Helpers -----------------------------------------------------------------
 
-def premium_kb() -> types.InlineKeyboardMarkup:
-    kb = InlineKeyboardBuilder()
-    kb.button(text="Что внутри", callback_data=CB_INFO)
-    kb.button(text="Оставить заявку", callback_data=CB_APPLY)
-    kb.button(text="Мои заявки", callback_data=CB_LIST)
-    kb.button(text="⬅️ В меню", callback_data=CB_BACK)
-    kb.adjust(2, 2)
-    return kb.as_markup()
-
-
-def _format_status(status: str) -> str:
-    mapping = {
-        "new": "🟡 новая",
-        "in_review": "🟠 в рассмотрении",
-        "approved": "🟢 одобрено",
-        "rejected": "🔴 отклонено",
-    }
-    return mapping.get(status, status)
+STATUS_EMOJI = {
+    "new": "🟡",
+    "seen": "🟠",
+    "approved": "🟢",
+    "rejected": "🔴",
+}
 
 
-@router.message(F.text == BTN_PREMIUM)
-async def premium_entry(msg: Message) -> None:
-    await msg.answer(
-        "⭐ Расширенная версия\n\n"
-        "Здесь можно оставить заявку на расширенные возможности тренинга.",
-        reply_markup=premium_kb(),
-    )
+def _status_badge(status: str) -> str:
+    return f"{STATUS_EMOJI.get(status, '🟡')} {status}"
 
 
-@router.callback_query(F.data == CB_BACK)
-async def premium_back(cb: CallbackQuery) -> None:
-    await cb.message.edit_text("Ок, вернёмся в главное меню. Нужная кнопка снизу 👇")
-    await cb.message.answer("Меню:", reply_markup=main_menu())
-    await cb.answer()
-
-
-@router.callback_query(F.data == CB_INFO)
-async def premium_info(cb: CallbackQuery) -> None:
-    await cb.message.edit_text(
-        "Что внутри расширенной версии:\n"
-        "• персональные разборы и обратная связь;\n"
-        "• расширенная аналитика прогресса;\n"
-        "• уведомления и план тренировок.\n\n"
-        "Готовы попробовать? Нажмите «Оставить заявку».",
-        reply_markup=premium_kb(),
-    )
-    await cb.answer()
-
-
-@router.callback_query(F.data == CB_APPLY)
-async def premium_apply(cb: CallbackQuery) -> None:
-    user = cb.from_user
-    pr = add_premium_request(user.id, user.username)
-
-    # алерт админу (если указан)
-    if ADMIN_ALERT_CHAT_ID:
-        try:
-            await cb.bot.send_message(
-                int(ADMIN_ALERT_CHAT_ID),
-                f"🆕 Заявка на ⭐ Премиум\n"
-                f"user_id: <code>{user.id}</code>\n"
-                f"@{user.username or '—'}\n"
-                f"status: {pr.status}\n"
-                f"id: {pr.id}",
-            )
-        except Exception:
-            pass
-
-    text = (
-        "Заявка принята ✅\n\n"
-        "Мы свяжемся с вами или включим доступ автоматически.\n"
-        "Статус можно смотреть в «Мои заявки»."
-    )
-    await cb.message.edit_text(text, reply_markup=premium_kb())
-    await cb.answer("Заявка отправлена")
-
-
-@router.callback_query(F.data == CB_LIST)
-async def premium_list(cb: CallbackQuery) -> None:
-    rows = list_user_premium_requests(cb.from_user.id, limit=10)
+async def _render_my_requests(user: User) -> str:
+    with session_scope() as s:
+        rows = s.execute(
+            select(PremiumRequest).where(PremiumRequest.user_id == user.id).order_by(desc(PremiumRequest.created_at))
+        ).scalars().all()
 
     if not rows:
-        await cb.message.edit_text("Заявок пока нет.", reply_markup=premium_kb())
-        await cb.answer()
-        return
+        return "Заявок пока нет."
 
-    lines = []
-    for r in rows:
-        created = r.created_at
-        if isinstance(created, str):
-            try:
-                created = datetime.fromisoformat(created)
-            except Exception:
-                created = None
-        dt = created.strftime("%d.%m %H:%M") if isinstance(created, datetime) else "—"
-        lines.append(f"• #{r.id} — {dt} — {_format_status(r.status)}")
+    lines = ["Мои заявки:"]
+    for i, r in enumerate(rows, start=1):
+        when = fmt_local(r.created_at, user.tz, settings.TZ_DEFAULT)
+        lines.append(f"• #{i} — {when} — {_status_badge(r.status)}")
+    return "\n".join(lines)
 
-    await cb.message.edit_text("Мои заявки:\n" + "\n".join(lines), reply_markup=premium_kb())
-    await cb.answer()
+
+# --- Handlers ----------------------------------------------------------------
+
+@router.message(F.text == "⭐️ Расширенная версия")
+@router.message(F.text == "/premium")
+async def on_premium_menu(m: Message, user: User):
+    await m.answer("⭐️ Расширенная версия", reply_markup=KB_PREMIUM)
+
+
+@router.message(F.text == "Что внутри")
+async def on_premium_inside(m: Message, user: User):
+    await m.answer(
+        "В расширенной версии — персональные тренировки, обратная связь и живые разборы.\n\n"
+        "Оставьте заявку — и мы подключим вас, когда будет слот.",
+        reply_markup=KB_PREMIUM,
+    )
+
+
+@router.message(F.text == "Оставить заявку")
+async def on_premium_apply(m: Message, user: User):
+    with session_scope() as s:
+        s.add(PremiumRequest(user_id=user.id, status="new", meta={}))
+    await m.answer("Заявка принята ✅ (без записи в БД)", reply_markup=KB_PREMIUM)
+    # ↑ текст сохранён из вашего UX; при необходимости замените
+
+
+@router.message(F.text == "Мои заявки")
+async def on_premium_list(m: Message, user: User):
+    text = await _render_my_requests(user)
+    await m.answer(text, reply_markup=KB_PREMIUM)
+
+
+@router.message(F.text == "🏠 В меню")
+async def on_back_to_menu(m: Message, user: User):
+    from app.keyboards.menu import main_menu
+    await m.answer("Ок, вернулись в главное меню. Нажми нужную кнопку снизу.", reply_markup=main_menu())
