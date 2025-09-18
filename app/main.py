@@ -16,6 +16,9 @@ from aiogram.types import (
     BotCommandScopeAllChatAdministrators,
 )
 
+# ⬇️ добавим импорт asyncpg
+import asyncpg
+
 from app.keyboards.menu import get_bot_commands  # единый источник /команд
 
 # === Настройки ================================================================
@@ -62,6 +65,23 @@ async def _init_db_if_available() -> None:
     except Exception as e:
         log.exception("DB init failed: %s", e)
 
+# ⬇️ НОВОЕ: создаём пул к БД, если есть DB_URL
+async def _create_db_pool_if_possible(bot: Bot) -> None:
+    dsn = (
+        getattr(settings, "DB_URL", None)
+        if settings is not None
+        else None
+    ) or os.getenv("DB_URL")
+    if not dsn:
+        log.info("DB_URL is not set – skipping pool creation.")
+        return
+    try:
+        pool = await asyncpg.create_pool(dsn=dsn, min_size=1, max_size=10)
+        bot["db_pool"] = pool
+        log.info("DB pool created.")
+    except Exception as e:
+        log.exception("DB pool create failed: %s", e)
+
 
 def _include_router_safe(dp: Dispatcher, dotted: str, attr: str = "router") -> None:
     try:
@@ -74,17 +94,10 @@ def _include_router_safe(dp: Dispatcher, dotted: str, attr: str = "router") -> N
 
 
 async def _set_bot_commands_everywhere(bot: Bot) -> None:
-    """
-    Полностью синхронизируем список /команд с нашим нижним меню:
-    - чистим команды в базовых скоупах (на всякий случай);
-    - задаём один и тот же список во всех приватных скоупах.
-    Это влияет на «маленькое меню» Telegram в мобилке.
-    """
     cmds = get_bot_commands()
     scopes = [
         BotCommandScopeDefault(),
         BotCommandScopeAllPrivateChats(),
-        # ниже для порядка, чтобы вдруг в группах не всплывали старые команды
         BotCommandScopeAllGroupChats(),
         BotCommandScopeAllChatAdministrators(),
     ]
@@ -105,7 +118,11 @@ async def main() -> None:
     bot = Bot(token=token, default=DefaultBotProperties(parse_mode="HTML"))
     dp = Dispatcher()
 
+    # init структур (если есть)
     await _init_db_if_available()
+
+    # ⬇️ НОВОЕ: создаём пул и кладём в контекст бота
+    await _create_db_pool_if_possible(bot)
 
     # Порядок: шорткаты → онбординг → доменные → системные → отзывы/премиум
     _include_router_safe(dp, "app.routers.shortcuts")
@@ -121,9 +138,8 @@ async def main() -> None:
     _include_router_safe(dp, "app.routers.analytics")  # отчёты по источникам
     _include_router_safe(dp, "app.routers.cancel")
     _include_router_safe(dp, "app.routers.feedback")
-    _include_router_safe(dp, "app.routers.premium")
+    _include_router_safe(dp, "app.routers.premium")  # <-- наш новый роутер
 
-    # Ставим команды во всех скоупах (для «маленького меню»)
     await _set_bot_commands_everywhere(bot)
 
     log.info("Bot is starting polling…")
