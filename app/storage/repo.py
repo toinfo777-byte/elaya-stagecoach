@@ -3,16 +3,16 @@ from __future__ import annotations
 import os
 from contextlib import contextmanager
 from datetime import datetime
-from sqlalchemy import create_engine, text
+
+from sqlalchemy import create_engine, text, select
 from sqlalchemy.orm import Session, sessionmaker
-from sqlalchemy.orm import declarative_base
 from sqlalchemy.engine.url import make_url
 
 from app.config import settings
-from app.storage.models import Base, User, Event
+from app.storage.models import Base, User, Event, PremiumRequest
 
 
-# 👇 ДОБАВЛЕНО: гарантируем, что папка для SQLite существует
+# 👇 гарантируем, что папка для SQLite существует
 def _ensure_sqlite_dir(db_url: str):
     try:
         u = make_url(db_url)
@@ -31,6 +31,10 @@ SessionLocal = sessionmaker(bind=engine, expire_on_commit=False, autoflush=False
 
 
 def init_db() -> None:
+    """
+    Создаёт недостающие таблицы и «мягко» добавляет недостающие колонки
+    для users.source / leads.track (SQLite и Postgres).
+    """
     Base.metadata.create_all(engine)
 
     with Session(engine) as s:
@@ -49,6 +53,7 @@ def init_db() -> None:
                 s.execute(text("ALTER TABLE leads ADD COLUMN track TEXT"))
                 s.commit()
         else:
+            # Postgres / другие диалекты
             s.execute(text("ALTER TABLE IF EXISTS users ADD COLUMN IF NOT EXISTS source varchar(64)"))
             s.execute(text("ALTER TABLE IF EXISTS leads ADD COLUMN IF NOT EXISTS track varchar(32)"))
             s.commit()
@@ -94,3 +99,41 @@ def log_event(s: Session, user_id: int | None, name: str, payload: dict | None =
     except Exception:
         s.rollback()
         # намеренно молчим — лог вспомогательный
+
+
+# ---------- Премиум: CRUD (вариант 2 «как надо») ----------
+
+def add_premium_request(user_id: int, tg_username: str | None) -> PremiumRequest:
+    """
+    Создаёт новую заявку, но если у пользователя уже есть 'new' или 'in_review',
+    возвращаем её (без дубликатов).
+    """
+    with SessionLocal() as s:
+        existing = s.execute(
+            select(PremiumRequest)
+            .where(
+                PremiumRequest.user_id == user_id,
+                PremiumRequest.status.in_(("new", "in_review")),
+            )
+            .order_by(PremiumRequest.id.desc())
+        ).scalar_one_or_none()
+
+        if existing:
+            return existing
+
+        pr = PremiumRequest(user_id=user_id, tg_username=tg_username or None, status="new")
+        s.add(pr)
+        s.commit()
+        s.refresh(pr)
+        return pr
+
+
+def list_user_premium_requests(user_id: int, limit: int = 10) -> list[PremiumRequest]:
+    with SessionLocal() as s:
+        rows = s.execute(
+            select(PremiumRequest)
+            .where(PremiumRequest.user_id == user_id)
+            .order_by(PremiumRequest.id.desc())
+            .limit(limit)
+        ).scalars().all()
+        return list(rows)
