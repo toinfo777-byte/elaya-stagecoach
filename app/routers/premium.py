@@ -1,117 +1,193 @@
-# routers/premium.py
-from aiogram import Router, F
-from aiogram.types import Message
-from aiogram.utils.formatting import Bold, Text, as_marked_section
+# app/routers/premium.py
+from __future__ import annotations
+
 import os
-from datetime import datetime, timedelta, timezone
+import json
+import logging
+from datetime import datetime
 
-premium_router = Router()
+from aiogram import Router, F, types
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.utils.keyboard import InlineKeyboardBuilder
 
-ADMIN_ALERT_CHAT_ID = int(os.getenv("ADMIN_ALERT_CHAT_ID", "0"))
+# Пытаемся импортировать БД, но не рушим бота если её нет
+try:
+    from app.storage.repo import SessionLocal  # sync Session
+    from sqlalchemy import text
+except Exception:  # pragma: no cover
+    SessionLocal = None  # type: ignore
+    text = None  # type: ignore
 
-# --- вспомогалки ---
+log = logging.getLogger(__name__)
+router = Router()
 
-def user_link(m: Message) -> str:
-    u = m.from_user
-    # кликабельная ссылка, если есть username; иначе просто id
-    if u.username:
-        return f"@{u.username} (id={u.id})"
-    return f"id={u.id}"
+PREMIUM_BTN_TEXT = "⭐️ Расширенная версия"
 
-async def notify_admins(bot, text: str) -> None:
-    if ADMIN_ALERT_CHAT_ID:
-        try:
-            await bot.send_message(ADMIN_ALERT_CHAT_ID, text, disable_web_page_preview=True)
-        except Exception as e:
-            # не падаем, просто логни где-то у себя
-            print(f"[premium] admin notify failed: {e}")
 
-async def already_sent_recently(pool, user_id: int, hours: int = 24) -> bool:
-    """Есть ли заявка за последние `hours` часов."""
-    async with pool.acquire() as con:
-        row = await con.fetchrow(
-            """
-            SELECT 1
-            FROM pro_requests
-            WHERE user_id = $1
-              AND ts > now() - $2::interval
-            LIMIT 1
-            """,
-            user_id, f"{hours} hours"
-        )
-    return row is not None
+def _kb_main() -> InlineKeyboardMarkup:
+    kb = InlineKeyboardBuilder()
+    kb.row(
+        InlineKeyboardButton(text="Что внутри", callback_data="prem:info"),
+        InlineKeyboardButton(text="Оставить заявку", callback_data="prem:apply"),
+    )
+    kb.row(
+        InlineKeyboardButton(text="Мои заявки", callback_data="prem:myreq"),
+        InlineKeyboardButton(text="⬅️ В меню", callback_data="prem:back"),
+    )
+    return kb.as_markup()
 
-async def save_request(pool, m: Message, note: str | None) -> None:
-    async with pool.acquire() as con:
-        await con.execute(
-            """
-            INSERT INTO pro_requests(user_id, username, note)
-            VALUES ($1, $2, $3)
-            """,
-            m.from_user.id, m.from_user.username, note
-        )
 
-# --- хэндлеры ---
-
-# Кнопка из меню
-@premium_router.message(F.text == "⭐️ Расширенная версия")
-async def premium_button(message: Message):
-    await handle_pro_request(message, note="from:menu_button")
-
-# Команда /pro (на всякий)
-@premium_router.message(F.text.startswith("/pro"))
-async def premium_cmd(message: Message):
-    # можно позволить писать комментарий: /pro хочу личные разборы
-    note = message.text.partition(" ")[2].strip() or None
-    await handle_pro_request(message, note=note)
-
-# Общая логика
-async def handle_pro_request(message: Message, note: str | None):
-    bot = message.bot
-    pool = bot.get("db_pool")  # <- см. подключение ниже
-
-    # антиспам на 24 часа
-    if await already_sent_recently(pool, message.from_user.id, hours=24):
-        await message.answer("✅ Заявка уже есть, мы свяжемся. Спасибо!")
-        return
-
-    await save_request(pool, message, note)
-
-    await message.answer(
-        "✅ Заявка на ⭐️ Расширенную версию принята!\n"
-        "Мы напишем вам в личку, как только будет свободное окно."
+@router.message(F.text == PREMIUM_BTN_TEXT)
+async def premium_entry(msg: types.Message) -> None:
+    await msg.answer(
+        "⭐️ Расширенная версия\n\n"
+        "Дополнительные тренировки, расширенная аналитика, поддержка и бонус-материалы.",
+        reply_markup=_kb_main(),
     )
 
-    # уведомление админам
-    when = datetime.now(timezone.utc).astimezone().strftime("%d.%m %H:%M")
-    text = as_marked_section(
-        Bold("⭐️ Новая заявка на PRO"),
-        Text(
-            f"Пользователь: {user_link(message)}",
-            f"Когда: {when}",
-            f"Источник: {note or '—'}",
-            sep="\n",
-        )
-    ).as_html()
-    await notify_admins(bot, text)
 
-# (опционально) мини-статистика за 7 дней для админов: /pro_stats
-@premium_router.message(F.text == "/pro_stats")
-async def pro_stats(message: Message):
-    # доступ только админам — если у тебя есть список ADMIN_IDS, проверь тут
-    admin_ids = {int(x) for x in os.getenv("ADMIN_IDS", "").split(",") if x.strip()}
-    if admin_ids and message.from_user.id not in admin_ids:
+@router.callback_query(F.data == "prem:back")
+async def premium_back(cb: types.CallbackQuery) -> None:
+    await cb.message.edit_text("Ок, вернулись в главное меню. Нажми нужную кнопку снизу.")
+    await cb.answer()
+
+
+@router.callback_query(F.data == "prem:info")
+async def premium_info(cb: types.CallbackQuery) -> None:
+    await cb.message.edit_text(
+        "Что внутри ⭐️:\n"
+        "• Ежедневные расширенные тренировки\n"
+        "• Отчёт по прогрессу и источникам трафика\n"
+        "• Поддержка и рекомендации\n\n"
+        "Нажми «Оставить заявку», если хочешь доступ.",
+        reply_markup=_kb_main(),
+    )
+    await cb.answer()
+
+
+# ---------- Заявка на премиум ----------
+
+def _db_available() -> bool:
+    return bool(SessionLocal and text)
+
+
+def _insert_request_sync(user_id: int, username: str | None) -> None:
+    """
+    Пишем в таблицу premium_requests. Таблица создана миграцией.
+    Для SQLite/PG работает одинаково (без jsonb-спецсинтаксиса).
+    """
+    assert SessionLocal and text  # для type checkers
+    with SessionLocal() as s:
+        s.execute(
+            text(
+                """
+                INSERT INTO premium_requests (id, user_id, tg_username, created_at, status, meta)
+                VALUES (:id, :user_id, :tg, :dt, :st, :meta)
+                """
+            ),
+            {
+                "id": int(datetime.utcnow().timestamp() * 1000),  # простой уникальный id
+                "user_id": user_id,
+                "tg": username or "",
+                "dt": datetime.utcnow(),
+                "st": "new",
+                "meta": json.dumps({}),
+            },
+        )
+        s.commit()
+
+
+def _get_user_requests_sync(user_id: int) -> list[tuple]:
+    assert SessionLocal and text
+    with SessionLocal() as s:
+        rows = s.execute(
+            text(
+                """
+                SELECT id, created_at, status
+                FROM premium_requests
+                WHERE user_id = :uid
+                ORDER BY created_at DESC
+                LIMIT 10
+                """
+            ),
+            {"uid": user_id},
+        ).fetchall()
+    return rows
+
+
+def _admin_chat_id() -> int | None:
+    # Берём из ENV, если задан
+    val = os.getenv("ADMIN_ALERT_CHAT_ID") or os.getenv("ADMIN_CHAT_ID")
+    try:
+        return int(val) if val else None
+    except Exception:
+        return None
+
+
+@router.callback_query(F.data == "prem:apply")
+async def premium_apply(cb: types.CallbackQuery) -> None:
+    # Пишем заявку, если доступна БД. Иначе — просто уведомляем.
+    if _db_available():
+        try:
+            _insert_request_sync(cb.from_user.id, cb.from_user.username)
+            status = "Заявка отправлена ✅"
+        except Exception as e:  # не роняем UX
+            log.exception("premium request insert failed: %s", e)
+            status = "Заявка принята ✅ (без записи в БД)"
+    else:
+        status = "Заявка принята ✅"
+
+    # Уведомление админу (если указан)
+    admin_id = _admin_chat_id()
+    if admin_id:
+        try:
+            await cb.message.bot.send_message(
+                admin_id,
+                (
+                    "🔔 Новая заявка на ⭐️ Расширенную версию\n"
+                    f"user_id: <code>{cb.from_user.id}</code>\n"
+                    f"username: @{cb.from_user.username or '—'}"
+                ),
+            )
+        except Exception as e:
+            log.warning("admin notify failed: %s", e)
+
+    await cb.message.edit_text(
+        f"{status}\n\nМы свяжемся с тобой или включим доступ автоматически.",
+        reply_markup=_kb_main(),
+    )
+    await cb.answer("Заявка отправлена")
+
+
+@router.callback_query(F.data == "prem:myreq")
+async def premium_my_requests(cb: types.CallbackQuery) -> None:
+    if not _db_available():
+        await cb.message.edit_text(
+            "Пока не могу показать заявки (БД недоступна). Попробуй позже.",
+            reply_markup=_kb_main(),
+        )
+        await cb.answer()
         return
 
-    pool = message.bot.get("db_pool")
-    async with pool.acquire() as con:
-        row = await con.fetchrow(
-            "SELECT COUNT(*) AS c FROM pro_requests WHERE ts > now() - interval '7 days'"
-        )
-        c7 = row["c"] if row else 0
-        row = await con.fetchrow(
-            "SELECT COUNT(*) AS c FROM pro_requests WHERE ts > now() - interval '24 hours'"
-        )
-        c1 = row["c"] if row else 0
+    try:
+        rows = _get_user_requests_sync(cb.from_user.id)
+    except Exception as e:
+        log.exception("select premium requests failed: %s", e)
+        rows = []
 
-    await message.answer(f"⭐️ PRO заявки: за 24ч — {c1}, за 7д — {c7}")
+    if not rows:
+        text = "Заявок пока нет."
+    else:
+        items = []
+        for r in rows:
+            _id, created_at, status = r
+            dt = (
+                created_at.strftime("%d.%m %H:%M")
+                if hasattr(created_at, "strftime")
+                else str(created_at)
+            )
+            items.append(f"• #{_id} — {status} ({dt})")
+        text = "Твои заявки:\n" + "\n".join(items)
+
+    await cb.message.edit_text(text, reply_markup=_kb_main())
+    await cb.answer()
