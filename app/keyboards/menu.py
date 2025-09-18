@@ -12,6 +12,7 @@ BTN_HELP = "💬 Помощь"
 BTN_PREMIUM = "⭐️ Расширенная версия"
 BTN_SETTINGS = "⚙️ Настройки"
 
+
 def main_menu() -> ReplyKeyboardMarkup:
     """Стандартное нижнее меню. Всегда одно и то же, не «скачет»."""
     rows = [
@@ -21,7 +22,12 @@ def main_menu() -> ReplyKeyboardMarkup:
         [KeyboardButton(text=BTN_PREMIUM), KeyboardButton(text=BTN_SETTINGS)],
     ]
     # is_persistent помогает клиенту держать клавиатуру закреплённой
-    return ReplyKeyboardMarkup(keyboard=rows, resize_keyboard=True, is_persistent=True)
+    return ReplyKeyboardMarkup(
+        keyboard=rows,
+        resize_keyboard=True,
+        is_persistent=True,
+    )
+
 
 def get_bot_commands() -> list[BotCommand]:
     """
