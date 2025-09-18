@@ -1,78 +1,117 @@
-from __future__ import annotations
-
+# routers/premium.py
 from aiogram import Router, F
-from aiogram.filters import Command, StateFilter
-from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
-from aiogram.fsm.context import FSMContext
-from aiogram.fsm.state import StatesGroup, State
+from aiogram.types import Message
+from aiogram.utils.formatting import Bold, Text, as_marked_section
+import os
+from datetime import datetime, timedelta, timezone
 
-from app.keyboards.menu import BTN_PREMIUM, main_menu
-from app.storage.repo import session_scope, log_event
-from app.storage.models import User
+premium_router = Router()
 
-router = Router(name="premium")
+ADMIN_ALERT_CHAT_ID = int(os.getenv("ADMIN_ALERT_CHAT_ID", "0"))
 
-class PremiumLead(StatesGroup):
-    wait_contact = State()
+# --- вспомогалки ---
 
-def _lead_kb() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="⭐️ Оставить заявку", callback_data="premium:lead")],
-        [InlineKeyboardButton(text="ℹ️ Подробнее", callback_data="premium:more")],
-    ])
+def user_link(m: Message) -> str:
+    u = m.from_user
+    # кликабельная ссылка, если есть username; иначе просто id
+    if u.username:
+        return f"@{u.username} (id={u.id})"
+    return f"id={u.id}"
 
-@router.message(Command("premium"))
-@router.message(F.text == BTN_PREMIUM)
-async def premium_entry(m: Message):
-    text = (
-        "⭐️ <b>Расширенная версия</b>\n\n"
-        "Планируем: персональные планы, расширенная аналитика, кастомные треки.\n"
-        "Оставьте заявку — мы свяжемся, когда откроем доступ."
-    )
-    await m.answer(text, reply_markup=main_menu())
-    await m.answer("Интересно? Нажмите ниже:", reply_markup=_lead_kb())
+async def notify_admins(bot, text: str) -> None:
+    if ADMIN_ALERT_CHAT_ID:
+        try:
+            await bot.send_message(ADMIN_ALERT_CHAT_ID, text, disable_web_page_preview=True)
+        except Exception as e:
+            # не падаем, просто логни где-то у себя
+            print(f"[premium] admin notify failed: {e}")
 
-@router.callback_query(F.data == "premium:more")
-async def premium_more(cb: CallbackQuery):
-    await cb.answer()
-    await cb.message.answer(
-        "В бете формируем список интересантов. Приоритет — активные пользователи и подробные заявки.",
-        reply_markup=main_menu()
-    )
+async def already_sent_recently(pool, user_id: int, hours: int = 24) -> bool:
+    """Есть ли заявка за последние `hours` часов."""
+    async with pool.acquire() as con:
+        row = await con.fetchrow(
+            """
+            SELECT 1
+            FROM pro_requests
+            WHERE user_id = $1
+              AND ts > now() - $2::interval
+            LIMIT 1
+            """,
+            user_id, f"{hours} hours"
+        )
+    return row is not None
 
-@router.callback_query(F.data == "premium:lead")
-async def premium_lead_start(cb: CallbackQuery, state: FSMContext):
-    await cb.answer()
-    await state.set_state(PremiumLead.wait_contact)
-    await cb.message.answer(
-        "Ок! Напишите контакт (телеграм @username, телефон, email) и коротко ожидания.\n"
-        "Одним сообщением, до 300 символов. /cancel — отмена.",
-        reply_markup=main_menu()
-    )
+async def save_request(pool, m: Message, note: str | None) -> None:
+    async with pool.acquire() as con:
+        await con.execute(
+            """
+            INSERT INTO pro_requests(user_id, username, note)
+            VALUES ($1, $2, $3)
+            """,
+            m.from_user.id, m.from_user.username, note
+        )
 
-@router.message(StateFilter(PremiumLead.wait_contact), ~F.text.startswith("/"))
-async def premium_lead_save(m: Message, state: FSMContext):
-    txt = (m.text or "").strip()
-    if not txt:
-        await m.answer("Пусто. Напишите контакт и ожидания одним сообщением.")
+# --- хэндлеры ---
+
+# Кнопка из меню
+@premium_router.message(F.text == "⭐️ Расширенная версия")
+async def premium_button(message: Message):
+    await handle_pro_request(message, note="from:menu_button")
+
+# Команда /pro (на всякий)
+@premium_router.message(F.text.startswith("/pro"))
+async def premium_cmd(message: Message):
+    # можно позволить писать комментарий: /pro хочу личные разборы
+    note = message.text.partition(" ")[2].strip() or None
+    await handle_pro_request(message, note=note)
+
+# Общая логика
+async def handle_pro_request(message: Message, note: str | None):
+    bot = message.bot
+    pool = bot.get("db_pool")  # <- см. подключение ниже
+
+    # антиспам на 24 часа
+    if await already_sent_recently(pool, message.from_user.id, hours=24):
+        await message.answer("✅ Заявка уже есть, мы свяжемся. Спасибо!")
         return
-    if len(txt) > 300:
-        await m.answer(f"Слишком длинно ({len(txt)}). Сократите до 300 символов.")
+
+    await save_request(pool, message, note)
+
+    await message.answer(
+        "✅ Заявка на ⭐️ Расширенную версию принята!\n"
+        "Мы напишем вам в личку, как только будет свободное окно."
+    )
+
+    # уведомление админам
+    when = datetime.now(timezone.utc).astimezone().strftime("%d.%m %H:%M")
+    text = as_marked_section(
+        Bold("⭐️ Новая заявка на PRO"),
+        Text(
+            f"Пользователь: {user_link(message)}",
+            f"Когда: {when}",
+            f"Источник: {note or '—'}",
+            sep="\n",
+        )
+    ).as_html()
+    await notify_admins(bot, text)
+
+# (опционально) мини-статистика за 7 дней для админов: /pro_stats
+@premium_router.message(F.text == "/pro_stats")
+async def pro_stats(message: Message):
+    # доступ только админам — если у тебя есть список ADMIN_IDS, проверь тут
+    admin_ids = {int(x) for x in os.getenv("ADMIN_IDS", "").split(",") if x.strip()}
+    if admin_ids and message.from_user.id not in admin_ids:
         return
 
-    try:
-        with session_scope() as s:
-            u = s.query(User).filter_by(tg_id=m.from_user.id).first()
-            if u:
-                log_event(s, u.id, "premium_interest", {"payload": txt})
-                s.commit()
-    except Exception:
-        pass
+    pool = message.bot.get("db_pool")
+    async with pool.acquire() as con:
+        row = await con.fetchrow(
+            "SELECT COUNT(*) AS c FROM pro_requests WHERE ts > now() - interval '7 days'"
+        )
+        c7 = row["c"] if row else 0
+        row = await con.fetchrow(
+            "SELECT COUNT(*) AS c FROM pro_requests WHERE ts > now() - interval '24 hours'"
+        )
+        c1 = row["c"] if row else 0
 
-    await state.clear()
-    await m.answer("Спасибо! Заявка сохранена. Мы свяжемся при открытии доступа ✨", reply_markup=main_menu())
-
-@router.message(StateFilter(PremiumLead.wait_contact), F.text == "/cancel")
-async def premium_lead_cancel(m: Message, state: FSMContext):
-    await state.clear()
-    await m.answer("Отменено. Возвращаю в меню.", reply_markup=main_menu())
+    await message.answer(f"⭐️ PRO заявки: за 24ч — {c1}, за 7д — {c7}")
