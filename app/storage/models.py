@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from datetime import datetime
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 from sqlalchemy import String, Integer, DateTime, ForeignKey, JSON, Boolean
@@ -22,7 +24,7 @@ class User(Base):
     last_seen: Mapped[datetime | None] = mapped_column(DateTime)
     consent_at: Mapped[datetime | None] = mapped_column(DateTime)
 
-    # ⬇️ НОВОЕ: deep-link источник (/start?start=...)
+    # ⬇️ deep-link источник (/start?start=...)
     source: Mapped[str | None] = mapped_column(String(64), nullable=True)
 
     # связи
@@ -30,7 +32,8 @@ class User(Base):
     leads: Mapped[list["Lead"]] = relationship(back_populates="user", cascade="all, delete-orphan")
     events: Mapped[list["Event"]] = relationship(back_populates="user", cascade="all, delete-orphan")
     test_results: Mapped[list["TestResult"]] = relationship(back_populates="user", cascade="all, delete-orphan")
-    feedbacks: Mapped[list["Feedback"]] = relationship(back_populates="user", cascade="all, delete-orphan")  # NEW
+    feedbacks: Mapped[list["Feedback"]] = relationship(back_populates="user", cascade="all, delete-orphan")
+    premium_requests: Mapped[list["PremiumRequest"]] = relationship(back_populates="user", cascade="all, delete-orphan")  # NEW
 
 
 # --- Этюд и прохождения ---
@@ -119,3 +122,17 @@ class Feedback(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
     user: Mapped["User"] = relationship(back_populates="feedbacks")
+
+
+# --- Заявки на «⭐ Расширенную версию» ---
+class PremiumRequest(Base):
+    __tablename__ = "premium_requests"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    tg_username: Mapped[str | None] = mapped_column(String(255), default=None)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    status: Mapped[str] = mapped_column(String(16), default="new")               # new | in_review | approved | rejected
+    meta: Mapped[dict] = mapped_column(JSON, default=dict)                       # любые доп.поля
+
+    user: Mapped["User"] = relationship(back_populates="premium_requests")
