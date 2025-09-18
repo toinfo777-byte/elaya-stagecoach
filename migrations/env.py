@@ -7,61 +7,55 @@ from logging.config import fileConfig
 from typing import Optional
 
 from alembic import context
-from sqlalchemy import pool
+from sqlalchemy import create_engine, pool
 from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
-# --- алембиковский конфиг и логирование ---------------------------------------
+# Alembic config & logging
 config = context.config  # type: ignore[attr-defined]
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
-# --- metadata проекта ----------------------------------------------------------
-# Импортируй metadata своих моделей.
-# Если другой путь/имя — поправь импорт ниже.
+# Project metadata (если у тебя Base в другом месте — поправь импорт)
 try:
     from app.storage.models import Base  # type: ignore
     target_metadata = Base.metadata
 except Exception:
-    target_metadata = None  # миграции будут только по raw SQL, если что
+    target_metadata = None
 
-# --- URL к БД: берём из ENV или из alembic.ini и нормализуем к async -----------
+# --- DB URL: env первее, потом alembic.ini -----------------------------------
 DB_URL: Optional[str] = os.getenv("DB_URL") or config.get_main_option("sqlalchemy.url")
-
 if not DB_URL:
     raise RuntimeError(
         "DB_URL is not set (neither env nor alembic.ini). "
         "Set ENV VAR DB_URL or sqlalchemy.url in alembic.ini"
     )
 
-# нормализуем под async-драйвер
-if DB_URL.startswith("postgres://"):
-    DB_URL = DB_URL.replace("postgres://", "postgresql+asyncpg://", 1)
-elif DB_URL.startswith("postgresql://") and "+asyncpg" not in DB_URL:
-    DB_URL = DB_URL.replace("postgresql://", "postgresql+asyncpg://", 1)
+def _to_async_url(url: str) -> str:
+    # Postgres → asyncpg
+    if url.startswith("postgres://"):
+        return url.replace("postgres://", "postgresql+asyncpg://", 1)
+    if url.startswith("postgresql://") and "+asyncpg" not in url:
+        return url.replace("postgresql://", "postgresql+asyncpg://", 1)
+    # SQLite оставляем sync — alembic + sqlite работают отлично синхронно
+    return url
 
+ASYNC_URL = _to_async_url(DB_URL)
 
-# --- offline режим -------------------------------------------------------------
+# --- offline mode --------------------------------------------------------------
 def run_migrations_offline() -> None:
-    """
-    Запуск миграций без соединения (генерация SQL).
-    """
-    url = DB_URL
-    assert url is not None
     context.configure(
-        url=url,
+        url=DB_URL,
         target_metadata=target_metadata,
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
         compare_type=True,
         compare_server_default=True,
     )
-
     with context.begin_transaction():
         context.run_migrations()
 
-
-# --- online режим --------------------------------------------------------------
+# --- online helpers ------------------------------------------------------------
 def do_run_migrations(connection: Connection) -> None:
     context.configure(
         connection=connection,
@@ -69,22 +63,27 @@ def do_run_migrations(connection: Connection) -> None:
         compare_type=True,
         compare_server_default=True,
     )
-
     with context.begin_transaction():
         context.run_migrations()
 
-
 async def run_migrations_online() -> None:
-    assert DB_URL is not None
-    connectable: AsyncEngine = create_async_engine(DB_URL, poolclass=pool.NullPool)
+    # Если это SQLite — идём синхронным движком
+    if DB_URL.startswith("sqlite"):
+        engine = create_engine(DB_URL, poolclass=pool.NullPool)
+        try:
+            with engine.connect() as connection:
+                do_run_migrations(connection)
+        finally:
+            engine.dispose()
+        return
 
+    # Иначе (Postgres и пр.) — async
+    connectable: AsyncEngine = create_async_engine(ASYNC_URL, poolclass=pool.NullPool)
     async with connectable.connect() as connection:
         await connection.run_sync(do_run_migrations)
-
     await connectable.dispose()
 
-
-# --- точка входа ---------------------------------------------------------------
+# --- entrypoint ---------------------------------------------------------------
 if context.is_offline_mode():
     run_migrations_offline()
 else:
