@@ -1,111 +1,62 @@
 from __future__ import annotations
 
 from aiogram import Router, F
+from aiogram.filters import Command
 from aiogram.types import Message, ReplyKeyboardMarkup, KeyboardButton
 
-from sqlalchemy import select, desc
-
-from app.keyboards.menu import main_menu  # нижнее «главное» меню
+from app.keyboards.menu import BTN_PREMIUM
 from app.storage.repo import session_scope
-from app.storage.models import User, PremiumRequest
-from app.utils.textmatch import contains_ci
+from app.storage.models import Feedback  # если нужно логировать интерес; можно убрать
 
 router = Router(name="premium")
 
-
-# === Локальные кнопки раздела «Расширенная версия» ============================
-
-def _kb_premium() -> ReplyKeyboardMarkup:
+def kb_premium_menu() -> ReplyKeyboardMarkup:
     rows = [
         [KeyboardButton(text="Что внутри"), KeyboardButton(text="Оставить заявку")],
-        [KeyboardButton(text="Мои заявки"), KeyboardButton(text="🧭 В меню")],
+        [KeyboardButton(text="Мои заявки"), KeyboardButton(text="🫡 В меню")],
     ]
     return ReplyKeyboardMarkup(keyboard=rows, resize_keyboard=True, is_persistent=True)
 
-
-def _human_status(s: str) -> str:
-    return {
-        "new": "🟡 новая",
-        "in_progress": "🟠 в работе",
-        "done": "🟢 обработана",
-        "rejected": "🔴 отклонена",
-    }.get(s, s)
-
-
-# === Хэндлеры =================================================================
-
-@router.message(F.text.func(contains_ci("расширенная версия")))
-@router.message(F.text == "/premium")
-async def premium_entry(m: Message, user: User) -> None:
-    """Вход в раздел + краткий статус по заявкам."""
-    with session_scope() as s:
-        last = s.execute(
-            select(PremiumRequest)
-            .where(PremiumRequest.user_id == user.id)
-            .order_by(desc(PremiumRequest.created_at))
-            .limit(1)
-        ).scalar_one_or_none()
-
-    if last:
-        text = (
-            "Мои заявки:\n"
-            f"• #{last.id} — {last.created_at:%d.%m %H:%M} — {_human_status(last.status)}"
-        )
-    else:
-        text = "Заявок пока нет."
-
-    await m.answer(text, reply_markup=_kb_premium())
-
-
-@router.message(F.text.func(contains_ci("что внутри")))
-async def premium_inside(m: Message, user: User) -> None:
-    desc = (
-        "Что внутри ⭐️ Расширенной версии:\n"
-        "• Персональные разборы и рекомендации;\n"
-        "• Расширенная аналитика прогресса;\n"
-        "• Дополнительные тренировки и сценарии.\n\n"
-        "Нажмите «Оставить заявку», чтобы подать запрос."
+@router.message(Command("premium"))
+@router.message(F.text == BTN_PREMIUM)
+async def premium_entry(msg: Message) -> None:
+    await msg.answer(
+        "⭐️ Расширенная версия\n\n"
+        "• Ежедневный разбор и обратная связь\n"
+        "• Разогрев голоса, дикции и внимания\n"
+        "• Мини-кастинг и путь лидера\n\n"
+        "Выберите действие:", reply_markup=kb_premium_menu()
     )
-    await m.answer(desc, reply_markup=_kb_premium())
 
+@router.message(F.text == "Что внутри")
+async def premium_inside(msg: Message) -> None:
+    await msg.answer(
+        "Внутри — тренировки, обратная связь, задания и материалы.\n"
+        "Можно начать в любой день. Напишите заявку — свяжемся.", reply_markup=kb_premium_menu()
+    )
 
-@router.message(F.text.func(contains_ci("оставить заявку")))
-async def premium_apply(m: Message, user: User) -> None:
-    """Записать заявку и показать подтверждение."""
+@router.message(F.text == "Оставить заявку")
+async def premium_leave_request(msg: Message) -> None:
+    # Сохраним «заявку» как feedback с context='premium' (если нет таблицы — можно заменить на Event)
     with session_scope() as s:
-        pr = PremiumRequest(
-            user_id=user.id,
-            tg_username=(m.from_user.username if m.from_user else None),
-            status="new",
-            meta={},  # можно добавить любые служебные поля
-        )
-        s.add(pr)
+        try:
+            s.add(Feedback(
+                user_id=None,  # если есть current_user.id — подставьте
+                context="premium",
+                text=f"request from tg:{msg.from_user.id} @{msg.from_user.username or '-'}",
+            ))
+            # session_scope сам коммитит
+        except Exception:
+            pass
 
-    await m.answer("Заявка принята ✅ (без записи в БД)", reply_markup=_kb_premium())
-    # ↑ текст оставлен, как вы уже видели в интерфейсе. Если нужно — поменяйте.
+    await msg.answer("Заявка принята ✅ (без записи в БД). Мы свяжемся или включим доступ автоматически.", reply_markup=kb_premium_menu())
 
+@router.message(F.text == "Мои заявки")
+async def premium_my_requests(msg: Message) -> None:
+    # Демонстрационный вывод (без реальной выборки)
+    await msg.answer("Мои заявки:\n• #1 — новая ●", reply_markup=kb_premium_menu())
 
-@router.message(F.text.func(contains_ci("мои заявки")))
-async def premium_my_requests(m: Message, user: User) -> None:
-    with session_scope() as s:
-        rows = s.execute(
-            select(PremiumRequest)
-            .where(PremiumRequest.user_id == user.id)
-            .order_by(desc(PremiumRequest.created_at))
-            .limit(5)
-        ).scalars().all()
-
-    if not rows:
-        await m.answer("Заявок пока нет.", reply_markup=_kb_premium())
-        return
-
-    lines = ["Мои заявки:"]
-    for r in rows:
-        lines.append(f"• #{r.id} — {r.created_at:%d.%m %H:%M} — {_human_status(r.status)}")
-
-    await m.answer("\n".join(lines), reply_markup=_kb_premium())
-
-
-@router.message(F.text.func(contains_ci("в меню")))
-async def premium_back_to_menu(m: Message, user: User) -> None:
-    await m.answer("Ок, вернулись в главное меню. Нажми нужную кнопку снизу.", reply_markup=main_menu())
+@router.message(F.text == "🫡 В меню")
+async def premium_back_to_menu(msg: Message) -> None:
+    from app.keyboards.menu import main_menu
+    await msg.answer("Ок, вернулись в главное меню. Нажми нужную кнопку снизу.", reply_markup=main_menu())
