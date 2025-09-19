@@ -1,93 +1,54 @@
 # app/routers/apply.py
 from __future__ import annotations
 
-from aiogram import Router, F
+from aiogram import F, Router
 from aiogram.filters import Command
-from aiogram.fsm.context import FSMContext
-from aiogram.fsm.state import State, StatesGroup
-from aiogram.types import Message, ReplyKeyboardMarkup, KeyboardButton
-
-from app.keyboards.menu import BTN_APPLY, main_menu
-from app.storage.repo import session_scope
-from app.storage.models import User, Lead
+from aiogram.types import Message
 
 router = Router(name="apply")
 
-# --- локальные кнопки ---
-BTN_BACK_TO_MENU = "📣 В меню"
-BTN_LEAVE_REQUEST = "📝 Оставить заявку"
+# Тексты, по которым триггеримся (кнопка меню может слать просто текст)
+TEXT_TRIGGERS = {
+    "путь лидера",
+    "🧭 путь лидера",
+    "путь лидера (заявка)",
+    "заявка путь лидера",
+}
 
-def apply_kb() -> ReplyKeyboardMarkup:
-    rows = [
-        [KeyboardButton(text=BTN_LEAVE_REQUEST)],
-        [KeyboardButton(text=BTN_BACK_TO_MENU)],
-    ]
-    return ReplyKeyboardMarkup(keyboard=rows, resize_keyboard=True, is_persistent=True)
+ASK_TEXT = (
+    "Путь лидера — индивидуальная траектория с фокусом на цели.\n"
+    "Оставьте заявку — вернусь с вопросами и предложениями.\n\n"
+    "<i>Напишите цель одной короткой фразой (до 200 символов). Если передумали — отправьте /cancel.</i>"
+)
 
+CONFIRM_TEXT = "Спасибо! Принял. Двигаемся дальше 👍"
 
-class ApplyFSM(StatesGroup):
-    waiting_short_goal = State()
-
-
-# --- вход в раздел / кнопка ---
+# Вход — команда
 @router.message(Command("apply"))
-@router.message(F.text == BTN_APPLY)
-async def apply_entry(msg: Message) -> None:
-    text = (
-        "Путь лидера — индивидуальная траектория с фокусом на цели.\n"
-        "Оставьте заявку — вернусь с вопросами и предложениями."
-    )
-    await msg.answer(text, reply_markup=apply_kb())
+async def apply_cmd(message: Message) -> None:
+    await message.answer(ASK_TEXT)
 
+# Вход — нажатие текстовой кнопки в меню
+@router.message(F.text.casefold().in_(t.lower() for t in TEXT_TRIGGERS))
+async def apply_text(message: Message) -> None:
+    await message.answer(ASK_TEXT)
 
-# --- «оставить заявку» — запускаем FSM ---
-@router.message(F.text == BTN_LEAVE_REQUEST)
-async def apply_start_collect(msg: Message, state: FSMContext) -> None:
-    await state.set_state(ApplyFSM.waiting_short_goal)
-    await msg.answer(
-        "Напишите цель одной короткой фразой (до 200 символов). Если передумали — отправьте /cancel.",
-        reply_markup=ReplyKeyboardMarkup(
-            keyboard=[[KeyboardButton(text=BTN_BACK_TO_MENU)]],
-            resize_keyboard=True,
-            is_persistent=True,
-        ),
-    )
+# Примитивное «сохранение заявки»: любое текстовое сообщение,
+# пришедшее после вопроса, считаем заявкой (на простом слое).
+# Если у вас есть состояние/БД — подмените на свою логику.
+@router.message(F.text & ~Command())
+async def apply_save(message: Message) -> None:
+    text = (message.text or "").strip()
+    # Отфильтруем служебные строки меню, чтобы не ловить их как заявку
+    if text.casefold() in {"/menu", "/start", "/training", "/progress", "/casting", "/premium", "/settings"}:
+        return
+    # Примитивная валидация: 200 символов
+    if len(text) > 200:
+        await message.answer("Слишком длинно. Сформулируйте цель до 200 символов.")
+        return
 
+    # TODO: сохранить в вашу БД, если есть
+    # repo.save_leader_apply(user_id=message.from_user.id, goal=text)
 
-# --- получаем цель от пользователя ---
-@router.message(ApplyFSM.waiting_short_goal, F.text.len() > 0)
-async def apply_save_goal(msg: Message, state: FSMContext) -> None:
-    goal = msg.text.strip()
-    u = msg.from_user
-
-    with session_scope() as s:
-        user = s.query(User).filter_by(tg_id=u.id).first()
-        if not user:
-            user = User(
-                tg_id=u.id,
-                username=u.username or None,
-                name=(u.full_name or u.first_name or None),
-            )
-            s.add(user)
-            s.flush()
-
-        contact = f"@{u.username}" if u.username else str(u.id)
-        s.add(
-            Lead(
-                user_id=user.id,
-                channel="tg",
-                contact=contact,
-                note=goal,
-                track="leader",
-            )
-        )
-
-    await state.clear()
-    await msg.answer("Спасибо! Принял. Двигаемся дальше 👍", reply_markup=apply_kb())
-
-
-# --- выход в главное меню ---
-@router.message(F.text == BTN_BACK_TO_MENU)
-async def apply_back_to_menu(msg: Message, state: FSMContext) -> None:
-    await state.clear()
-    await msg.answer("Ок, вернулись в главное меню. Нажми нужную кнопку снизу.", reply_markup=main_menu())
+    await message.answer(CONFIRM_TEXT)
+    # После подтверждения — в главное меню (кнопка внизу у вас уже есть)
