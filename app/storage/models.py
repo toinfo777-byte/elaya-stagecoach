@@ -24,7 +24,7 @@ class User(Base):
     last_seen: Mapped[datetime | None] = mapped_column(DateTime)
     consent_at: Mapped[datetime | None] = mapped_column(DateTime)
 
-    # ⬇️ deep-link источник (/start?start=...)
+    # ⬇️ источник deeplink
     source: Mapped[str | None] = mapped_column(String(64), nullable=True)
 
     # связи
@@ -33,7 +33,6 @@ class User(Base):
     events: Mapped[list["Event"]] = relationship(back_populates="user", cascade="all, delete-orphan")
     test_results: Mapped[list["TestResult"]] = relationship(back_populates="user", cascade="all, delete-orphan")
     feedbacks: Mapped[list["Feedback"]] = relationship(back_populates="user", cascade="all, delete-orphan")
-    premium_requests: Mapped[list["PremiumRequest"]] = relationship(back_populates="user", cascade="all, delete-orphan")  # NEW
 
 
 # --- Этюд и прохождения ---
@@ -58,7 +57,7 @@ class DrillRun(Base):
     drill: Mapped["Drill"] = relationship()
 
 
-# --- Мини-кастинг (на будущее) ---
+# --- Мини-кастинг ---
 class Test(Base):
     __tablename__ = "tests"
 
@@ -106,33 +105,34 @@ class Lead(Base):
     user: Mapped["User"] = relationship(back_populates="leads")
 
 
-# --- Обратная связь (feedback) ---
+# --- Обратная связь ---
 class Feedback(Base):
     __tablename__ = "feedbacks"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
 
-    first_source: Mapped[str | None] = mapped_column(String(64), default=None)  # откуда впервые пришёл
-    context: Mapped[str] = mapped_column(String(32))                             # "training" | "casting" | "manual"
-    context_id: Mapped[str | None] = mapped_column(String(64), default=None)     # id этюда/теста и т.п.
-    score: Mapped[int | None] = mapped_column(Integer, default=None)             # 2 / 1 / 0
-    text: Mapped[str | None] = mapped_column(String(2000), default=None)         # свободный текст
-    voice_file_id: Mapped[str | None] = mapped_column(String(256), default=None) # id voice в TG (если будет)
+    first_source: Mapped[str | None] = mapped_column(String(64), default=None)
+    context: Mapped[str] = mapped_column(String(32))                          # "training" | "casting" | "manual"
+    context_id: Mapped[str | None] = mapped_column(String(64), default=None)  # id этюда/теста
+    score: Mapped[int | None] = mapped_column(Integer, default=None)
+    text: Mapped[str | None] = mapped_column(String(2000), default=None)
+    voice_file_id: Mapped[str | None] = mapped_column(String(256), default=None)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
     user: Mapped["User"] = relationship(back_populates="feedbacks")
 
 
-# --- Заявки на «⭐ Расширенную версию» ---
+# --- Заявки на Расширенную версию ---
 class PremiumRequest(Base):
     __tablename__ = "premium_requests"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
     tg_username: Mapped[str | None] = mapped_column(String(255), default=None)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    status: Mapped[str] = mapped_column(String(16), default="new")               # new | in_review | approved | rejected
-    meta: Mapped[dict] = mapped_column(JSON, default=dict)                       # любые доп.поля
+    status: Mapped[str] = mapped_column(String(32), default="new")  # new | in_review | done | rejected
+    meta: Mapped[dict] = mapped_column(JSON, default=dict)
 
-    user: Mapped["User"] = relationship(back_populates="premium_requests")
+    # (по желанию) связь:
+    # user: Mapped["User"] = relationship()
