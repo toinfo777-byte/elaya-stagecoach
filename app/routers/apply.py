@@ -2,68 +2,83 @@ from __future__ import annotations
 
 from aiogram import Router, F
 from aiogram.filters import Command
+from aiogram.fsm.state import StatesGroup, State
+from aiogram.fsm.context import FSMContext
 from aiogram.types import Message, ReplyKeyboardMarkup, KeyboardButton
 
-from app.keyboards.menu import BTN_APPLY
-from app.storage.repo import session_scope
-from app.storage.models import Lead
+from app.keyboards.menu import BTN_APPLY, main_menu
+from app.storage.repo import session_scope, log_event
+from app.storage.models import User, Lead
+from app.config import settings
 
 router = Router(name="apply")
 
-def kb_apply_menu() -> ReplyKeyboardMarkup:
+
+def kb_apply() -> ReplyKeyboardMarkup:
     rows = [
-        [KeyboardButton(text="Что внутри"), KeyboardButton(text="Оставить заявку")],
-        [KeyboardButton(text="Мои заявки"), KeyboardButton(text="🫡 В меню")],
+        [KeyboardButton(text="Оставить заявку")],
+        [KeyboardButton(text="📣 В меню")],
     ]
     return ReplyKeyboardMarkup(keyboard=rows, resize_keyboard=True, is_persistent=True)
 
+
+class ApplySG(StatesGroup):
+    waiting_goal = State()
+
+
 @router.message(Command("apply"))
 @router.message(F.text == BTN_APPLY)
-async def apply_entry(msg: Message) -> None:
-    await msg.answer(
-        "🧭 Путь лидера: короткая заявка.\n"
-        "Напишите, чего хотите достичь — одним сообщением.", reply_markup=kb_apply_menu()
-    )
-
-@router.message(F.text == "Что внутри")
-async def apply_inside(msg: Message) -> None:
-    await msg.answer(
+async def apply_entry(message: Message, state: FSMContext) -> None:
+    await state.clear()
+    await message.answer(
         "Путь лидера — индивидуальная траектория с фокусом на цели.\n"
-        "Оставьте заявку — вернусь с вопросами и предложениями.", reply_markup=kb_apply_menu()
+        "Оставьте заявку — вернусь с вопросами и предложениями.",
+        reply_markup=kb_apply(),
     )
 
-@router.message(F.text == "Оставить заявку")
-async def apply_ask_text(msg: Message) -> None:
-    await msg.answer("Напишите цель одной фразой (до 200 символов). Если передумали — отправьте /cancel.", reply_markup=kb_apply_menu())
 
-@router.message(F.text == "Мои заявки")
-async def apply_my_requests(msg: Message) -> None:
-    # Минимальный «лист» — без реальной выборки
-    await msg.answer("Заявок пока нет.", reply_markup=kb_apply_menu())
+@router.message(F.text.lower().in_({"📣 в меню", "в меню"}))
+async def apply_back_to_menu(message: Message, state: FSMContext) -> None:
+    await state.clear()
+    await message.answer("Ок, вернулись в главное меню. Нажми нужную кнопку снизу.", reply_markup=main_menu())
 
-@router.message(F.text == "🫡 В меню")
-async def apply_back_to_menu(msg: Message) -> None:
-    from app.keyboards.menu import main_menu
-    await msg.answer("Ок, вернулись в главное меню. Нажми нужную кнопку снизу.", reply_markup=main_menu())
 
-# Пришёл свободный текст после «Путь лидера»
-@router.message(F.text.len() > 0)
-async def apply_catch_free_text(msg: Message) -> None:
-    text = (msg.text or "").strip()
-    if not text:
+@router.message(F.text.lower().in_({"оставить заявку"}))
+async def apply_ask_goal(message: Message, state: FSMContext) -> None:
+    await state.set_state(ApplySG.waiting_goal)
+    await message.answer(
+        "Путь лидера: короткая заявка.\n"
+        "Напишите, чего хотите достичь — одним сообщением (до 200 символов).\n"
+        "Если передумали — /cancel.",
+    )
+
+
+@router.message(ApplySG.waiting_goal, F.text.len() > 0)
+async def apply_save_goal(message: Message, state: FSMContext) -> None:
+    goal = (message.text or "").strip()
+    if not goal:
+        await message.answer("Пусто. Напишите кратко цель.")
+        return
+    if len(goal) > 200:
+        await message.answer("Слишком длинно 🙈 Сократите до 200 символов, пожалуйста.")
         return
 
-    # Сохраним лид (user_id тут не маппим — можно доработать, если есть текущий пользователь)
     with session_scope() as s:
-        try:
-            s.add(Lead(
-                user_id=None,
-                channel="tg",
-                contact=str(msg.from_user.id),
-                note=text[:500],
-                track="apply",
-            ))
-        except Exception:
-            pass
+        u = s.query(User).filter_by(tg_id=message.from_user.id).first()
+        if not u:
+            u = User(tg_id=message.from_user.id, username=message.from_user.username or None, name=message.from_user.full_name)
+            s.add(u)
+            s.commit()
 
-    await msg.reply("Спасибо! Принял. Двигаемся дальше 👍", reply_markup=kb_apply_menu())
+        s.add(Lead(
+            user_id=u.id,
+            channel="tg",
+            contact=f"@{u.username}" if u.username else str(u.tg_id),
+            note=goal,
+            track="apply",
+        ))
+        s.commit()
+        log_event(s, u.id, "apply_request", {"goal": goal})
+
+    await state.clear()
+    await message.answer("Спасибо! Принял. Двигаемся дальше 👍", reply_markup=main_menu())
