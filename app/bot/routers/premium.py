@@ -1,88 +1,116 @@
-# app/bot/routers/premium.py
 from __future__ import annotations
 
 from aiogram import Router, F, types
-from aiogram.fsm.context import FSMContext
+from aiogram.filters import Text
 from aiogram.fsm.state import StatesGroup, State
-from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
+from aiogram.fsm.context import FSMContext
+from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from app.keyboards.menu import (
-    BTN_PREMIUM,  # "⭐️ Расширенная версия"
+    BTN_PREMIUM,
     main_menu,
 )
-from app.storage.repo import session_scope
-from app.storage.models import User, Lead
+from app.storage.repo import session_scope, log_event
+from app.storage.models import Lead, User
 
 router = Router(name="premium")
 
-
-# ——— Локальные кнопки раздела «Расширенная версия»
-PRE_BTN_WHATS_INSIDE = "📦 Что внутри"
-PRE_BTN_LEAVE = "📝 Оставить заявку"
-PRE_BTN_MY_LEADS = "🗂 Мои заявки"
-PRE_BTN_BACK = "📣 В меню"
-
-
-def premium_kb() -> ReplyKeyboardMarkup:
-    rows = [
-        [KeyboardButton(text=PRE_BTN_WHATS_INSIDE)],
-        [KeyboardButton(text=PRE_BTN_LEAVE)],
-        [KeyboardButton(text=PRE_BTN_MY_LEADS)],
-        [KeyboardButton(text=PRE_BTN_BACK)],
-    ]
-    return ReplyKeyboardMarkup(keyboard=rows, resize_keyboard=True, is_persistent=True)
+# --- callbacks
+CB_INSIDE = "premium:inside"
+CB_APPLY = "premium:apply"
+CB_LIST = "premium:list"
+CB_BACK = "premium:back"
 
 
-class PremiumStates(StatesGroup):
-    wait_goal = State()
+class PremiumForm(StatesGroup):
+    waiting_goal = State()
 
 
-def _ensure_user(session, msg: types.Message) -> User:
-    tg_id = msg.from_user.id
-    user = session.query(User).filter(User.tg_id == tg_id).first()
-    if not user:
-        user = User(
-            tg_id=msg.from_user.id,
-            username=msg.from_user.username or None,
-            name=(msg.from_user.first_name or "")
-            + ((" " + msg.from_user.last_name) if msg.from_user.last_name else ""),
-        )
-        session.add(user)
-        session.commit()
-        session.refresh(user)
-    return user
+def premium_kb() -> types.InlineKeyboardMarkup:
+    kb = InlineKeyboardBuilder()
+    kb.button(text="🔍 Что внутри", callback_data=CB_INSIDE)
+    kb.button(text="📝 Оставить заявку", callback_data=CB_APPLY)
+    kb.button(text="📋 Мои заявки", callback_data=CB_LIST)
+    kb.button(text="📣 В меню", callback_data=CB_BACK)
+    kb.adjust(1)
+    return kb.as_markup()
 
 
-# ——— вход в раздел
-@router.message(F.text == BTN_PREMIUM)
-@router.message(F.text == "/premium")
-async def premium_entry(msg: types.Message, state: FSMContext):
-    await state.clear()
-    await msg.answer(
+@router.message(Text(BTN_PREMIUM))
+async def premium_entry(message: types.Message) -> None:
+    text = (
         "⭐️ <b>Расширенная версия</b>\n\n"
         "• Ежедневный разбор и обратная связь\n"
         "• Разогрев голоса, дикции и внимания\n"
         "• Мини-кастинг и «путь лидера»\n\n"
-        "Выберите действие:",
-        reply_markup=premium_kb(),
+        "Выберите действие:"
+    )
+    await message.answer(text, reply_markup=premium_kb())
+
+
+@router.callback_query(F.data == CB_INSIDE)
+async def premium_inside(call: types.CallbackQuery) -> None:
+    await call.answer()
+    await call.message.answer(
+        "Внутри расширенной версии — больше практики и персональных разборов."
     )
 
 
-# ——— Подкнопки
-@router.message(F.text == PRE_BTN_WHATS_INSIDE)
-async def premium_whats_inside(msg: types.Message):
-    await msg.answer(
-        "Внутри расширенной версии — больше практики и персональных разборов.",
-        reply_markup=premium_kb(),
+@router.callback_query(F.data == CB_APPLY)
+async def premium_apply_start(call: types.CallbackQuery, state: FSMContext) -> None:
+    await call.answer()
+    await state.set_state(PremiumForm.waiting_goal)
+    await call.message.answer(
+        "Напишите цель одной короткой фразой (до 200 символов). Если передумали — отправьте /cancel."
     )
 
 
-@router.message(F.text == PRE_BTN_MY_LEADS)
-async def premium_my_leads(msg: types.Message):
+@router.message(PremiumForm.waiting_goal)
+async def premium_apply_save(message: types.Message, state: FSMContext) -> None:
+    goal_text = (message.text or "").strip()[:200]
+
     with session_scope() as s:
-        user = s.query(User).filter(User.tg_id == msg.from_user.id).first()
+        # гарантируем наличие пользователя
+        tg_id = message.from_user.id
+        user = s.query(User).filter_by(tg_id=tg_id).first()
+        if user is None:
+            user = User(
+                tg_id=tg_id,
+                username=message.from_user.username or None,
+                name=message.from_user.full_name or None,
+            )
+            s.add(user)
+            s.flush()
+
+        # сохраняем лид
+        contact = f"@{message.from_user.username}" if message.from_user.username else str(tg_id)
+        lead = Lead(
+            user_id=user.id,
+            channel="tg",
+            contact=contact,
+            note=goal_text,
+            track="premium",
+        )
+        s.add(lead)
+        s.flush()
+
+        # лог
+        log_event(s, user_id=user.id, name="lead_created", payload={"track": "premium"})
+
+    await state.clear()
+    await message.answer("Спасибо! Принял. Двигаемся дальше 👍")
+    await message.answer("Ок, вернулись в главное меню. Нажми нужную кнопку снизу.", reply_markup=main_menu())
+
+
+@router.callback_query(F.data == CB_LIST)
+async def premium_my_leads(call: types.CallbackQuery) -> None:
+    await call.answer()
+    tg_id = call.from_user.id
+
+    with session_scope() as s:
+        user = s.query(User).filter_by(tg_id=tg_id).first()
         if not user:
-            await msg.answer("Заявок пока нет.", reply_markup=premium_kb())
+            await call.message.answer("Заявок пока нет.")
             return
 
         leads = (
@@ -94,50 +122,17 @@ async def premium_my_leads(msg: types.Message):
         )
 
     if not leads:
-        await msg.answer("Заявок пока нет.", reply_markup=premium_kb())
+        await call.message.answer("Заявок пока нет.")
         return
 
-    lines = []
-    for i, lead in enumerate(leads, 1):
-        lines.append(f"#{i} — {lead.ts:%d.%m %H:%M} — {lead.track or '—'}")
-    await msg.answer("Мои заявки:\n" + "\n".join(lines), reply_markup=premium_kb())
+    lines = ["Мои заявки:"]
+    for i, l in enumerate(leads, 1):
+        lines.append(f"• #{i} — {l.ts:%d.%m %H:%M} — {l.track or 'без трека'}")
+
+    await call.message.answer("\n".join(lines))
 
 
-@router.message(F.text == PRE_BTN_BACK)
-async def premium_back(msg: types.Message, state: FSMContext):
-    await state.clear()
-    await msg.answer("Ок, вернулись в главное меню. Нажми нужную кнопку снизу.", reply_markup=main_menu())
-
-
-# ——— «Оставить заявку» (FSM)
-@router.message(F.text == PRE_BTN_LEAVE)
-async def premium_leave_start(msg: types.Message, state: FSMContext):
-    await state.set_state(PremiumStates.wait_goal)
-    await msg.answer(
-        "Напишите цель одной короткой фразой (до 200 символов). Если передумали — отправьте /cancel."
-    )
-
-
-@router.message(PremiumStates.wait_goal, F.text)
-async def premium_leave_save(msg: types.Message, state: FSMContext):
-    txt = (msg.text or "").strip()
-    if not txt:
-        await msg.answer("Пришлите, пожалуйста, цель одной короткой фразой.")
-        return
-
-    with session_scope() as s:
-        user = _ensure_user(s, msg)
-        s.add(
-            Lead(
-                user_id=user.id,
-                channel="tg",
-                contact=msg.from_user.username or str(msg.from_user.id),
-                note=txt[:500],
-                track="premium",
-            )
-        )
-        s.commit()
-
-    await state.clear()
-    # ВАЖНО: сразу уводим на главное меню, чтобы не оставалась «Оставить заявку» внизу
-    await msg.answer("Спасибо! Принял. Двигаемся дальше 👍", reply_markup=main_menu())
+@router.callback_query(F.data == CB_BACK)
+async def premium_back(call: types.CallbackQuery) -> None:
+    await call.answer()
+    await call.message.answer("Ок, вернулись в главное меню. Нажми нужную кнопку снизу.", reply_markup=main_menu())
