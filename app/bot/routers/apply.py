@@ -2,102 +2,76 @@
 from __future__ import annotations
 
 from aiogram import Router, F, types
-from aiogram.filters import Command, StateFilter
-from aiogram.fsm.state import StatesGroup, State
 from aiogram.fsm.context import FSMContext
+from aiogram.fsm.state import StatesGroup, State
 
-from app.keyboards.menu import (
-    main_menu,
-    BTN_APPLY,         # 🧭 Путь лидера
-)
-from app.storage.models import User, Lead
+from app.keyboards.menu import BTN_APPLY, main_menu
 from app.storage.repo import session_scope
+from app.storage.models import User, Lead
 
 router = Router(name="apply")
 
 
-# ----- FSM -----
-class ApplyForm(StatesGroup):
-    waiting_text = State()   # ждём «цель одной фразой»
+class ApplyStates(StatesGroup):
+    wait_goal = State()
 
 
-# ----- Вспомогательное -----
-def _contact_from_tg(user: types.User) -> str:
-    if user.username:
-        return f"@{user.username}"
-    return f"tg:{user.id}"
+def _user_from_message(m: types.Message) -> dict:
+    u = m.from_user
+    return {
+        "tg_id": u.id,
+        "username": u.username or None,
+        "name": (u.first_name or "") + ((" " + u.last_name) if u.last_name else ""),
+    }
 
 
-def _get_or_create_user(tg_user: types.User) -> User:
-    with session_scope() as s:
-        u: User | None = s.query(User).filter_by(tg_id=tg_user.id).first()
-        if u is None:
-            u = User(
-                tg_id=tg_user.id,
-                username=tg_user.username,
-                name=tg_user.full_name,
-            )
-            s.add(u)
-            s.commit()
-            s.refresh(u)
-        return u
+def _ensure_user(session, msg: types.Message) -> User:
+    tg_id = msg.from_user.id
+    user = session.query(User).filter(User.tg_id == tg_id).first()
+    if not user:
+        payload = _user_from_message(msg)
+        user = User(**payload)
+        session.add(user)
+        session.commit()
+        session.refresh(user)
+    return user
 
 
-# ----- Клавиатуры локальные -----
-def apply_kb() -> types.ReplyKeyboardMarkup:
-    rows = [
-        [types.KeyboardButton(text="Оставить заявку")],
-        [types.KeyboardButton(text="📯 В меню")],
-    ]
-    return types.ReplyKeyboardMarkup(keyboard=rows, resize_keyboard=True)
-
-
-# ----- Хендлеры -----
-@router.message(Command("apply"))
 @router.message(F.text == BTN_APPLY)
-async def open_apply(message: types.Message, state: FSMContext) -> None:
-    await state.clear()
-    await message.answer(
+@router.message(F.text == "/apply")
+async def apply_entry(msg: types.Message, state: FSMContext):
+    """
+    Нажали «🧭 Путь лидера» — сразу просим короткую цель одной фразой.
+    """
+    await state.set_state(ApplyStates.wait_goal)
+    await msg.answer(
         "Путь лидера — индивидуальная траектория с фокусом на цели.\n"
-        "Оставьте заявку — вернусь с вопросами и предложениями.",
-        reply_markup=apply_kb(),
-    )
-
-
-@router.message(F.text == "Оставить заявку")
-async def apply_start(message: types.Message, state: FSMContext) -> None:
-    await state.set_state(ApplyForm.waiting_text)
-    await message.answer(
-        "Путь лидера: короткая заявка.\n"
-        "Напишите, чего хотите достичь — одним сообщением (до 200 символов).\n"
+        "Напишите цель одной короткой фразой (до 200 символов). "
         "Если передумали — отправьте /cancel.",
     )
 
 
-@router.message(Command("cancel"), StateFilter(ApplyForm.waiting_text))
-async def apply_cancel(message: types.Message, state: FSMContext) -> None:
-    await state.clear()
-    await message.answer("Ок, вернулись в главное меню. Нажми нужную кнопку снизу.", reply_markup=main_menu())
-
-
-@router.message(StateFilter(ApplyForm.waiting_text))
-async def apply_save_text(message: types.Message, state: FSMContext) -> None:
-    text = (message.text or "").strip()
+@router.message(ApplyStates.wait_goal, F.text)
+async def apply_save_goal(msg: types.Message, state: FSMContext):
+    text = (msg.text or "").strip()
     if not text:
-        await message.answer("Пришлите, пожалуйста, цель одной фразой.")
+        await msg.answer("Пришлите, пожалуйста, цель одной короткой фразой.")
         return
 
-    # Сохраняем заявку в leads (track='leader')
-    u = _get_or_create_user(message.from_user)
+    # Сохраняем лид
     with session_scope() as s:
-        s.add(Lead(
-            user_id=u.id,
-            channel="tg",
-            contact=_contact_from_tg(message.from_user),
-            note=text[:500],
-            track="leader",
-        ))
+        user = _ensure_user(s, msg)
+        s.add(
+            Lead(
+                user_id=user.id,
+                channel="tg",
+                contact=msg.from_user.username or str(msg.from_user.id),
+                note=text[:500],
+                track="leader",
+            )
+        )
         s.commit()
 
+    # Завершаем сценарий и возвращаем в главное меню
     await state.clear()
-    await message.answer("Спасибо! Принял. Двигаемся дальше 👍", reply_markup=main_menu())
+    await msg.answer("Спасибо! Принял. Двигаемся дальше 👍", reply_markup=main_menu())
