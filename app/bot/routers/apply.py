@@ -1,89 +1,67 @@
-# app/bot/routers/apply.py
 from __future__ import annotations
 
 from aiogram import Router, F
-from aiogram.types import Message, ReplyKeyboardMarkup, KeyboardButton
-from aiogram.fsm.state import StatesGroup, State
-from aiogram.fsm.context import FSMContext
-
-from app.keyboards.menu import BTN_APPLY, main_menu
+from aiogram.filters import Command
+from aiogram.types import Message, ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove
 
 router = Router(name="apply")
 
-KB_LEAVE_APP = "📝 Оставить заявку"
-KB_BACK_MENU = "📣 В меню"
+# Простое «состояние» без FSM
+_WAIT_GOAL: set[int] = set()
 
 
 def _apply_kb() -> ReplyKeyboardMarkup:
-    rows = [
-        [KeyboardButton(text=KB_LEAVE_APP)],
-        [KeyboardButton(text=KB_BACK_MENU)],
-    ]
-    return ReplyKeyboardMarkup(keyboard=rows, resize_keyboard=True, is_persistent=True)
-
-
-def _only_menu_kb() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
-        keyboard=[[KeyboardButton(text=KB_BACK_MENU)]],
+        keyboard=[
+            [KeyboardButton(text="📝 Оставить заявку")],
+            [KeyboardButton(text="📣 В меню")],
+        ],
         resize_keyboard=True,
-        is_persistent=True,
+        one_time_keyboard=False,
+        input_field_placeholder="Выбери действие…",
     )
 
 
-class ApplyForm(StatesGroup):
-    goal = State()
-
-
-@router.message(F.text == BTN_APPLY)
-async def apply_entry(message: Message, state: FSMContext) -> None:
-    await state.clear()
-    await message.answer(
+@router.message(Command("apply"))
+@router.message(F.text.lower().in_({"путь лидера", "🧭 путь лидера", "🧭 путь лидера (заявка)"}))
+async def apply_entry(message: Message) -> None:
+    txt = (
         "Путь лидера — индивидуальная траектория с фокусом на цели.\n"
-        "Оставьте заявку — вернусь с вопросами и предложениями.",
+        "Оставьте короткую заявку — вернусь с вопросами и предложениями."
+    )
+    await message.answer(txt, reply_markup=_apply_kb())
+
+
+@router.message(F.text.lower() == "📝 оставить заявку")
+async def apply_ask_goal(message: Message) -> None:
+    _WAIT_GOAL.add(message.from_user.id)
+    await message.answer(
+        "Напишите цель одной короткой фразой (до 200 символов).\n"
+        "Если передумали — отправьте /cancel.",
         reply_markup=_apply_kb(),
     )
 
 
-@router.message(F.text == KB_LEAVE_APP)
-async def apply_ask(message: Message, state: FSMContext) -> None:
-    await state.set_state(ApplyForm.goal)
-    await message.answer(
-        "Короткая заявка. Напишите, чего хотите достичь — одним сообщением (до 200 символов).\n"
-        "Если передумали — отправьте /cancel.",
-        reply_markup=_only_menu_kb(),
-    )
+@router.message(F.text.lower() == "/cancel")
+async def apply_cancel(message: Message) -> None:
+    _WAIT_GOAL.discard(message.from_user.id)
+    await message.answer("Отменил. Что дальше?", reply_markup=_apply_kb())
 
 
-@router.message(ApplyForm.goal)
-async def apply_take(message: Message, state: FSMContext) -> None:
-    text = (message.text or "").strip()
-    if not text:
-        await message.answer("Пусто. Напишите коротко вашу цель, пожалуйста.")
-        return
+# ловим любое текстовое сообщение как «цель», если человек в ожидании
+@router.message(F.text & (F.from_user.id.func(lambda uid: uid in _WAIT_GOAL)))
+async def apply_save_goal(message: Message) -> None:
+    _WAIT_GOAL.discard(message.from_user.id)
 
-    # сохраняем как событие/лид — необязательно, но полезно
-    try:
-        from app.storage.repo import session_scope, log_event  # type: ignore
-        from app.storage.models import User  # type: ignore
+    goal = (message.text or "").strip()
+    # здесь можно сохранить goal в БД, если нужна персистентность
+    # try: await repo.save_leader_path_goal(user_id=message.from_user.id, goal=goal) ...
 
-        with session_scope() as s:
-            u = s.query(User).filter_by(tg_id=message.from_user.id).first()
-            uid = u.id if u else None
-            log_event(s, uid, "apply_application", {"text": text})
-    except Exception:
-        pass
-
-    await state.clear()
-    await message.answer("Спасибо! Принял. Двигаемся дальше 👍", reply_markup=_only_menu_kb())
+    await message.answer("Спасибо! Принял. Двигаемся дальше 👍", reply_markup=_apply_kb())
 
 
-@router.message(F.text == KB_BACK_MENU)
-async def back_to_menu(message: Message, state: FSMContext) -> None:
-    await state.clear()
-    await message.answer("Ок, вернулись в главное меню. Нажми нужную кнопку снизу.", reply_markup=main_menu())
-
-
-@router.message(F.text.casefold() == "/cancel")
-async def cancel_any(message: Message, state: FSMContext) -> None:
-    await state.clear()
-    await message.answer("Отменил. Вернул в меню.", reply_markup=main_menu())
+# универсальная кнопка «В меню» (пусть отрабатывает ваш общий роутер)
+@router.message(F.text.lower() == "📣 в меню")
+async def back_to_menu(message: Message) -> None:
+    # просто уберём локальную клавиатуру — дальше сработает ваш системный «В меню»
+    await message.answer("Ок, вернулись в главное меню. Нажми нужную кнопку снизу.", reply_markup=ReplyKeyboardRemove())
