@@ -2,106 +2,186 @@ from __future__ import annotations
 
 from aiogram import Router, F, types
 from aiogram.filters import Command
-from aiogram.utils.markdown import hbold as b
+from aiogram.fsm.state import StatesGroup, State
+from aiogram.fsm.context import FSMContext
+
+from aiogram.utils.keyboard import InlineKeyboardBuilder
+
+from sqlalchemy import text
 
 from app.keyboards.menu import (
     BTN_PREMIUM,
-    main_menu,
 )
-from app.storage.repo import session_scope, add_premium_request_for_tg, list_premium_requests_for_tg
+from app.storage.repo import SessionLocal
 
 router = Router(name="premium")
 
 
-# ── Клавиатуры ────────────────────────────────────────────────────────────────
-def kb_premium_menu() -> types.ReplyKeyboardMarkup:
-    rows = [
-        [types.KeyboardButton(text="Что внутри")],
-        [types.KeyboardButton(text="Оставить заявку")],
-        [types.KeyboardButton(text="Мои заявки")],
-        [types.KeyboardButton(text="📣 В меню")],
-    ]
-    return types.ReplyKeyboardMarkup(keyboard=rows, resize_keyboard=True, is_persistent=True)
+# --------- FSM ---------
+class PremiumForm(StatesGroup):
+    waiting_goal = State()
 
 
-# ── Вход в раздел ─────────────────────────────────────────────────────────────
-@router.message(F.text == BTN_PREMIUM)
-@router.message(Command("premium"))
-async def premium_entry(msg: types.Message) -> None:
-    await msg.answer(
-        f"{b('⭐️ Расширенная версия')}\n\n"
+# --------- inline-клавиатуры ---------
+def kb_premium_menu() -> types.InlineKeyboardMarkup:
+    kb = InlineKeyboardBuilder()
+    kb.button(text="Что внутри", callback_data="prem:inside")
+    kb.button(text="Оставить заявку", callback_data="prem:req")
+    kb.button(text="Мои заявки", callback_data="prem:list")
+    kb.button(text="📣 В меню", callback_data="prem:menu")
+    kb.adjust(2, 2)
+    return kb.as_markup()
+
+# --------- утилиты ---------
+def _markdown_premium_intro() -> str:
+    return (
+        "⭐️ <b>Расширенная версия</b>\n\n"
         "• Ежедневный разбор и обратная связь\n"
         "• Разогрев голоса, дикции и внимания\n"
         "• Мини-кастинг и путь лидера\n\n"
-        f"{b('Выберите действие:')}",
-        reply_markup=kb_premium_menu(),
+        "<i>Выберите действие:</i>"
     )
 
 
-# ── Что внутри ────────────────────────────────────────────────────────────────
-@router.message(F.text == "Что внутри")
-async def premium_what(msg: types.Message) -> None:
-    await msg.answer(
-        "Внутри — индивидуальные задания, регулярный разбор и персональная обратная связь. "
-        "Можно начать со свободной заявки: коротко опишите цель.",
+def _ensure_user_and_get_id(telegram_id: int, username: str | None) -> int:
+    """Возвращает id нашего пользователя (создаёт пустого при необходимости)."""
+    with SessionLocal() as s:
+        row = s.execute(
+            text("SELECT id FROM users WHERE tg_id = :tg"),
+            {"tg": telegram_id},
+        ).fetchone()
+        if row:
+            return int(row[0])
+
+        s.execute(
+            text(
+                "INSERT INTO users (tg_id, username, streak) VALUES (:tg, :un, 0)"
+            ),
+            {"tg": telegram_id, "un": username or None},
+        )
+        s.commit()
+        row = s.execute(
+            text("SELECT id FROM users WHERE tg_id = :tg"),
+            {"tg": telegram_id},
+        ).fetchone()
+        return int(row[0])
+
+
+async def _show_premium_menu(message: types.Message) -> None:
+    await message.answer(_markdown_premium_intro(), reply_markup=kb_premium_menu())
+
+
+# --------- вход в раздел ---------
+@router.message(Command("premium"))
+@router.message(F.text == BTN_PREMIUM, state="*")
+async def premium_entry(message: types.Message, state: FSMContext) -> None:
+    # «супер-кнопка»: чистим любое состояние и открываем раздел
+    await state.clear()
+    await _show_premium_menu(message)
+
+
+# --------- Что внутри ---------
+@router.callback_query(F.data == "prem:inside", state="*")
+async def prem_inside(cb: types.CallbackQuery, state: FSMContext) -> None:
+    await state.clear()
+    await cb.message.answer(
+        "Внутри — разбор ваших ответов и аудио, ежедневные микро-тренировки и обратная связь.\n"
+        "Если хотите попробовать — нажмите «Оставить заявку».",
         reply_markup=kb_premium_menu(),
     )
+    await cb.answer()
 
 
-# ── Оставить заявку ───────────────────────────────────────────────────────────
-@router.message(F.text == "Оставить заявку")
-async def premium_request_start(msg: types.Message) -> None:
-    await msg.answer(
-        f"{b('Путь лидера: короткая заявка.')} \n"
+# --------- Оставить заявку (старт) ---------
+@router.callback_query(F.data == "prem:req", state="*")
+async def prem_request_start(cb: types.CallbackQuery, state: FSMContext) -> None:
+    await state.clear()
+    await state.set_state(PremiumForm.waiting_goal)
+    await cb.message.answer(
+        "Путь лидера: короткая заявка.\n"
         "Напишите, чего хотите достичь — одним сообщением (до 200 символов).\n"
         "Если передумали — отправьте /cancel.",
+    )
+    await cb.answer()
+
+
+# отмена
+@router.message(Command("cancel"), PremiumForm.waiting_goal)
+async def prem_cancel(message: types.Message, state: FSMContext) -> None:
+    await state.clear()
+    await message.answer("Ок, вернулись в главное меню. Нажми нужную кнопку снизу.")
+    # возвращаем меню раздела, чтобы было куда вернуться сразу
+    await _show_premium_menu(message)
+
+
+# --------- Оставить заявку (приём текста) ---------
+@router.message(PremiumForm.waiting_goal)
+async def prem_request_save(message: types.Message, state: FSMContext) -> None:
+    user_id = _ensure_user_and_get_id(
+        message.from_user.id,
+        getattr(message.from_user, "username", None),
+    )
+    goal_text = (message.text or "").strip()[:200]
+
+    # Пишем в premium_requests
+    with SessionLocal() as s:
+        # для sqlite JSON — обычная строка '{}' (без ::jsonb)
+        s.execute(
+            text(
+                "INSERT INTO premium_requests (user_id, tg_username, status, meta) "
+                "VALUES (:uid, :un, 'new', :meta)"
+            ),
+            {
+                "uid": user_id,
+                "un": getattr(message.from_user, "username", None),
+                "meta": "{}",
+            },
+        )
+        s.commit()
+
+    await state.clear()
+    await message.answer("Спасибо! Принял. Двигаемся дальше 👍")
+    await _show_premium_menu(message)
+
+
+# --------- Мои заявки ---------
+@router.callback_query(F.data == "prem:list", state="*")
+async def prem_list(cb: types.CallbackQuery, state: FSMContext) -> None:
+    await state.clear()
+    user_id = _ensure_user_and_get_id(cb.from_user.id, getattr(cb.from_user, "username", None))
+
+    with SessionLocal() as s:
+        rows = s.execute(
+            text(
+                "SELECT id, created_at, status "
+                "FROM premium_requests WHERE user_id = :uid "
+                "ORDER BY id DESC LIMIT 5"
+            ),
+            {"uid": user_id},
+        ).fetchall()
+
+    if not rows:
+        await cb.message.answer("Заявок пока нет.", reply_markup=kb_premium_menu())
+        await cb.answer()
+        return
+
+    status_emoji = {"new": "🟡", "in_review": "🟠", "done": "🟢"}
+    lines = []
+    for rid, created_at, status in rows:
+        mark = status_emoji.get(status, "⚪️")
+        ts = str(created_at)[:16] if created_at else ""
+        lines.append(f"• #{rid} — {ts} — {mark} {status}")
+
+    await cb.message.answer(
+        "<b>Мои заявки:</b>\n" + "\n".join(lines),
         reply_markup=kb_premium_menu(),
     )
+    await cb.answer()
 
 
-@router.message(F.text, F.text.len() > 0, F.text != "Что внутри", F.text != "Мои заявки", F.text != "📣 В меню")
-async def premium_request_catch_text(msg: types.Message) -> None:
-    """
-    Если юзер находится в разделе «Расширенная версия» и написал произвольный
-    текст после «Оставить заявку», просто сохраняем как заявку.
-    (Формальный FSM не делаем, чтобы не зависать на шагах.)
-    """
-    # Чтобы не перехватывать всё подряд, проверим, что последнее меню было премиум:
-    # простая эвристика: ниже клавиатура премиума всегда активна — позволяем сохранять.
-    text = (msg.text or "").strip()
-    if not text or text.startswith("/"):
-        return
-
-    with session_scope() as s:
-        add_premium_request_for_tg(
-            s,
-            tg_id=msg.from_user.id,
-            username=msg.from_user.username,
-            text_note=text,
-            source="premium_text",
-        )
-
-    await msg.answer("Спасибо! Заявка принята ✅", reply_markup=kb_premium_menu())
-
-
-# ── Мои заявки ────────────────────────────────────────────────────────────────
-@router.message(F.text == "Мои заявки")
-async def premium_my_requests(msg: types.Message) -> None:
-    with session_scope() as s:
-        items = list_premium_requests_for_tg(s, msg.from_user.id)
-
-    if not items:
-        await msg.answer("Заявок пока нет.", reply_markup=kb_premium_menu())
-        return
-
-    lines = [f"{b('Мои заявки')}: #{len(items)}"]
-    for idx, it in enumerate(items, 1):
-        note = (it.meta or {}).get("note") or "—"
-        lines.append(f"{idx}. {it.created_at:%d.%m %H:%M} — {it.status} — {note[:100]}")
-    await msg.answer("\n".join(lines), reply_markup=kb_premium_menu())
-
-
-# ── В меню ────────────────────────────────────────────────────────────────────
-@router.message(F.text == "📣 В меню")
-async def premium_back_to_menu(msg: types.Message) -> None:
-    await msg.answer("Ок, вернулись в главное меню. Нажми нужную кнопку снизу.", reply_markup=main_menu())
+# --------- «В меню» внутри раздела ---------
+@router.callback_query(F.data == "prem:menu", state="*")
+async def prem_back_to_menu(cb: types.CallbackQuery, state: FSMContext) -> None:
+    await state.clear()
+    await cb.message.answer("Ок, вернулись в главное меню. Нажми нужную кнопку снизу.")
+    await cb.answer()
