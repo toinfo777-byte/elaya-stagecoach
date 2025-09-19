@@ -1,12 +1,17 @@
-# app/routers/help.py
-from aiogram import Router, types
-from aiogram.filters import Command
-from app.keyboards.menu import main_menu
-from app.texts.strings import HELP  # используем тот же текст, без разметки
+from __future__ import annotations
 
-router = Router(name="help_fallback")
+from aiogram import Router, F
+from aiogram.filters import Command
+from aiogram.types import Message
+
+from app.keyboards.menu import get_bot_commands, main_menu
+
+router = Router(name="help")
 
 @router.message(Command("help"))
-async def help_cmd(m: types.Message):
-    # Без parse_mode → Telegram не парсит Markdown, ошибки не будет
-    await m.answer(HELP, reply_markup=main_menu())
+async def help_cmd(message: Message) -> None:
+    cmds = get_bot_commands()
+    txt = ["<b>Команды:</b>"]
+    for c in cmds:
+        txt.append(f"/{c.command} — {c.description}")
+    await message.answer("\n".join(txt), reply_markup=main_menu())
