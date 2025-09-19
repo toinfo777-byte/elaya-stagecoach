@@ -1,16 +1,33 @@
+# app/bot/routers/apply.py
 from __future__ import annotations
 
-from datetime import datetime
-from aiogram import F, Router
-from aiogram.fsm.state import State, StatesGroup
+from aiogram import Router, F
+from aiogram.types import Message, ReplyKeyboardMarkup, KeyboardButton
+from aiogram.fsm.state import StatesGroup, State
 from aiogram.fsm.context import FSMContext
-from aiogram.types import Message
 
-from app.keyboards.menu import main_menu, BTN_APPLY
-from app.storage.repo import session_scope, log_event
-from app.storage.models import Lead, User
+from app.keyboards.menu import BTN_APPLY, main_menu
 
 router = Router(name="apply")
+
+KB_LEAVE_APP = "📝 Оставить заявку"
+KB_BACK_MENU = "📣 В меню"
+
+
+def _apply_kb() -> ReplyKeyboardMarkup:
+    rows = [
+        [KeyboardButton(text=KB_LEAVE_APP)],
+        [KeyboardButton(text=KB_BACK_MENU)],
+    ]
+    return ReplyKeyboardMarkup(keyboard=rows, resize_keyboard=True, is_persistent=True)
+
+
+def _only_menu_kb() -> ReplyKeyboardMarkup:
+    return ReplyKeyboardMarkup(
+        keyboard=[[KeyboardButton(text=KB_BACK_MENU)]],
+        resize_keyboard=True,
+        is_persistent=True,
+    )
 
 
 class ApplyForm(StatesGroup):
@@ -18,63 +35,55 @@ class ApplyForm(StatesGroup):
 
 
 @router.message(F.text == BTN_APPLY)
-@router.message(F.text == "🧭 Путь лидера")
-@router.message(F.text == "/apply")
-async def apply_entry(msg: Message, state: FSMContext) -> None:
-    await state.set_state(ApplyForm.goal)
-    await msg.answer(
+async def apply_entry(message: Message, state: FSMContext) -> None:
+    await state.clear()
+    await message.answer(
         "Путь лидера — индивидуальная траектория с фокусом на цели.\n"
-        "Оставьте заявку — вернусь с вопросами и предложениями.\n\n"
-        "Напишите цель одной короткой фразой (до 200 символов). Если передумали — отправьте /cancel."
+        "Оставьте заявку — вернусь с вопросами и предложениями.",
+        reply_markup=_apply_kb(),
     )
-    await log_event_safe(msg.from_user.id, "apply_open")
+
+
+@router.message(F.text == KB_LEAVE_APP)
+async def apply_ask(message: Message, state: FSMContext) -> None:
+    await state.set_state(ApplyForm.goal)
+    await message.answer(
+        "Короткая заявка. Напишите, чего хотите достичь — одним сообщением (до 200 символов).\n"
+        "Если передумали — отправьте /cancel.",
+        reply_markup=_only_menu_kb(),
+    )
 
 
 @router.message(ApplyForm.goal)
-async def apply_save(msg: Message, state: FSMContext) -> None:
-    text = (msg.text or "").strip()
+async def apply_take(message: Message, state: FSMContext) -> None:
+    text = (message.text or "").strip()
     if not text:
-        await msg.answer("Нужно написать цель одной фразой. Или /cancel.")
+        await message.answer("Пусто. Напишите коротко вашу цель, пожалуйста.")
         return
 
-    tg_id = msg.from_user.id
-    username = (msg.from_user.username or "").strip()
-    contact = f"@{username}" if username else str(tg_id)
-
-    with session_scope() as s:
-        user = s.query(User).filter_by(tg_id=tg_id).first()
-        if not user:
-            user = User(tg_id=tg_id, username=username, last_seen=datetime.utcnow())
-            s.add(user)
-            s.flush()
-
-        s.add(
-            Lead(
-                user_id=user.id,
-                channel="tg",
-                contact=contact,
-                note=text[:500],
-                track="apply",
-            )
-        )
-
-    await state.clear()
-    # Сразу возвращаем основное меню, чтобы избежать «залипания» любого подменю
-    await msg.answer("Спасибо! Принял. Двигаемся дальше 👍", reply_markup=main_menu())
-    await log_event_safe(tg_id, "lead_apply_created", {"text": text})
-
-
-# универсальный /cancel
-@router.message(F.text == "/cancel")
-async def apply_cancel(msg: Message, state: FSMContext) -> None:
-    await state.clear()
-    await msg.answer("Отменил. Возвращаемся в меню.", reply_markup=main_menu())
-
-
-async def log_event_safe(tg_id: int, name: str, payload: dict | None = None) -> None:
+    # сохраняем как событие/лид — необязательно, но полезно
     try:
+        from app.storage.repo import session_scope, log_event  # type: ignore
+        from app.storage.models import User  # type: ignore
+
         with session_scope() as s:
-            user = s.query(User).filter_by(tg_id=tg_id).first()
-            log_event(s, user_id=(user.id if user else None), name=name, payload=(payload or {}))
+            u = s.query(User).filter_by(tg_id=message.from_user.id).first()
+            uid = u.id if u else None
+            log_event(s, uid, "apply_application", {"text": text})
     except Exception:
         pass
+
+    await state.clear()
+    await message.answer("Спасибо! Принял. Двигаемся дальше 👍", reply_markup=_only_menu_kb())
+
+
+@router.message(F.text == KB_BACK_MENU)
+async def back_to_menu(message: Message, state: FSMContext) -> None:
+    await state.clear()
+    await message.answer("Ок, вернулись в главное меню. Нажми нужную кнопку снизу.", reply_markup=main_menu())
+
+
+@router.message(F.text.casefold() == "/cancel")
+async def cancel_any(message: Message, state: FSMContext) -> None:
+    await state.clear()
+    await message.answer("Отменил. Вернул в меню.", reply_markup=main_menu())
