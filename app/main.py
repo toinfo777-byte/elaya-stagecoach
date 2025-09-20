@@ -137,14 +137,11 @@ async def main() -> None:
         "casting",
         "progress",
         "apply",
-        "system",
-        "settings",
-        "admin",
-        "metrics",
-        "analytics",
-        "cancel",
-        "feedback",
         "premium",
+        "privacy",
+        "help",
+        "settings",
+        "system",
     ]:
         _include_router_try_both(dp, name)
 
