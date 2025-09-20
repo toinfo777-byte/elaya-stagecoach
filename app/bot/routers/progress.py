@@ -1,10 +1,8 @@
 from __future__ import annotations
-
 from aiogram import Router, F
 from aiogram.filters import Command
 from aiogram.types import Message
-
-from app.bot.keyboards.menu import main_menu, BTN_PROGRESS
+from app.keyboards.menu import main_menu, BTN_PROGRESS
 
 router = Router(name="progress")
 
@@ -19,13 +17,10 @@ def _get_progress(user_id: int) -> dict[str, int]:
 @router.message(F.text == BTN_PROGRESS)
 async def progress_entry(message: Message) -> None:
     data = _get_progress(message.from_user.id)
-    streak = data["streak"]
-    etudes = data["etudes"]
-
     text = (
-        "<b>Мой прогресс</b>\n"
-        f"• Стрик: {streak}\n"
-        f"• Этюдов за 7 дней: {etudes}\n\n"
+        "<b>📊 Мой прогресс</b>\n"
+        f"• Стрик: {data['streak']}\n"
+        f"• Этюдов за 7 дней: {data['etudes']}\n\n"
         "Продолжай каждый день — тренировка дня в один клик 👇"
     )
     await message.answer(text, reply_markup=main_menu())
