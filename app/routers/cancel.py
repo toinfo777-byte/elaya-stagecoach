@@ -1,12 +1,14 @@
 # app/routers/cancel.py
 from aiogram import Router
-from aiogram.filters import Command, StateFilter
+from aiogram.filters import Command
+from aiogram.filters.state import StateFilter
 from aiogram.types import Message
 from aiogram.fsm.context import FSMContext
 
-from app.routers.menu import main_menu
+from app.keyboards.menu import main_menu  # <- держим единый импорт
 
 router = Router(name="cancel")
+
 
 @router.message(StateFilter("*"), Command("cancel"))
 async def cancel_any(m: Message, state: FSMContext):
