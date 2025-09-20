@@ -4,15 +4,17 @@ from aiogram import Router, F
 from aiogram.filters import Command
 from aiogram.types import Message
 
-from app.bot.keyboards.menu import main_menu, BTN_SETTINGS
+from app.keyboards.menu import main_menu, BTN_SETTINGS
 
 router = Router(name="settings")
+
 
 @router.message(Command("settings"))
 @router.message(F.text == BTN_SETTINGS)
 async def settings_entry(message: Message) -> None:
-    await message.answer(
-        "Настройки.\nМожешь удалить профиль или вернуться в меню.\n\n"
-        "Удаление: /wipe_me",
-        reply_markup=main_menu(),
+    text = (
+        "<b>Настройки.</b>\n"
+        "Можешь удалить профиль командой <code>/wipe_me</code> "
+        "или просто вернуться в меню кнопкой ниже."
     )
+    await message.answer(text, reply_markup=main_menu())
