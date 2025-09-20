@@ -5,7 +5,7 @@ import asyncio
 import inspect
 import logging
 import os
-from typing import Any, Callable
+from typing import Any, Callable, Iterable
 
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
@@ -16,7 +16,12 @@ from aiogram.types import (
     BotCommandScopeDefault,
 )
 
-from app.keyboards.menu import get_bot_commands  # единый источник /команд
+# Единый источник /команд, если он у тебя есть. Иначе — безопасный заглушка.
+try:
+    from app.keyboards.menu import get_bot_commands  # type: ignore
+except Exception:
+    def get_bot_commands():
+        return []
 
 logging.basicConfig(
     level=os.getenv("LOG_LEVEL", "INFO"),
@@ -25,7 +30,9 @@ logging.basicConfig(
 log = logging.getLogger("app.main")
 
 
+# ============ УТИЛИТЫ ============
 def _resolve_token() -> str:
+    """Берём токен из app.config.settings или из ENV."""
     try:
         from app.config import settings  # type: ignore
     except Exception:
@@ -56,12 +63,12 @@ async def _maybe_await(fn: Callable[..., Any], *args: Any, **kwargs: Any) -> Any
 
 
 async def _init_db_if_available() -> None:
+    """Опциональный старт БД, если есть app.storage.repo.init_db"""
     try:
         from app.storage.repo import init_db  # type: ignore
     except Exception:
         log.info("DB init: app.storage.repo.init_db not found – skipping.")
         return
-
     try:
         await _maybe_await(init_db)  # type: ignore[arg-type]
         log.info("DB init: OK")
@@ -69,17 +76,32 @@ async def _init_db_if_available() -> None:
         log.exception("DB init failed: %s", e)
 
 
-def _include_router_safe(dp: Dispatcher, dotted: str, attr: str = "router") -> None:
+def _include_router_safe(dp: Dispatcher, dotted: str, attr: str = "router") -> bool:
+    """Импортирует и включает роутер, если модуль есть. Возвращает True при успехе."""
     try:
         module = __import__(dotted, fromlist=[attr])
         router = getattr(module, attr)
         dp.include_router(router)
         log.info("Router included: %s.%s", dotted, attr)
+        return True
     except Exception as e:
         log.warning("Skip router %s: %s", dotted, e)
+        return False
+
+
+def _include_router_try_both(
+    dp: Dispatcher,
+    module_name: str,
+    prefixes: Iterable[str] = ("app.routers", "app.bot.routers"),
+) -> None:
+    """Пробуем подключить как app.routers.X и как app.bot.routers.X — что найдём, то подключим."""
+    for base in prefixes:
+        if _include_router_safe(dp, f"{base}.{module_name}"):
+            return
 
 
 async def _set_bot_commands_everywhere(bot: Bot) -> None:
+    """Синхронизируем /команды (маленькое тг-меню) с нашим меню."""
     cmds = get_bot_commands()
     scopes = [
         BotCommandScopeDefault(),
@@ -99,6 +121,7 @@ async def _set_bot_commands_everywhere(bot: Bot) -> None:
             log.warning("set_my_commands failed for %s: %s", sc, e)
 
 
+# ============ MAIN ============
 async def main() -> None:
     token = _resolve_token()
     bot = Bot(token=token, default=DefaultBotProperties(parse_mode="HTML"))
@@ -106,27 +129,24 @@ async def main() -> None:
 
     await _init_db_if_available()
 
-    # ВАЖНО: правильные пути
-    core_routers = [
-        "app.routers.shortcuts",
-        "app.routers.onboarding",
-        "app.routers.training",
-        "app.routers.casting",
-        "app.routers.progress",
-
-        # наши новые файлы живут в app/bot/routers
-        "app.bot.routers.apply",
-        "app.routers.system",
-        "app.routers.settings",
-        "app.routers.admin",
-        "app.routers.metrics",
-        "app.routers.analytics",
-        "app.routers.cancel",
-        "app.routers.feedback",
-        "app.bot.routers.premium",
-    ]
-    for dotted in core_routers:
-        _include_router_safe(dp, dotted)
+    # Подключаем оба пространства имён
+    for name in [
+        "shortcuts",
+        "onboarding",
+        "training",
+        "casting",
+        "progress",
+        "apply",
+        "system",
+        "settings",
+        "admin",
+        "metrics",
+        "analytics",
+        "cancel",
+        "feedback",
+        "premium",
+    ]:
+        _include_router_try_both(dp, name)
 
     await _set_bot_commands_everywhere(bot)
 
