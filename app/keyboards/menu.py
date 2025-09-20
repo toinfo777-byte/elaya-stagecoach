@@ -1,32 +1,27 @@
+# app/keyboards/menu.py
 from __future__ import annotations
-
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, BotCommand
 
 # ——— ЕДИНЫЕ ТЕКСТЫ КНОПОК ———
-BTN_TRAIN = "🎯 Тренировка дня"
+BTN_TRAIN    = "🎯 Тренировка дня"
 BTN_PROGRESS = "📈 Мой прогресс"
-BTN_APPLY = "🧭 Путь лидера"
-BTN_CASTING = "🎭 Мини-кастинг"
-BTN_PRIVACY = "🔐 Политика"
-BTN_HELP = "💬 Помощь"
-BTN_PREMIUM = "⭐️ Расширенная версия"
+BTN_APPLY    = "🧭 Путь лидера"
+BTN_CASTING  = "🎭 Мини-кастинг"
+BTN_PRIVACY  = "🛡 Политика"              # ← БЫЛО: "🔐 Политика"
+BTN_HELP     = "💬 Помощь"
+BTN_PREMIUM  = "⭐️ Расширенная версия"
 BTN_SETTINGS = "⚙️ Настройки"
 
 def main_menu() -> ReplyKeyboardMarkup:
-    """Стандартное нижнее меню. Всегда одно и то же, не «скачет»."""
     rows = [
-        [KeyboardButton(text=BTN_TRAIN), KeyboardButton(text=BTN_PROGRESS)],
-        [KeyboardButton(text=BTN_APPLY), KeyboardButton(text=BTN_CASTING)],
-        [KeyboardButton(text=BTN_PRIVACY), KeyboardButton(text=BTN_HELP)],
-        [KeyboardButton(text=BTN_PREMIUM), KeyboardButton(text=BTN_SETTINGS)],
+        [KeyboardButton(text=BTN_TRAIN),    KeyboardButton(text=BTN_PROGRESS)],
+        [KeyboardButton(text=BTN_APPLY),    KeyboardButton(text=BTN_CASTING)],
+        [KeyboardButton(text=BTN_PRIVACY),  KeyboardButton(text=BTN_HELP)],
+        [KeyboardButton(text=BTN_PREMIUM),  KeyboardButton(text=BTN_SETTINGS)],
     ]
     return ReplyKeyboardMarkup(keyboard=rows, resize_keyboard=True, is_persistent=True)
 
 def get_bot_commands() -> list[BotCommand]:
-    """
-    Список команд для левого меню Telegram и для /help.
-    Полностью соответствует нижнему меню (плюс /start и /menu).
-    """
     return [
         BotCommand(command="start",    description="Начать / онбординг"),
         BotCommand(command="menu",     description="Открыть меню"),
