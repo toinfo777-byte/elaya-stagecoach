@@ -18,7 +18,6 @@ from aiogram.types import (
 
 from app.keyboards.menu import get_bot_commands  # единый источник /команд
 
-# ===================== ЛОГГИ =====================
 logging.basicConfig(
     level=os.getenv("LOG_LEVEL", "INFO"),
     format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
@@ -26,12 +25,7 @@ logging.basicConfig(
 log = logging.getLogger("app.main")
 
 
-# ===================== УТИЛИТЫ =====================
 def _resolve_token() -> str:
-    """
-    Достаём токен из app.config.settings или из ENV.
-    Поддерживаем несколько названий для совместимости.
-    """
     try:
         from app.config import settings  # type: ignore
     except Exception:
@@ -62,9 +56,6 @@ async def _maybe_await(fn: Callable[..., Any], *args: Any, **kwargs: Any) -> Any
 
 
 async def _init_db_if_available() -> None:
-    """
-    Опциональная инициализация БД, если в проекте есть app.storage.repo.init_db
-    """
     try:
         from app.storage.repo import init_db  # type: ignore
     except Exception:
@@ -79,10 +70,6 @@ async def _init_db_if_available() -> None:
 
 
 def _include_router_safe(dp: Dispatcher, dotted: str, attr: str = "router") -> None:
-    """
-    Импортирует и включает роутер, если модуль существует.
-    Не падает, если файла нет.
-    """
     try:
         module = __import__(dotted, fromlist=[attr])
         router = getattr(module, attr)
@@ -93,10 +80,6 @@ def _include_router_safe(dp: Dispatcher, dotted: str, attr: str = "router") -> N
 
 
 async def _set_bot_commands_everywhere(bot: Bot) -> None:
-    """
-    Полностью синхронизируем /команды с нашим нижним меню.
-    Это влияет на «маленькое меню» Telegram.
-    """
     cmds = get_bot_commands()
     scopes = [
         BotCommandScopeDefault(),
@@ -104,15 +87,11 @@ async def _set_bot_commands_everywhere(bot: Bot) -> None:
         BotCommandScopeAllGroupChats(),
         BotCommandScopeAllChatAdministrators(),
     ]
-
-    # Сначала подчистим
     for sc in scopes:
         try:
             await bot.delete_my_commands(scope=sc)
         except Exception:
             pass
-
-    # Затем выставим одинаковый набор
     for sc in scopes:
         try:
             await bot.set_my_commands(cmds, scope=sc)
@@ -120,32 +99,35 @@ async def _set_bot_commands_everywhere(bot: Bot) -> None:
             log.warning("set_my_commands failed for %s: %s", sc, e)
 
 
-# ===================== MAIN =====================
 async def main() -> None:
     token = _resolve_token()
     bot = Bot(token=token, default=DefaultBotProperties(parse_mode="HTML"))
     dp = Dispatcher()
 
-    # Опционально — поднимем БД, если есть
     await _init_db_if_available()
 
-    # ВАЖНО: пути соответствуют реальной структуре app/bot/routers/**
-    _include_router_safe(dp, "app.bot.routers.shortcuts")
-    _include_router_safe(dp, "app.bot.routers.onboarding")
-    _include_router_safe(dp, "app.bot.routers.training")
-    _include_router_safe(dp, "app.bot.routers.casting")
-    _include_router_safe(dp, "app.bot.routers.progress")
-    _include_router_safe(dp, "app.bot.routers.apply")
-    _include_router_safe(dp, "app.bot.routers.system")
-    _include_router_safe(dp, "app.bot.routers.settings")
-    _include_router_safe(dp, "app.bot.routers.admin")
-    _include_router_safe(dp, "app.bot.routers.metrics")
-    _include_router_safe(dp, "app.bot.routers.analytics")
-    _include_router_safe(dp, "app.bot.routers.cancel")
-    _include_router_safe(dp, "app.bot.routers.feedback")
-    _include_router_safe(dp, "app.bot.routers.premium")  # расширенная версия
+    # ВАЖНО: правильные пути
+    core_routers = [
+        "app.routers.shortcuts",
+        "app.routers.onboarding",
+        "app.routers.training",
+        "app.routers.casting",
+        "app.routers.progress",
 
-    # Ставим команды во всех скоупах
+        # наши новые файлы живут в app/bot/routers
+        "app.bot.routers.apply",
+        "app.routers.system",
+        "app.routers.settings",
+        "app.routers.admin",
+        "app.routers.metrics",
+        "app.routers.analytics",
+        "app.routers.cancel",
+        "app.routers.feedback",
+        "app.bot.routers.premium",
+    ]
+    for dotted in core_routers:
+        _include_router_safe(dp, dotted)
+
     await _set_bot_commands_everywhere(bot)
 
     log.info("Bot is starting polling…")
