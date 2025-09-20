@@ -24,7 +24,7 @@ async def apply_entry(message: Message, state: FSMContext) -> None:
     )
     await message.answer(text, reply_markup=main_menu())
 
-@router.message(ApplySG.wait_goal)
+@router.message(ApplySG.wait_goal, ~F.text.startswith("/"))
 async def apply_save_goal(message: Message, state: FSMContext) -> None:
     goal = (message.text or "").strip()[:200]
     # здесь можно сохранить в БД; сейчас просто подтверждаем
