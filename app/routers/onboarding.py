@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+
 from aiogram import Router, F
 from aiogram.filters import CommandStart, Command
 from aiogram.fsm.context import FSMContext
@@ -16,7 +17,7 @@ from app.texts.strings import (
     ONBOARD_TZ_PROMPT,
     ONBOARD_NAME_PROMPT,
 )
-from app.keyboards.menu import main_menu
+from app.keyboards.menu import main_menu  # <- если main_menu у тебя в другом модуле, поправь импорт
 from app.storage.repo import session_scope
 from app.storage.models import User
 
@@ -34,8 +35,7 @@ class Onboarding(StatesGroup):
 def extract_start_payload(text: str | None) -> str | None:
     """
     Забираем payload из /start <payload>.
-    До 64 символов (лимит Telegram). Никакой декодировки не делаем, чтобы не ломать короткие коды.
-    Рекомендуем форматить коды как: src_vk_sep, src_tg_chX, ad_gdn_01 и т.п.
+    До 64 символов (лимит Telegram). Никакой декодировки не делаем.
     """
     if not text:
         return None
@@ -48,16 +48,12 @@ def extract_start_payload(text: str | None) -> str | None:
 def _bump_sources_meta(u: User, src: str | None) -> None:
     """
     Храним «первый» и «последний» источник в meta_json, а также плоское поле user.source.
-    - user.source заполняем только если ещё пусто (источник привлечения)
-    - meta.sources.first_source / last_source обновляем всегда по факту текущего входа
     """
     if not src:
         return
-    # плоское поле для простых отчётов
     if not getattr(u, "source", None):
         u.source = src[:64]
 
-    # аккуратно обновим meta_json
     meta = {}
     try:
         meta = dict(u.meta_json or {}) if hasattr(u, "meta_json") and u.meta_json else {}
@@ -72,7 +68,6 @@ def _bump_sources_meta(u: User, src: str | None) -> None:
     try:
         u.meta_json = meta  # type: ignore[attr-defined]
     except Exception:
-        # если в модели нет meta_json — просто молча пропустим
         pass
 
 
@@ -91,10 +86,12 @@ async def cancel_anywhere(msg: Message, state: FSMContext):
     await state.clear()
     await msg.answer("Анкета сброшена. Возвращаю в меню.", reply_markup=main_menu())
 
+
 @router.message(~StateFilter(None), Command("menu"))
 async def menu_anywhere(msg: Message, state: FSMContext):
     await state.clear()
     await msg.answer("Готово. Вот меню:", reply_markup=main_menu())
+
 
 @router.message(~StateFilter(None), CommandStart())
 async def restart_anywhere(msg: Message, state: FSMContext):
@@ -102,9 +99,13 @@ async def restart_anywhere(msg: Message, state: FSMContext):
     await start(msg, state)
 
 
+# ВАЖНО: сторож не мешает командам со слешем
 @router.message(~StateFilter(None), F.text.startswith("/"))
 async def in_form_but_command(msg: Message):
-    await msg.answer("Вы сейчас заполняете короткую анкету. Напишите ответ или /cancel, чтобы выйти.")
+    await msg.answer(
+        "Вы сейчас заполняете короткую анкету. "
+        "Напишите ответ или /cancel, чтобы выйти."
+    )
 
 
 @router.message(Onboarding.name, ~F.text.startswith("/"))
@@ -113,17 +114,20 @@ async def set_name(msg: Message, state: FSMContext):
     await msg.answer(ONBOARD_TZ_PROMPT)
     await state.set_state(Onboarding.tz)
 
+
 @router.message(Onboarding.tz, ~F.text.startswith("/"))
 async def set_tz(msg: Message, state: FSMContext):
     await state.update_data(tz=(msg.text or "").strip())
     await msg.answer(ONBOARD_GOAL_PROMPT)
     await state.set_state(Onboarding.goal)
 
+
 @router.message(Onboarding.goal, ~F.text.startswith("/"))
 async def set_goal(msg: Message, state: FSMContext):
     await state.update_data(goal=(msg.text or "").strip())
     await msg.answer(ONBOARD_EXP_PROMPT)
     await state.set_state(Onboarding.exp)
+
 
 @router.message(Onboarding.exp, ~F.text.startswith("/"))
 async def set_exp(msg: Message, state: FSMContext):
@@ -134,6 +138,7 @@ async def set_exp(msg: Message, state: FSMContext):
     await state.update_data(exp=exp)
     await msg.answer(CONSENT + "\n\nНапишите «Согласен».")
     await state.set_state(Onboarding.consent)
+
 
 @router.message(Onboarding.consent, ~F.text.startswith("/"))
 async def finalize(msg: Message, state: FSMContext):
@@ -154,5 +159,6 @@ async def finalize(msg: Message, state: FSMContext):
             _bump_sources_meta(u, src)
 
         s.add(u)
+
     await state.clear()
     await msg.answer("Готово. Добро пожаловать в меню.", reply_markup=main_menu())
