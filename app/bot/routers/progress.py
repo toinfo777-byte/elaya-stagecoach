@@ -5,11 +5,11 @@ from aiogram import Router, F
 from aiogram.filters import Command
 from aiogram.types import Message
 
-from app.bot.keyboards.menu import main_menu
+from app.bot.keyboards.menu import main_menu, BTN_PROGRESS
 
 router = Router(name="progress")
 
-# Псевдо-данные прогресса (можно заменить на базу)
+# Псевдо-данные прогресса (потом можно заменить на БД)
 _USER_PROGRESS: dict[int, dict[str, int]] = {}
 
 
@@ -20,19 +20,19 @@ def _get_progress(user_id: int) -> dict[str, int]:
 
 
 @router.message(Command("progress"))
-@router.message(F.text == "📈 Мой прогресс")
+@router.message(F.text == BTN_PROGRESS)
 async def progress_entry(message: Message) -> None:
-    """Раздел 'Мой прогресс'"""
+    """Раздел '📈 Мой прогресс'"""
     data = _get_progress(message.from_user.id)
 
     streak = data["streak"]
     etudes = data["etudes"]
 
     text = (
-        f"📊 *Мой прогресс*\n"
-        f"- Стрик: {streak}\n"
-        f"- Этюдов за 7 дней: {etudes}\n\n"
+        f"📈 <b>Мой прогресс</b>\n\n"
+        f"• Стрик: {streak}\n"
+        f"• Этюдов за 7 дней: {etudes}\n\n"
         "Продолжай каждый день — тренировка дня в один клик 👇"
     )
 
-    await message.answer(text, reply_markup=main_menu(), parse_mode="Markdown")
+    await message.answer(text, reply_markup=main_menu(), parse_mode="HTML")
