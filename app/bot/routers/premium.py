@@ -1,114 +1,89 @@
-# app/bot/routers/premium.py
 from __future__ import annotations
 
-from aiogram import F, Router, types
+from aiogram import Router, F
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
+from aiogram.types import Message
 
-# Необязательный импорт готовой клавиатуры меню, если у тебя она есть
-try:
-    from app.keyboards.menu import get_main_menu_kb  # type: ignore
-except Exception:
-    get_main_menu_kb = None
+from app.bot.keyboards.menu import premium_kb, main_menu_kb
 
 router = Router(name="premium")
 
-BACK_TO_MENU_TEXT = "📎 В меню"
+# Простая "псевдо-БД" для примера. Замените на ваш репозиторий/БД.
+_USER_PREMIUM_APPS: dict[int, str] = {}
 
 
-class PremiumForm(StatesGroup):
-    WAIT_GOAL = State()
+class PremiumSG(StatesGroup):
+    wait_goal = State()
 
 
-def _only_menu_kb() -> types.ReplyKeyboardMarkup:
-    return types.ReplyKeyboardMarkup(
-        keyboard=[[types.KeyboardButton(text=BACK_TO_MENU_TEXT)]],
-        resize_keyboard=True,
-    )
-
-
-def _inline_actions_kb() -> types.InlineKeyboardMarkup:
-    return types.InlineKeyboardMarkup(
-        inline_keyboard=[
-            [types.InlineKeyboardButton(text="🔎 Что внутри", callback_data="premium:inside")],
-            [types.InlineKeyboardButton(text="📝 Оставить заявку", callback_data="premium:apply")],
-            [types.InlineKeyboardButton(text="📂 Мои заявки", callback_data="premium:list")],
-        ]
-    )
-
-
-def _main_menu_kb() -> types.ReplyKeyboardMarkup | None:
-    if callable(get_main_menu_kb):
-        try:
-            return get_main_menu_kb()  # type: ignore[misc]
-        except Exception:
-            pass
-    return None
-
-
-async def _back_to_main_menu(message: types.Message, state: FSMContext | None = None) -> None:
-    if state:
-        await state.clear()
-    menu_kb = _main_menu_kb() or _only_menu_kb()
-    await message.answer("Ок, вернулись в главное меню. Нажми нужную кнопку снизу.", reply_markup=menu_kb)
-
-
+# Вход в раздел
 @router.message(Command("premium"))
-@router.message(F.text.casefold() == "⭐ расширенная версия")
-@router.message(F.text.casefold() == "расширенная версия")
-async def premium_entry(message: types.Message, state: FSMContext) -> None:
-    await state.clear()
+@router.message(F.text == "⭐ Расширенная версия")
+async def premium_entry(message: Message, state: FSMContext) -> None:
+    uid = message.from_user.id
+    has_app = uid in _USER_PREMIUM_APPS
     text = (
-        "⭐ <b>Расширенная версия</b>\n\n"
+        "⭐ Расширенная версия\n\n"
         "• Ежедневный разбор и обратная связь\n"
         "• Разогрев голоса, дикции и внимания\n"
         "• Мини-кастинг и «путь лидера»\n\n"
         "Выберите действие:"
     )
-    # Внизу — только «В меню»
-    await message.answer(text, reply_markup=_only_menu_kb())
-    # А действия — инлайном
-    await message.answer(" ", reply_markup=_inline_actions_kb())
+    await state.clear()
+    await message.answer(text, reply_markup=premium_kb(has_app))
 
 
-@router.callback_query(F.data == "premium:inside")
-async def premium_inside(cb: types.CallbackQuery) -> None:
-    text = "Внутри расширенной версии — больше практики и персональных разборов."
-    await cb.message.edit_text(text, reply_markup=_inline_actions_kb())
-    await cb.answer()
-
-
-@router.callback_query(F.data == "premium:list")
-async def premium_list(cb: types.CallbackQuery) -> None:
-    await cb.answer()
-    await cb.message.answer("Заявок пока нет.", reply_markup=_only_menu_kb())
-
-
-@router.callback_query(F.data == "premium:apply")
-async def premium_apply(cb: types.CallbackQuery, state: FSMContext) -> None:
-    await cb.answer()
-    await state.set_state(PremiumForm.WAIT_GOAL)
-    await cb.message.answer(
-        "Напишите цель одной короткой фразой (до 200 символов). Если передумали — /cancel.",
-        reply_markup=_only_menu_kb(),
+# Что внутри
+@router.message(F.text == "🔎 Что внутри")
+async def premium_inside(message: Message) -> None:
+    await message.answer(
+        "Внутри расширенной версии — больше практики и персональных разборов.",
+        reply_markup=premium_kb(has_application=(message.from_user.id in _USER_PREMIUM_APPS)),
     )
 
 
-@router.message(PremiumForm.WAIT_GOAL, F.text & ~F.text.startswith("/"))
-async def premium_save_goal(message: types.Message, state: FSMContext) -> None:
-    goal = (message.text or "").strip()
-    # TODO: сохранить goal при необходимости
-    await message.answer("Спасибо! Принял. Двигаемся дальше 👍")
-    await _back_to_main_menu(message, state)
+# Оставить заявку
+@router.message(F.text == "📝 Оставить заявку")
+async def premium_ask_goal(message: Message, state: FSMContext) -> None:
+    await state.set_state(PremiumSG.wait_goal)
+    await message.answer(
+        "Напишите цель одной короткой фразой (до 200 символов). Если передумали — отправьте /cancel."
+    )
 
 
-@router.message(PremiumForm.WAIT_GOAL, Command("cancel"))
-async def premium_cancel(message: types.Message, state: FSMContext) -> None:
-    await message.answer("Отменил. Ничего не сохранил.")
-    await _back_to_main_menu(message, state)
+@router.message(PremiumSG.wait_goal, F.text.len() <= 200)
+async def premium_save_goal(message: Message, state: FSMContext) -> None:
+    _USER_PREMIUM_APPS[message.from_user.id] = message.text.strip()
+    await state.clear()
+    await message.answer("Спасибо! Принял. Двигаемся дальше 👍", reply_markup=premium_kb(has_application=True))
 
 
-@router.message(F.text == BACK_TO_MENU_TEXT)
-async def premium_back_to_menu(message: types.Message, state: FSMContext) -> None:
-    await _back_to_main_menu(message, state)
+@router.message(PremiumSG.wait_goal)
+async def premium_goal_too_long(message: Message) -> None:
+    await message.answer("Слишком длинно 🙈 Отправьте цель одной короткой фразой (до 200 символов) или /cancel.")
+
+
+# Мои заявки
+@router.message(F.text == "📂 Мои заявки")
+async def premium_my_apps(message: Message) -> None:
+    uid = message.from_user.id
+    if uid not in _USER_PREMIUM_APPS:
+        await message.answer("Заявок пока нет.", reply_markup=premium_kb(has_application=False))
+        return
+    goal = _USER_PREMIUM_APPS[uid]
+    await message.answer(f"Ваша заявка:\n— {goal}", reply_markup=premium_kb(has_application=True))
+
+
+# Единая навигация «В меню» — только reply-кнопка
+@router.message(F.text == "📎 В меню")
+async def premium_to_menu(message: Message) -> None:
+    await message.answer("Ок, вернулись в главное меню. Нажми нужную кнопку снизу.", reply_markup=main_menu_kb())
+
+
+# Страховка на /cancel из премиума
+@router.message(Command("cancel"))
+async def premium_cancel(message: Message, state: FSMContext) -> None:
+    await state.clear()
+    await message.answer("Ок, вернулись в главное меню.", reply_markup=main_menu_kb())
