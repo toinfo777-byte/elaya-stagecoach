@@ -1,3 +1,4 @@
+# app/bot/routers/apply.py
 from __future__ import annotations
 
 from aiogram import F, Router, types
@@ -42,38 +43,33 @@ async def _back_to_main_menu(message: types.Message, state: FSMContext | None = 
     await message.answer("Ок, вернулись в главное меню. Нажми нужную кнопку снизу.", reply_markup=kb)
 
 
-# Вход
 @router.message(Command("apply"))
 @router.message(F.text.casefold() == "🧭 путь лидера")
 @router.message(F.text.casefold() == "путь лидера")
 async def apply_entry(message: types.Message, state: FSMContext) -> None:
     await state.set_state(LeaderForm.WAIT_GOAL)
     await message.answer(
-        "Путь лидера: короткая заявка.\nНапишите, чего хотите достичь — одним сообщением (до 200 символов).\n"
+        "Путь лидера: короткая заявка.\n"
+        "Напишите, чего хотите достичь — одним сообщением (до 200 символов).\n"
         "Если передумали — /cancel.",
         reply_markup=_only_menu_kb(),
     )
 
 
-# Сохранение цели
 @router.message(LeaderForm.WAIT_GOAL, F.text & ~F.text.startswith("/"))
 async def apply_save(message: types.Message, state: FSMContext) -> None:
     goal = (message.text or "").strip()
-    # сохранить в БД, если нужно
-    # await repo.save_leader_goal(user_id=message.from_user.id, text=goal)
-
+    # TODO: здесь можно сохранить goal в БД/гугл-таблицу/что угодно
     await message.answer("Спасибо! Принял. Двигаемся дальше 👍")
     await _back_to_main_menu(message, state)
 
 
-# Отмена
 @router.message(LeaderForm.WAIT_GOAL, Command("cancel"))
 async def apply_cancel(message: types.Message, state: FSMContext) -> None:
     await message.answer("Отменил. Ничего не сохранил.")
     await _back_to_main_menu(message, state)
 
 
-# Нижняя «В меню»
 @router.message(F.text == BACK_TO_MENU_TEXT)
 async def apply_back_to_menu(message: types.Message, state: FSMContext) -> None:
     await _back_to_main_menu(message, state)
