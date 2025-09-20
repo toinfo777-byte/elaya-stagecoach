@@ -9,9 +9,7 @@ router = Router(name="settings")
 @router.message(Command("settings"))
 @router.message(F.text == BTN_SETTINGS)
 async def settings_entry(message: Message) -> None:
-    text = (
-        "<b>Настройки</b>.\n"
-        "Можешь удалить профиль или вернуться в меню.\n\n"
-        "Чтобы полностью удалить данные — отправь команду <code>/wipe_me</code>."
+    await message.answer(
+        "⚙️ <b>Настройки.</b>\nМожешь удалить профиль или вернуться в меню.",
+        reply_markup=main_menu()
     )
-    await message.answer(text, reply_markup=main_menu())
