@@ -2,167 +2,145 @@
 from __future__ import annotations
 
 import asyncio
-import inspect
+import importlib
 import logging
 import os
-from typing import Any, Callable, Iterable
+from typing import Optional
 
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.types import (
-    BotCommandScopeAllChatAdministrators,
-    BotCommandScopeAllGroupChats,
+    BotCommand,
     BotCommandScopeAllPrivateChats,
-    BotCommandScopeDefault,
 )
 
-# Единый источник /команд, если он у тебя есть. Иначе — безопасный заглушка.
+# === Настройки ================================================================
 try:
-    from app.keyboards.menu import get_bot_commands  # type: ignore
+    from app.config import settings  # type: ignore
 except Exception:
-    def get_bot_commands():
-        return []
+    settings = None  # noqa: N816
 
+BOT_TOKEN = (settings and settings.BOT_TOKEN) or os.getenv("BOT_TOKEN")
+if not BOT_TOKEN:
+    raise RuntimeError("BOT_TOKEN is not set")
+
+# Логирование — включаем DEBUG, чтобы видеть подключение роутеров и фильтры
 logging.basicConfig(
-    level=os.getenv("LOG_LEVEL", "INFO"),
-    format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
+    level=os.getenv("LOG_LEVEL", "DEBUG"),
+    format="%(asctime)s | %(levelname)-8s | %(name)s | %(message)s",
 )
-log = logging.getLogger("app.main")
+log = logging.getLogger("main")
 
 
-# ============ УТИЛИТЫ ============
-def _resolve_token() -> str:
-    """Берём токен из app.config.settings или из ENV."""
-    try:
-        from app.config import settings  # type: ignore
-    except Exception:
-        settings = None  # noqa: N816
-
-    candidates = ("BOT_TOKEN", "API_TOKEN", "TELEGRAM_TOKEN", "ELAYA_BOT_TOKEN")
-
-    if settings is not None:
-        for name in candidates:
-            val = getattr(settings, name, None)
-            if val:
-                return val  # type: ignore[return-value]
-
-    for name in candidates:
-        val = os.getenv(name)
-        if val:
-            return val
-
-    raise RuntimeError(
-        "Bot token not found. Provide BOT_TOKEN (or API_TOKEN/TELEGRAM_TOKEN/ELAYA_BOT_TOKEN)."
-    )
-
-
-async def _maybe_await(fn: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
-    if inspect.iscoroutinefunction(fn):
-        return await fn(*args, **kwargs)
-    return fn(*args, **kwargs)
-
-
-async def _init_db_if_available() -> None:
-    """Опциональный старт БД, если есть app.storage.repo.init_db"""
-    try:
-        from app.storage.repo import init_db  # type: ignore
-    except Exception:
-        log.info("DB init: app.storage.repo.init_db not found – skipping.")
-        return
-    try:
-        await _maybe_await(init_db)  # type: ignore[arg-type]
-        log.info("DB init: OK")
-    except Exception as e:
-        log.exception("DB init failed: %s", e)
-
-
-def _include_router_safe(dp: Dispatcher, dotted: str, attr: str = "router") -> bool:
-    """Импортирует и включает роутер, если модуль есть. Возвращает True при успехе."""
-    try:
-        module = __import__(dotted, fromlist=[attr])
-        router = getattr(module, attr)
-        dp.include_router(router)
-        log.info("Router included: %s.%s", dotted, attr)
-        return True
-    except Exception as e:
-        log.warning("Skip router %s: %s", dotted, e)
-        return False
-
-
-def _include_router_try_both(
-    dp: Dispatcher,
-    module_name: str,
-    prefixes: Iterable[str] = ("app.routers", "app.bot.routers"),
-) -> None:
-    """Пробуем подключить как app.routers.X и как app.bot.routers.X — что найдём, то подключим."""
-    for base in prefixes:
-        if _include_router_safe(dp, f"{base}.{module_name}"):
-            return
-
-
-async def _set_bot_commands_everywhere(bot: Bot) -> None:
-    """Синхронизируем /команды (маленькое тг-меню) с нашим меню."""
-    cmds = get_bot_commands()
-    scopes = [
-        BotCommandScopeDefault(),
-        BotCommandScopeAllPrivateChats(),
-        BotCommandScopeAllGroupChats(),
-        BotCommandScopeAllChatAdministrators(),
+# === Вспомогалки ==============================================================
+def _import_router(module_base: str, name: str):
+    """
+    Пытаемся импортировать роутер из:
+      1) app.routers.<name>  (переменная router внутри модуля)
+      2) app.routers.<name>.router (если роутер лежит подмодулем)
+    Возвращает объект Router или None.
+    """
+    candidates = [
+        f"{module_base}.{name}",
+        f"{module_base}.{name}.router",
     ]
-    for sc in scopes:
+    for cand in candidates:
         try:
-            await bot.delete_my_commands(scope=sc)
-        except Exception:
-            pass
-    for sc in scopes:
-        try:
-            await bot.set_my_commands(cmds, scope=sc)
+            mod = importlib.import_module(cand)
+            # a) сам модуль — если он уже router
+            if getattr(mod, "__class__", None).__name__ == "Router":
+                return mod
+            # b) поле router внутри модуля
+            router = getattr(mod, "router", None)
+            if router is not None:
+                return router
         except Exception as e:
-            log.warning("set_my_commands failed for %s: %s", sc, e)
+            log.debug("Import miss: %s (%s)", cand, e)
+    return None
 
 
-# ============ MAIN ============
-async def main() -> None:
-    token = _resolve_token()
-    bot = Bot(token=token, default=DefaultBotProperties(parse_mode="HTML"))
+def _include_router_try_both(dp: Dispatcher, name: str):
+    router = _import_router("app.routers", name)
+    if router is None:
+        log.warning("Router '%s' NOT found — пропускаю", name)
+        return False
+    dp.include_router(router)
+    log.info("✅ Router '%s' подключён: %s", name, router)
+    return True
+
+
+async def _set_commands(bot: Bot):
+    # Единый список команд (минимум)
+    commands = [
+        BotCommand(command="start", description="Запустить / перезапустить"),
+        BotCommand(command="menu", description="Главное меню"),
+        BotCommand(command="training", description="Тренировка"),
+        BotCommand(command="progress", description="Мой прогресс"),
+        BotCommand(command="help", description="Помощь"),
+        BotCommand(command="cancel", description="Отменить текущее действие"),
+    ]
+    await bot.set_my_commands(commands, scope=BotCommandScopeAllPrivateChats())
+    log.info("✅ /команды установлены для приватных чатов")
+
+
+# === Bootstrap ================================================================
+def build_dispatcher() -> Dispatcher:
     dp = Dispatcher()
 
-    await _init_db_if_available()
+    # Порядок ВАЖЕН: сначала системные и разруливающие, потом FSM/меню, потом функциональные,
+    # в конце — отзывки/шорткаты/настройки.
+    routers_order = [
+        # базовые
+        "system",
+        "deeplink",          # если используем диплинки
+        "cancel",            # общий /cancel вне зависимости от state
 
-    # Подключаем оба пространства имён
-    for name in [
-    # базовые служебные
-    "system",
-    "deeplink",         # если используешь deep link обработчики
-    "cancel",           # если cancel вынесен в отдельный модуль
+        # онбординг и «маленькое» меню
+        "onboarding",        # FSM name → tz → goal → exp → consent
+        "reply_shortcuts",   # «В меню», «Настройки», «Удалить профиль» (reply-кнопки)
 
-    # онбординг и сокращённые реплаи
-    "onboarding",
-    "reply_shortcuts",  # КНОПКИ «маленького меню»
+        # основное
+        "menu",              # если у тебя есть отдельный модуль роутера меню
+        "training",
+        "casting",
+        "progress",
+        "apply",
+        "premium",
+        "privacy",
+        "help",
 
-    # основная логика
-    "training",
-    "casting",
-    "progress",
-    "apply",
-    "premium",
-    "privacy",
-    "help",
+        # отзывы/оценки (эмодзи и «✍️ 1 фраза»)
+        "feedback",
 
-    # отзывы/реакции
-    "feedback",         # ЭМОДЗИ-ОЦЕНКИ и короткие фразы
-    "shortcuts",        # если у тебя есть ещё общий модуль шорткатов
-    "settings",
-]:
-    _include_router_try_both(dp, name)
-    await _set_bot_commands_everywhere(bot)
+        # общие шорткаты и настройки (если есть)
+        "shortcuts",
+        "settings",
 
-    log.info("Bot is starting polling…")
-    await dp.start_polling(bot)
+        # отчёты/аналитика (по желанию)
+        "analytics",
+    ]
+
+    for name in routers_order:
+        _include_router_try_both(dp, name)
+
+    return dp
+
+
+async def main():
+    bot = Bot(
+        token=BOT_TOKEN,
+        default=DefaultBotProperties(parse_mode="HTML"),
+    )
+    dp = build_dispatcher()
+
+    await _set_commands(bot)
+
+    log.info("🚀 Starting long polling…")
+    await dp.start_polling(bot, allowed_updates=None)
 
 
 if __name__ == "__main__":
     try:
         asyncio.run(main())
     except (KeyboardInterrupt, SystemExit):
-        log.info("Bot stopped")
+        log.info("Bot stopped.")
