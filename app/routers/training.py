@@ -1,119 +1,62 @@
+# app/routers/training.py
 from __future__ import annotations
 
+from datetime import date
+
 from aiogram import Router, F
-from aiogram.filters import Command
-from aiogram.fsm.state import State, StatesGroup
-from aiogram.fsm.context import FSMContext
-from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.types import Message, CallbackQuery
 
 from app.keyboards.menu import main_menu, BTN_TRAINING
-from app.storage.mvp_repo import log_training
+from app.keyboards.training import levels_kb, actions_kb, skip_confirm_kb
+from app.storage.repo import repo_add_training_entry  # запись в БД
 
 router = Router(name="training")
 
-# Контент MVP (можно потом вынести в YAML)
-LEVELS = {
-    "beginner": {
-        "title": "Разогрев · 5 минут",
-        "content": (
-            "1) Дыхание: 1 мин\n"
-            "2) Рот–язык–щёлчки: 2 мин\n"
-            "3) Артикуляция: 2 мин\n"
-            "⚑ Совет: запиши 15 секунд речи до/после."
-        )
-    },
-    "medium": {
-        "title": "Голос · 10 минут",
-        "content": (
-            "1) Гудение на «м»: 2 мин\n"
-            "2) Скольжения («сирена»): 3 мин\n"
-            "3) Чистая дикция: 5 скороговорок\n"
-            "⚑ Совет: говори чуть медленнее, чем обычно."
-        )
-    },
-    "pro": {
-        "title": "Сцена · 15 минут",
-        "content": (
-            "1) Дыхание + корпус: 3 мин\n"
-            "2) Резонаторы: 5 мин\n"
-            "3) Текст с задачей: 7 мин\n"
-            "⚑ Совет: цель фразы > громкость."
-        )
-    },
+TRAINING_PROGRAMS = {
+    "beginner": "Разогрев · 5 минут\n1) Дыхание: 1 мин\n2) Рот–язык–щелчки: 2 мин\n3) Артикуляция: 2 мин\n💡 Совет: запиши 15 сек до/после.",
+    "medium":   "Голос · 10 минут\n1) Гудение на «м»: 2 мин\n2) Скольжения («сирена»): 3 мин\n3) Чистая дикция: 5 скороговорок\n💡 Совет: говори медленнее обычного.",
+    "pro":      "Сцена · 15 минут\n1) Дых. цикл: 3 мин\n2) Резонаторы: 5 мин\n3) Текст с задачей: 7 мин\n💡 Совет: работай стоя, корпус свободен.",
 }
 
-def levels_kb() -> InlineKeyboardMarkup:
-    rows = [
-        [InlineKeyboardButton(text="🟢 Новичок", callback_data="lvl:beginner")],
-        [InlineKeyboardButton(text="🟡 Средний", callback_data="lvl:medium")],
-        [InlineKeyboardButton(text="🔴 Про", callback_data="lvl:pro")],
-    ]
-    return InlineKeyboardMarkup(inline_keyboard=rows)
-
-def done_kb() -> InlineKeyboardMarkup:
-    rows = [
-        [
-            InlineKeyboardButton(text="✅ Выполнил(а)", callback_data="train:done"),
-            InlineKeyboardButton(text="⏭ Пропустить",  callback_data="train:skip"),
-        ]
-    ]
-    return InlineKeyboardMarkup(inline_keyboard=rows)
-
-
-class TrainSG(StatesGroup):
-    choose = State()
-    running = State()
-
-
-@router.message(F.text == BTN_TRAINING)
-@router.message(Command("training"))
-async def training_entry(m: Message, state: FSMContext) -> None:
-    await state.clear()
-    await state.set_state(TrainSG.choose)
+@router.message(F.text == BTN_TRAINING)  # кнопка в меню
+async def training_entry(m: Message):
     await m.answer(
-        "Тренировка дня\n\n"
-        "Выбери уровень. После выполнения нажми «Выполнил(а)».",
-        reply_markup=main_menu()
+        "Тренировка дня\n\nВыбери уровень. После выполнения нажми «Выполнил(а)».",
+        reply_markup=levels_kb(),
     )
-    await m.answer("Уровни:", reply_markup=levels_kb())
 
+@router.callback_query(F.data.startswith("training:level:"))
+async def on_level_pick(c: CallbackQuery):
+    level = c.data.split(":")[-1]
+    await c.message.answer(TRAINING_PROGRAMS[level], reply_markup=actions_kb(level))
+    await c.answer()
 
-@router.callback_query(F.data.startswith("lvl:"), TrainSG.choose)
-async def pick_level(cq: CallbackQuery, state: FSMContext) -> None:
-    level = cq.data.split(":", 1)[1]
-    data = LEVELS.get(level)
-    if not data:
-        await cq.answer("Неизвестный уровень", show_alert=True)
-        return
-    await state.update_data(level=level)
-    await state.set_state(TrainSG.running)
-    await cq.message.answer(
-        f"<b>{data['title']}</b>\n{data['content']}",
-        reply_markup=done_kb()
+@router.callback_query(F.data.startswith("training:done:"))
+async def on_done(c: CallbackQuery):
+    level = c.data.split(":")[-1]
+    # запись в БД
+    await repo_add_training_entry(
+        user_id=c.from_user.id, day=date.today(), level=level, done=True
     )
-    await cq.answer()
+    await c.message.answer("🔥 Отлично! День засчитан. Увидимся завтра!", reply_markup=main_menu())
+    await c.answer("Засчитано")
 
+@router.callback_query(F.data.startswith("training:skip:"))
+async def on_skip_request(c: CallbackQuery):
+    level = c.data.split(":")[-1]
+    await c.message.answer("Пропустить тренировку сегодня?", reply_markup=skip_confirm_kb(level))
+    await c.answer()
 
-@router.callback_query(F.data == "train:done", TrainSG.running)
-async def mark_done(cq: CallbackQuery, state: FSMContext) -> None:
-    data = await state.get_data()
-    level = data.get("level", "beginner")
-    log_training(cq.from_user.id, level, True)
-    await state.clear()
-    await cq.message.answer(
-        "🔥 Отлично! День засчитан.\n"
-        "Продолжай каждый день — «Тренировка дня» в один клик.",
-        reply_markup=main_menu()
+@router.callback_query(F.data.startswith("training:skip-confirm:"))
+async def on_skip_confirm(c: CallbackQuery):
+    level = c.data.split(":")[-1]
+    await repo_add_training_entry(
+        user_id=c.from_user.id, day=date.today(), level=level, done=False
     )
-    await cq.answer("Засчитано!")
+    await c.message.answer("Ок, вернёмся завтра.", reply_markup=main_menu())
+    await c.answer("Пропуск записан")
 
-
-@router.callback_query(F.data == "train:skip", TrainSG.running)
-async def mark_skip(cq: CallbackQuery, state: FSMContext) -> None:
-    data = await state.get_data()
-    level = data.get("level", "beginner")
-    # Можно не логировать пропуск; оставим как «не выполнено»
-    log_training(cq.from_user.id, level, False)
-    await state.clear()
-    await cq.message.answer("Ок, вернёмся завтра. 💫", reply_markup=main_menu())
-    await cq.answer()
+@router.callback_query(F.data.startswith("training:skip-cancel:"))
+async def on_skip_cancel(c: CallbackQuery):
+    await c.message.answer("Тогда выбирай уровень ещё раз 👇", reply_markup=levels_kb())
+    await c.answer("Отменено")
