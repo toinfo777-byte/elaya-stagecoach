@@ -1,4 +1,3 @@
-# app/routers/training.py
 from __future__ import annotations
 
 from aiogram import Router, F
@@ -9,12 +8,10 @@ from app.keyboards.menu import main_menu, BTN_TRAINING
 
 router = Router(name="training")
 
-
 @router.message(F.text == BTN_TRAINING)
 @router.message(Command("training"))
 async def training_entry(m: Message) -> None:
     await m.answer("Тренировка дня", reply_markup=main_menu())
-
 
 TRAINING_START_RE = r"^/start(?:@\w+)?\s+go_training_"
 
