@@ -11,8 +11,9 @@ from aiogram.types import BotCommandScopeAllPrivateChats
 
 from app.config import settings
 from app.keyboards.menu import get_bot_commands
-from app.storage.repo import ensure_schema  # NEW
+from app.storage import repo as db  # <— модульный импорт, чтобы точно было
 
+# Логи
 logging.basicConfig(
     level=os.getenv("LOG_LEVEL", "DEBUG"),
     format="%(asctime)s | %(levelname)-8s | %(name)s | %(message)s",
@@ -23,16 +24,18 @@ BOT_TOKEN = settings.bot_token or os.getenv("BOT_TOKEN")
 if not BOT_TOKEN:
     raise RuntimeError("Не найден BOT_TOKEN (settings.bot_token или ENV BOT_TOKEN).")
 
-DATABASE_URL = settings.db_url or os.getenv("DATABASE_URL", "sqlite:///elaya.db")
-
 
 def _import_router(module_base: str, name: str):
+    """
+    Пробуем импортировать модуль и взять .router
+    Поддерживаем варианты:
+      app.routers.<name>
+      app.routers.<name>.router  (если файл — пакет)
+    """
     candidates = [f"{module_base}.{name}", f"{module_base}.{name}.router"]
     for cand in candidates:
         try:
             mod = importlib.import_module(cand)
-            if getattr(mod, "__class__", None).__name__ == "Router":
-                return mod
             r = getattr(mod, "router", None)
             if r is not None:
                 return r
@@ -59,17 +62,17 @@ async def _set_commands(bot: Bot):
 def build_dispatcher() -> Dispatcher:
     dp = Dispatcher()
     routers = [
-        "reply_shortcuts",
-        "cancel",
-        "onboarding",   # весь /start + диплинки
-        "menu",
+        "reply_shortcuts",  # маленькое меню (В меню / Настройки / Удалить профиль)
+        "cancel",           # общий /cancel (если есть)
+        "onboarding",       # /start + диплинки
+        "menu",             # кнопки главного меню
         "training",
         "casting",
         "apply",
         "progress",
         "settings",
-        "feedback",
-        "analytics",
+        # "feedback",       # подключай, если модуль есть
+        "analytics",        # если есть
     ]
     for name in routers:
         _include(dp, name)
@@ -77,12 +80,12 @@ def build_dispatcher() -> Dispatcher:
 
 
 async def main():
-    # 1) Создаём/мигрируем схему (dev-инициализация для SQLite и не только)
-    ensure_schema()
+    # 1) БД-инициализация (создаст отсутствующие таблицы)
+    db.ensure_schema()
 
     bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode="HTML"))
 
-    # 2) На всякий случай уберём вебхук перед long polling
+    # 2) На всякий случай снимем вебхук для long-poll
     try:
         await bot.delete_webhook(drop_pending_updates=False)
     except Exception as e:
