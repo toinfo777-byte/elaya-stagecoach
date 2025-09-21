@@ -26,7 +26,7 @@ if not BOT_TOKEN:
 DATABASE_URL = settings.db_url or os.getenv("DATABASE_URL", "sqlite:///elaya.db")
 
 
-# === ВСПОМОГАТЕЛЬНОЕ ==========================================================
+# === ИМПОРТ РОУТЕРОВ ПО ИМЕНИ =================================================
 def _import_router(module_base: str, name: str):
     candidates = [f"{module_base}.{name}", f"{module_base}.{name}.router"]
     for cand in candidates:
@@ -60,7 +60,7 @@ async def _set_commands(bot: Bot):
             BotCommand("training", "Тренировка"),
             BotCommand("progress", "Мой прогресс"),
             BotCommand("apply", "Путь лидера"),
-            BotCommand("privacy", "Политика конфиденциальности"),
+            BotCommand("privacy", "Политика"),
             BotCommand("help", "Помощь"),
             BotCommand("cancel", "Отменить текущее действие"),
         ],
@@ -72,17 +72,16 @@ async def _set_commands(bot: Bot):
 def build_dispatcher() -> Dispatcher:
     dp = Dispatcher()
 
-    # ВАЖНО: reply_shortcuts СТАВИМ ПЕРЕД onboarding,
-    # чтобы их хэндлеры имели приоритет даже во время FSM.
+    # ВАЖНО: reply_shortcuts ставим ПЕРЕД onboarding, чтобы их текстовые кнопки
+    # не глушились FSM даже во время анкеты.
     routers = [
         "system",
-        "deeplink",          # старт по ссылкам
         "reply_shortcuts",   # «В меню», «Настройки», «Удалить профиль» и т.п. (reply)
-        "cancel",            # общий /cancel
+        "cancel",
 
-        "onboarding",        # FSM name → tz → goal → exp → consent
+        "onboarding",        # весь /start (и deep-link) только здесь
 
-        # основное
+        # меню + разделы
         "menu",
         "training",
         "casting",
@@ -92,10 +91,7 @@ def build_dispatcher() -> Dispatcher:
         "privacy",
         "help",
 
-        # отзывы/оценки
         "feedback",
-
-        # прочее
         "shortcuts",
         "settings",
         "analytics",
