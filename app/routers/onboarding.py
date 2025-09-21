@@ -1,5 +1,4 @@
 from __future__ import annotations
-
 from datetime import datetime
 
 from aiogram import Router, F
@@ -11,20 +10,15 @@ from aiogram.filters.command import CommandObject
 
 from app.keyboards.menu import main_menu
 from app.texts.strings import (
-    HELLO,
-    CONSENT,
-    ONBOARD_GOAL_PROMPT,
-    ONBOARD_EXP_PROMPT,
-    ONBOARD_TZ_PROMPT,
-    ONBOARD_NAME_PROMPT,
+    HELLO, CONSENT,
+    ONBOARD_GOAL_PROMPT, ONBOARD_EXP_PROMPT,
+    ONBOARD_TZ_PROMPT, ONBOARD_NAME_PROMPT,
 )
 from app.storage.repo import session_scope
 from app.storage.models import User
 
 router = Router(name="onboarding")
 
-
-# === СТЕЙТЫ ===================================================================
 class Onboarding(StatesGroup):
     name = State()
     tz = State()
@@ -32,14 +26,11 @@ class Onboarding(StatesGroup):
     exp = State()
     consent = State()
 
-
-# === ВСПОМОГАТЕЛЬНОЕ ==========================================================
 def _norm(s: str | None) -> str:
     return (s or "").strip()
 
 def _is_yes_consent(text: str | None) -> bool:
-    t = (_norm(text)).lower()
-    return t.startswith("соглас")  # «согласен/на», с точками/эмодзи — ок
+    return _norm(text).lower().startswith("соглас")
 
 def _get_user(user_id: int) -> User | None:
     with session_scope() as s:
@@ -64,26 +55,29 @@ def _save_or_update_user(user_id: int, data: dict):
 
 async def _route_by_payload(msg: Message, payload: str):
     """
-    ВАЖНО: триггерим СЛЭШ-КОМАНДЫ, а не текст,
-    чтобы хэндлеры других модулей гарантированно сработали.
+    ВАЖНО: вызываем entry-point функций напрямую, НЕ отправляем /команды текстом
+    (бот не получает апдейты на свои сообщения).
     """
     p = (payload or "").strip()
+
     if p.startswith("go_training"):
-        await msg.bot.send_message(msg.chat.id, "/training")
+        from app.routers.training import open_training
+        await open_training(msg, source=p)
         return
+
     if p.startswith("go_casting"):
-        await msg.bot.send_message(msg.chat.id, "/casting")
+        from app.routers.casting import open_casting
+        await open_casting(msg, source=p)
         return
+
     if p.startswith("go_apply"):
-        await msg.bot.send_message(msg.chat.id, "/apply")
+        from app.routers.apply import open_apply
+        await open_apply(msg, source=p)
         return
+
     # неизвестный payload — просто меню
     await msg.answer("Готово. Вот меню:", reply_markup=main_menu())
 
-
-# === ХЭНДЛЕРЫ =================================================================
-
-# ЕДИНСТВЕННАЯ точка входа для /start (в т.ч. с payload).
 @router.message(StateFilter(None), CommandStart(deep_link=True))
 async def start(msg: Message, state: FSMContext, command: CommandObject):
     payload = (command.args or "").strip() if command else ""
@@ -96,7 +90,6 @@ async def start(msg: Message, state: FSMContext, command: CommandObject):
         await msg.answer("Готово. Вот меню.", reply_markup=main_menu())
         return
 
-    # Нет профиля → начнём онбординг, запомним payload на потом
     if payload:
         await state.update_data(start_payload=payload)
 
@@ -104,26 +97,20 @@ async def start(msg: Message, state: FSMContext, command: CommandObject):
     await msg.answer(ONBOARD_NAME_PROMPT)
     await state.set_state(Onboarding.name)
 
-
 @router.message(~StateFilter(None), Command("cancel"))
 async def cancel_anywhere(msg: Message, state: FSMContext):
     await state.clear()
     await msg.answer("Анкета сброшена. Возвращаю в меню.", reply_markup=main_menu())
-
 
 @router.message(~StateFilter(None), Command("menu"))
 async def menu_anywhere(msg: Message, state: FSMContext):
     await state.clear()
     await msg.answer("Готово. Вот меню:", reply_markup=main_menu())
 
-
-# Во время анкеты блокируем только slash-команды; reply-кнопки/эмодзи пропускаем
+# Блокируем ТОЛЬКО слэш-команды во время анкеты
 @router.message(~StateFilter(None), F.text.startswith("/"))
 async def in_form_but_command(msg: Message):
     await msg.answer("Вы сейчас заполняете короткую анкету. Напишите ответ или /cancel, чтобы выйти.")
-
-
-# === ШАГИ ФОРМЫ ==============================================================
 
 @router.message(Onboarding.name, F.text.len() > 0)
 async def set_name(msg: Message, state: FSMContext):
