@@ -89,7 +89,7 @@ def ensure_schema() -> None:
         log.info("✅ БД инициализирована (%s)", DB_URL)
 
 
-# --- Утилиты для роутеров ---
+# --- Утилиты для роутеров (могут требоваться feedback/settings и т.п.) ---
 
 def log_event(s: Session, user_id: int, kind: str, payload: dict | None = None) -> Event:
     e = Event(user_id=user_id, kind=kind, payload_json=(payload or {}))
@@ -101,5 +101,5 @@ def log_event(s: Session, user_id: int, kind: str, payload: dict | None = None) 
 def delete_user_cascade(s: Session, tg_id: int) -> None:
     u = s.query(User).filter(User.tg_id == tg_id).one_or_none()
     if u:
-        s.delete(u)
+        s.delete(u)  # каскады настроены в моделях
         s.flush()
