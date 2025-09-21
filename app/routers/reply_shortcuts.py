@@ -1,3 +1,4 @@
+# app/routers/reply_shortcuts.py
 from __future__ import annotations
 
 from aiogram import Router, F
@@ -25,11 +26,11 @@ async def to_menu(m: Message):
 async def to_settings(m: Message):
     await m.answer("Настройки. Можешь удалить профиль или вернуться в меню.", reply_markup=small_menu())
 
-# 🗑 Удалить профиль (кнопка и /wipe_me)
+# 🗑 Удалить профиль (и /wipe_me)
 @router.message(F.text == BTN_WIPE)
 @router.message(Command("wipe_me"))
 async def wipe_profile(m: Message):
     with session_scope() as s:
-        s.query(User).filter(User.tg_id == m.from_user.id).delete()  # важно: tg_id, не id
+        s.query(User).filter(User.tg_id == m.from_user.id).delete()
         s.flush()
-    await m.answer("Профиль и записи удалены. Открываю меню.", reply_markup=main_menu())
+    await m.answer("Ок, всё сбросил. Открываю меню.", reply_markup=main_menu())
