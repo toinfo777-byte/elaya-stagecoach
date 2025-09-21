@@ -5,6 +5,7 @@ from datetime import date
 
 from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery
+from aiogram.fsm.context import FSMContext
 
 from app.keyboards.menu import main_menu, BTN_TRAINING
 from app.keyboards.training import levels_kb, actions_kb, skip_confirm_kb
@@ -60,3 +61,10 @@ async def on_skip_confirm(c: CallbackQuery):
 async def on_skip_cancel(c: CallbackQuery):
     await c.message.answer("Тогда выбирай уровень ещё раз 👇", reply_markup=levels_kb())
     await c.answer("Отменено")
+
+
+# ── Сверхприоритетный выход в меню ────────────────────────────────
+@router.message(F.text.in_({"Меню", "/menu"}))
+async def leave_to_menu(m: Message, state: FSMContext):
+    await state.clear()
+    await m.answer("Готово! Открываю меню.", reply_markup=main_menu())
