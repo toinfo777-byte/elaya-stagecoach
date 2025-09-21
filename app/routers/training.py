@@ -8,10 +8,10 @@ from app.keyboards.menu import BTN_TRAINING
 
 router = Router(name="training")
 
-# ЕДИНАЯ ТОЧКА ВХОДА (меню/команда/диплинк)
+# Единая точка входа
 async def open_training(m: Message, source: str | None = None, post_id: str | None = None):
-    # TODO: подгрузка этюда по post_id если надо
-    await m.answer("Тренировка дня")  # здесь твоя реальная логика
+    # TODO: твоя бизнес-логика; post_id — из диплинка
+    await m.answer("Тренировка дня")
 
 @router.message(Command("training"))
 async def cmd_training(m: Message):
