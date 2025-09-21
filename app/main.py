@@ -1,7 +1,7 @@
-# app/main.py
 from __future__ import annotations
 
 import asyncio
+import importlib
 import logging
 
 from aiogram import Bot, Dispatcher
@@ -11,53 +11,95 @@ from aiogram.types import BotCommand
 
 from app.config import settings
 from app.storage.repo import ensure_schema
-from app.storage.mvp_repo import init_schema as init_mvp_schema
-from app.routers.training import router as training_router
-from app.routers.casting import router as casting_router
-from app.routers.progress import router as progress_router
-from app.utils.import_routers import import_and_collect_routers  # твой helper
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("main")
 
+# Порядок подключения модулей-роутеров
+ROUTER_NAMES = [
+    "admin",
+    "analytics",
+    "reply_shortcuts",
+    "cancel",
+    "onboarding",
+    "menu",
+    "training",
+    "casting",
+    "progress",
+    "apply",
+    "privacy",
+    "help",
+    "settings",
+    "feedback",
+    "shortcuts",
+    "deeplink",
+]
+
+
+def _import_router(name: str):
+    """
+    Пытаемся импортировать модуль и достать из него объект `router`.
+    Поддерживаем 2 варианта путей: app.routers.<name> и app.<name>.
+    """
+    for modname in (f"app.routers.{name}", f"app.{name}"):
+        try:
+            mod = importlib.import_module(modname)
+        except Exception as e:
+            log.debug("Import miss %s: %s", modname, e)
+            continue
+        router = getattr(mod, "router", None)
+        if router is not None:
+            return router
+    return None
+
+
+async def _set_commands(bot: Bot) -> None:
+    cmds = [
+        BotCommand(command="start", description="Запуск / онбординг"),
+        BotCommand(command="menu", description="Главное меню"),
+        BotCommand(command="training", description="Тренировка дня"),
+        BotCommand(command="casting", description="Мини-кастинг"),
+        BotCommand(command="progress", description="Мой прогресс"),
+        BotCommand(command="apply", description="Путь лидера"),
+        BotCommand(command="privacy", description="Политика"),
+        BotCommand(command="help", description="Помощь"),
+        BotCommand(command="settings", description="Настройки"),
+        BotCommand(command="cancel", description="Сбросить форму"),
+    ]
+    await bot.set_my_commands(cmds)
+
 
 async def main() -> None:
-    # База данных
-    ensure_schema()       # базовые таблицы
-    init_mvp_schema()     # дополнительные таблицы MVP
+    # 1) гарантируем схему БД
+    ensure_schema()
 
+    # 2) инициализация бота (aiogram 3.7+)
     bot = Bot(
         token=settings.bot_token,
         default=DefaultBotProperties(parse_mode=ParseMode.HTML),
     )
     dp = Dispatcher()
 
-    # Подключаем наши сценарии (MVP)
-    dp.include_router(training_router)
-    dp.include_router(casting_router)
-    dp.include_router(progress_router)
-
-    # Остальные роутеры через helper
-    for r in import_and_collect_routers():
+    # 3) подключаем роутеры без дублей
+    seen_router_ids: set[int] = set()
+    for name in ROUTER_NAMES:
+        r = _import_router(name)
+        if r is None:
+            log.warning("Router '%s' NOT found — пропускаю", name)
+            continue
+        if id(r) in seen_router_ids:
+            log.info("Router '%s' уже подключён — пропускаю дубликат", name)
+            continue
         dp.include_router(r)
-        log.info("✅ Router '%s' подключён", r.name)
+        seen_router_ids.add(id(r))
+        log.info("✅ Router '%s' подключён", name)
 
-    # Команды в клиенте Telegram (меню слэшей)
-    await bot.set_my_commands([
-        BotCommand(command="start",    description="Начать / онбординг"),
-        BotCommand(command="menu",     description="Открыть меню"),
-        BotCommand(command="training", description="Тренировка"),
-        BotCommand(command="casting",  description="Мини-кастинг"),
-        BotCommand(command="progress", description="Мой прогресс"),
-        BotCommand(command="apply",    description="Путь лидера (заявка)"),
-        BotCommand(command="privacy",  description="Политика"),
-        BotCommand(command="help",     description="Помощь"),
-        BotCommand(command="settings", description="Настройки"),
-        BotCommand(command="cancel",   description="Отмена"),
-    ])
+    # 4) команды
+    await _set_commands(bot)
     log.info("✅ Команды установлены")
-    log.info("🚀 Start polling…")
 
+    # 5) старт long polling
+    log.info("🚀 Start polling…")
     await dp.start_polling(bot)
 
 
