@@ -8,8 +8,8 @@ from app.keyboards.menu import BTN_CASTING
 
 router = Router(name="casting")
 
-async def open_casting(m: Message, source: str | None = None):
-    # TODO: твоя логика мини-кастинга
+async def open_casting(m: Message, source: str | None = None, post_id: str | None = None):
+    # TODO: подгрузка теста по post_id если надо
     await m.answer("Мини-кастинг")
 
 @router.message(Command("casting"))
