@@ -1,21 +1,28 @@
 from __future__ import annotations
 
 from aiogram import Router, F
-from aiogram.filters import Command
+from aiogram.filters import Command, CommandStart
 from aiogram.types import Message
 
-from app.keyboards.menu import BTN_CASTING
+from app.keyboards.menu import main_menu, BTN_CASTING
 
 router = Router(name="casting")
 
-async def open_casting(m: Message, source: str | None = None, post_id: str | None = None):
-    # TODO: твоя бизнес-логика; post_id — из диплинка
-    await m.answer("Мини-кастинг")
 
-@router.message(Command("casting"))
-async def cmd_casting(m: Message):
-    await open_casting(m, source="/casting")
-
+# ── Общий запуск «Мини-кастинг»
 @router.message(F.text == BTN_CASTING)
-async def btn_casting(m: Message):
-    await open_casting(m, source="menu_button")
+@router.message(Command("casting"))
+async def casting_entry(m: Message) -> None:
+    await m.answer("Мини-кастинг", reply_markup=main_menu())
+
+
+# ── Deeplink только для кастинга
+# ловим варианты:
+#   /start go_casting_post_2009
+#   /start@elaya_stagecoach_dev_bot go_casting_post_2009
+CASTING_START_RE = r"^/start(?:@\w+)?\s+go_casting_"
+
+@router.message(CommandStart(deep_link=True), F.text.regexp(CASTING_START_RE))
+async def start_from_casting_deeplink(m: Message) -> None:
+    # args = m.text.split(maxsplit=1)[1] if " " in m.text else ""
+    await casting_entry(m)
