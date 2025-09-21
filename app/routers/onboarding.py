@@ -1,4 +1,5 @@
 from __future__ import annotations
+import re
 from datetime import datetime
 
 from aiogram import Router, F
@@ -26,6 +27,10 @@ class Onboarding(StatesGroup):
     exp = State()
     consent = State()
 
+TRAINING_RE = re.compile(r"^go_training(?:_post_(?P<id>\d+))?$")
+CASTING_RE  = re.compile(r"^go_casting(?:_post_(?P<id>\d+))?$")
+APPLY_RE    = re.compile(r"^go_apply(?:_post_(?P<id>\d+))?$")
+
 def _norm(s: str | None) -> str:
     return (s or "").strip()
 
@@ -40,12 +45,13 @@ def _save_or_update_user_by_tg(user_id: int, data: dict):
     with session_scope() as s:
         u = s.query(User).filter(User.tg_id == user_id).one_or_none()
         if not u:
-            u = User(tg_id=user_id)  # ВАЖНО: создаём по tg_id, НЕ по id
+            u = User(tg_id=user_id)
             s.add(u)
         u.name = data.get("name") or u.name
         u.tz = data.get("tz") or u.tz
         u.goal = data.get("goal") or u.goal
-        u.exp_level = data.get("exp") or getattr(u, "exp_level", None)
+        if data.get("exp") is not None:
+            u.exp_level = data.get("exp")
         if data.get("start_payload"):
             u.source = data["start_payload"]
         u.updated_at = datetime.utcnow()
@@ -54,24 +60,24 @@ def _save_or_update_user_by_tg(user_id: int, data: dict):
         s.flush()
 
 async def _route_by_payload(msg: Message, payload: str):
-    """
-    Вызовем entry-point функций напрямую (бот не получает апдейты на свои же сообщения).
-    """
     p = (payload or "").strip()
 
-    if p.startswith("go_training"):
+    m = TRAINING_RE.match(p)
+    if m:
         from app.routers.training import open_training
-        await open_training(msg, source=p)
+        await open_training(msg, source=p, post_id=m.group("id"))
         return
 
-    if p.startswith("go_casting"):
+    m = CASTING_RE.match(p)
+    if m:
         from app.routers.casting import open_casting
-        await open_casting(msg, source=p)
+        await open_casting(msg, source=p, post_id=m.group("id"))
         return
 
-    if p.startswith("go_apply"):
+    m = APPLY_RE.match(p)
+    if m:
         from app.routers.apply import open_apply
-        await open_apply(msg, source=p)
+        await open_apply(msg, source=p, post_id=m.group("id"))
         return
 
     await msg.answer("Готово. Вот меню:", reply_markup=main_menu())
@@ -105,7 +111,6 @@ async def menu_anywhere(msg: Message, state: FSMContext):
     await state.clear()
     await msg.answer("Готово. Вот меню:", reply_markup=main_menu())
 
-# Блокируем только /команды во время анкеты
 @router.message(~StateFilter(None), F.text.startswith("/"))
 async def in_form_but_command(msg: Message):
     await msg.answer("Вы сейчас заполняете короткую анкету. Напишите ответ или /cancel, чтобы выйти.")
