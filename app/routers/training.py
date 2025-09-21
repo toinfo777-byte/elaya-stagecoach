@@ -8,11 +8,10 @@ from app.keyboards.menu import BTN_TRAINING
 
 router = Router(name="training")
 
-# ЕДИНАЯ ТОЧКА ВХОДА (вызов из меню, командой или диплинком)
-async def open_training(m: Message, source: str | None = None):
-    # TODO: тут размести свою реальную логику тренировки.
-    # Сейчас — минимальный маркер, чтобы было видно, что диплинк сработал.
-    await m.answer("Тренировка дня")
+# ЕДИНАЯ ТОЧКА ВХОДА (меню/команда/диплинк)
+async def open_training(m: Message, source: str | None = None, post_id: str | None = None):
+    # TODO: подгрузка этюда по post_id если надо
+    await m.answer("Тренировка дня")  # здесь твоя реальная логика
 
 @router.message(Command("training"))
 async def cmd_training(m: Message):
