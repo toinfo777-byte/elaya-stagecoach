@@ -1,0 +1,18 @@
+name: Deploy to Staging (Render)
+
+on:
+  push:
+    branches: [ "develop" ]   # триггер — пуш в ветку develop
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Trigger Render Staging Deploy
+        run: |
+          curl -fsSL -X POST "$RENDER_STAGING_HOOK_URL"
+        env:
+          RENDER_STAGING_HOOK_URL: ${{ secrets.RENDER_STAGING_HOOK_URL }}
