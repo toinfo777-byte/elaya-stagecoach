@@ -9,7 +9,6 @@ from app.keyboards.menu import (
     BTN_TRAINING, BTN_PROGRESS, BTN_APPLY, BTN_CASTING,
     BTN_PRIVACY, BTN_HELP, BTN_SETTINGS, BTN_PREMIUM,
 )
-
 from app.routers.training import open_training
 from app.routers.casting import open_casting
 from app.routers.apply import open_apply
@@ -49,6 +48,7 @@ async def go_help(m: Message):
         "/training — Тренировка\n"
         "/progress — Мой прогресс\n"
         "/apply — Путь лидера (заявка)\n"
+        "/casting — Мини-кастинг\n"
         "/privacy — Политика конфиденциальности\n"
         "/help — Помощь\n"
         "/settings — Настройки\n"
