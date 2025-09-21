@@ -1,37 +1,52 @@
-# app/routers/deeplink.py
 from __future__ import annotations
 
 from aiogram import Router
-from aiogram.filters import StateFilter
+from aiogram.filters import CommandStart, StateFilter
 from aiogram.types import Message
+from aiogram.filters.command import CommandObject
+from aiogram.fsm.context import FSMContext
 
-# Пытаемся импортировать из shortcuts (совместимость),
-# если нет — берём прямые entry-функции.
-try:
-    from app.routers.shortcuts import start_training_flow as _train_flow
-    from app.routers.shortcuts import start_casting_flow as _cast_flow
-except Exception:
-    from app.routers.training import training_entry as _train_flow
-    from app.routers.casting import casting_entry as _cast_flow
+from app.keyboards.menu import main_menu
+from app.storage.repo import session_scope
+from app.storage.models import User
 
 router = Router(name="deeplink")
 
-def _payload(text: str | None) -> str | None:
-    if not text:
-        return None
-    parts = text.split(maxsplit=1)
-    if len(parts) == 2 and parts[0].startswith("/start"):
-        return parts[1].strip()
-    return None
 
-# Точный матч по payload → обрабатываем здесь.
-@router.message(StateFilter("*"), lambda m: (_payload(m.text) or "").startswith("go_training"))
-async def deeplink_training(m: Message, **kwargs):
-    # передаём state через kwargs, если есть
-    state = kwargs.get("state")
-    await _train_flow(m, state)
+def _has_profile(user_id: int) -> bool:
+    with session_scope() as s:
+        return s.query(User).filter(User.id == user_id).first() is not None
 
-@router.message(StateFilter("*"), lambda m: (_payload(m.text) or "").startswith("go_casting"))
-async def deeplink_casting(m: Message, **kwargs):
-    state = kwargs.get("state")
-    await _cast_flow(m, state)
+
+@router.message(StateFilter(None), CommandStart(deep_link=True))
+async def start_with_payload(msg: Message, state: FSMContext, command: CommandObject):
+    """
+    Старт по ссылке:
+      - если профиль уже есть — роутим сразу в нужный раздел
+      - если профиля нет — сохраняем payload и передаём управление онбордингу (его /start)
+    """
+    payload = (command.args or "").strip() if command else ""
+
+    if _has_profile(msg.from_user.id):
+        # Пользователь есть — быстрое ветвление
+        if payload.startswith("go_training"):
+            await msg.answer("Запускаю тренировку дня…", reply_markup=main_menu())
+            await msg.bot.send_message(msg.chat.id, "Тренировка дня")
+            return
+        if payload.startswith("go_casting"):
+            await msg.answer("Открою мини-кастинг…", reply_markup=main_menu())
+            await msg.bot.send_message(msg.chat.id, "Мини-кастинг")
+            return
+
+        # Непонятный payload — просто открываем меню
+        await msg.answer("Готово. Вот меню:", reply_markup=main_menu())
+        return
+
+    # Профиля нет — положим payload в FSM и вызовем онбординг (/start)
+    if payload:
+        await state.update_data(start_payload=payload)
+
+    # ПРОКСИ: вызываем онбординг-старт повторно (в том же апдейте это ок)
+    # Aiogram доставит управление в onboarding.start
+    await msg.answer("Давайте начнём с короткой анкеты, а потом перейдём по ссылке.")
+    # Ничего больше не делаем: onboarding CommandStart(StateFilter(None)) перехватит следующий /start
