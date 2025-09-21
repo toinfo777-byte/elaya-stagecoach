@@ -1,92 +1,95 @@
+# app/main.py
 from __future__ import annotations
 
 import asyncio
-import importlib
 import logging
-from typing import Optional
+from importlib import import_module
 
 from aiogram import Bot, Dispatcher
+from aiogram.client.default import DefaultBotProperties
 from aiogram.types import BotCommand
 
 from app.config import settings
 from app.storage.repo import ensure_schema
 
 log = logging.getLogger("main")
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s | %(levelname)-8s | %(name)s | %(message)s",
+)
+
+
+def _try_import_router(module_path: str, router_name: str = "router"):
+    """
+    Пытаемся подключить роутер из модуля. Если модуля нет или в нём нет router — просто предупреждаем.
+    """
+    try:
+        mod = import_module(module_path)
+        router = getattr(mod, router_name)
+        log.info("✅ Router '%s' подключён", module_path.rsplit(".", 1)[-1])
+        return router
+    except Exception as e:
+        log.warning("Router '%s' NOT found — пропускаю (%s)", module_path.rsplit(".", 1)[-1], e)
+        return None
 
 
 async def _set_commands(bot: Bot) -> None:
-    await bot.set_my_commands(
-        [
-            BotCommand(command="start", description="Запуск / онбординг"),
-            BotCommand(command="menu", description="Открыть меню"),
-            BotCommand(command="training", description="Тренировка дня"),
-            BotCommand(command="casting", description="Мини-кастинг"),
-            BotCommand(command="progress", description="Мой прогресс"),
-            BotCommand(command="settings", description="Настройки"),
-            BotCommand(command="help", description="Помощь"),
-            BotCommand(command="cancel", description="Отмена"),
-        ]
-    )
+    commands = [
+        BotCommand(command="start", description="Начать / онбординг"),
+        BotCommand(command="menu", description="Открыть меню"),
+        BotCommand(command="training", description="Тренировка"),
+        BotCommand(command="casting", description="Мини-кастинг"),
+        BotCommand(command="progress", description="Мой прогресс"),
+        BotCommand(command="apply", description="Путь лидера (заявка)"),
+        BotCommand(command="privacy", description="Политика конфиденциальности"),
+        BotCommand(command="help", description="Помощь"),
+        BotCommand(command="settings", description="Настройки"),
+        BotCommand(command="cancel", description="Отмена"),
+    ]
+    await bot.set_my_commands(commands)
     log.info("✅ Команды установлены")
 
 
-def _try_include(dp: Dispatcher, module_path: str, attr: str = "router") -> None:
-    """
-    Мягкое подключение роутера: если модуля нет или в нём нет router — просто предупреждение.
-    """
-    try:
-        module = importlib.import_module(module_path)
-        router = getattr(module, attr, None)
-        if router is None:
-            raise AttributeError(f"'{module_path}' has no '{attr}'")
-        dp.include_router(router)
-        log.info("✅ Router '%s' подключён", module_path.rsplit(".", 1)[-1])
-    except Exception as e:
-        log.warning("Router '%s' NOT found — пропускаю (%s)", module_path, e)
-
-
-def setup_routers(dp: Dispatcher) -> None:
-    # важен порядок: сначала универсальные шорткаты и cancel, потом онбординг, остальное — ниже
-    for mod in [
-        "app.routers.reply_shortcuts",
-        "app.routers.cancel",
-        "app.routers.onboarding",
-        "app.routers.menu",
-        "app.routers.training",
-        "app.routers.casting",
-        "app.routers.apply",
-        "app.routers.progress",
-        "app.routers.settings",
-        "app.routers.analytics",
-        # опциональные:
-        "app.routers.help",
-        "app.routers.system",
-        "app.routers.shortcuts",
-        "app.routers.feedback",
-        "app.routers.premium",
-        "app.routers.privacy",
-    ]:
-        _try_include(dp, mod)
-
-
 async def main() -> None:
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s | %(levelname)-8s | %(name)s | %(message)s",
-    )
-
-    # 1) гарантируем схему БД (создастся, если таблиц нет)
+    # 1) гарантируем схему БД (создаст таблицы, если их нет)
     ensure_schema()
 
-    # 2) aiogram
-    bot = Bot(token=settings.bot_token, parse_mode="HTML")
+    # 2) создаём бота (aiogram 3.7+ — parse_mode через DefaultBotProperties)
+    bot = Bot(
+        token=settings.BOT_TOKEN,
+        default=DefaultBotProperties(parse_mode="HTML"),
+    )
+
+    # убеждаемся, что webhook выключен (мы на long-polling)
+    try:
+        await bot.delete_webhook(drop_pending_updates=False)
+    except Exception:
+        # не критично
+        pass
+
     dp = Dispatcher()
 
-    setup_routers(dp)
-    await _set_commands(bot)
+    # 3) Подключаем роутеры.
+    # ВАЖНО: deeplink-роутеры (training/casting) подключаем ПЕРВЫМИ, чтобы обрабатывать /start с аргументами.
+    for path in [
+        "app.routers.training",         # deeplink на тренировки
+        "app.routers.casting",          # deeplink на кастинг
+        "app.routers.reply_shortcuts",  # кнопки "в меню" / "настройки" / "удалить профиль"
+        "app.routers.cancel",           # /cancel
+        "app.routers.onboarding",       # общий /start (после deeplink-роутеров!)
+        "app.routers.menu",             # отображение меню
+        "app.routers.apply",            # путь лидера
+        "app.routers.progress",         # прогресс
+        "app.routers.settings",         # настройки
+        "app.routers.feedback",         # можно отсутствовать
+        "app.routers.analytics",        # аналитика/health
+    ]:
+        r = _try_import_router(path)
+        if r:
+            dp.include_router(r)
 
-    # 3) работаем на long-polling — отключаем вебхук, но апдейты не дропаем
-    await bot.delete_webhook(drop_pending_updates=False)
+    # 4) Команды
+    await _set_commands(bot)
 
     log.info("🚀 Start polling…")
     await dp.start_polling(bot)
