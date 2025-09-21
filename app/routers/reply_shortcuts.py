@@ -15,19 +15,21 @@ router = Router(name="reply_shortcuts")
 
 # 🏠 В меню
 @router.message(F.text == BTN_TO_MENU)
+@router.message(Command("menu"))
 async def to_menu(m: Message):
     await m.answer("Меню", reply_markup=main_menu())
 
 # ⚙️ Настройки
-@router.message(F.text == BTN_TO_SETTINGS)
+@router.message(F.text == BTN_TO_SETTINGS))
+@router.message(Command("settings"))
 async def to_settings(m: Message):
     await m.answer("Настройки. Можешь удалить профиль или вернуться в меню.", reply_markup=small_menu())
 
-# 🗑 Удалить профиль (и /wipe_me)
+# 🗑 Удалить профиль (кнопка и /wipe_me)
 @router.message(F.text == BTN_WIPE)
 @router.message(Command("wipe_me"))
 async def wipe_profile(m: Message):
     with session_scope() as s:
-        s.query(User).filter(User.id == m.from_user.id).delete()
+        s.query(User).filter(User.tg_id == m.from_user.id).delete()  # ключевой фикс
         s.flush()
     await m.answer("Профиль и записи удалены. Открываю меню.", reply_markup=main_menu())
