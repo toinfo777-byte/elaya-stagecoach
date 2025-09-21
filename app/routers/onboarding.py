@@ -32,20 +32,20 @@ def _norm(s: str | None) -> str:
 def _is_yes_consent(text: str | None) -> bool:
     return _norm(text).lower().startswith("соглас")
 
-def _get_user(user_id: int) -> User | None:
+def _get_user_by_tg(user_id: int) -> User | None:
     with session_scope() as s:
-        return s.query(User).filter(User.id == user_id).one_or_none()
+        return s.query(User).filter(User.tg_id == user_id).one_or_none()
 
-def _save_or_update_user(user_id: int, data: dict):
+def _save_or_update_user_by_tg(user_id: int, data: dict):
     with session_scope() as s:
-        u = s.query(User).filter(User.id == user_id).one_or_none()
+        u = s.query(User).filter(User.tg_id == user_id).one_or_none()
         if not u:
-            u = User(id=user_id)
+            u = User(tg_id=user_id)  # ВАЖНО: создаём по tg_id, НЕ по id
             s.add(u)
         u.name = data.get("name") or u.name
         u.tz = data.get("tz") or u.tz
         u.goal = data.get("goal") or u.goal
-        u.exp = data.get("exp") or u.exp
+        u.exp_level = data.get("exp") or getattr(u, "exp_level", None)
         if data.get("start_payload"):
             u.source = data["start_payload"]
         u.updated_at = datetime.utcnow()
@@ -55,8 +55,7 @@ def _save_or_update_user(user_id: int, data: dict):
 
 async def _route_by_payload(msg: Message, payload: str):
     """
-    ВАЖНО: вызываем entry-point функций напрямую, НЕ отправляем /команды текстом
-    (бот не получает апдейты на свои сообщения).
+    Вызовем entry-point функций напрямую (бот не получает апдейты на свои же сообщения).
     """
     p = (payload or "").strip()
 
@@ -75,13 +74,12 @@ async def _route_by_payload(msg: Message, payload: str):
         await open_apply(msg, source=p)
         return
 
-    # неизвестный payload — просто меню
     await msg.answer("Готово. Вот меню:", reply_markup=main_menu())
 
 @router.message(StateFilter(None), CommandStart(deep_link=True))
 async def start(msg: Message, state: FSMContext, command: CommandObject):
     payload = (command.args or "").strip() if command else ""
-    existing = _get_user(msg.from_user.id)
+    existing = _get_user_by_tg(msg.from_user.id)
 
     if existing:
         if payload:
@@ -107,7 +105,7 @@ async def menu_anywhere(msg: Message, state: FSMContext):
     await state.clear()
     await msg.answer("Готово. Вот меню:", reply_markup=main_menu())
 
-# Блокируем ТОЛЬКО слэш-команды во время анкеты
+# Блокируем только /команды во время анкеты
 @router.message(~StateFilter(None), F.text.startswith("/"))
 async def in_form_but_command(msg: Message):
     await msg.answer("Вы сейчас заполняете короткую анкету. Напишите ответ или /cancel, чтобы выйти.")
@@ -139,7 +137,7 @@ async def set_exp(msg: Message, state: FSMContext):
 @router.message(Onboarding.consent, F.text.func(_is_yes_consent))
 async def finalize(msg: Message, state: FSMContext):
     data = await state.get_data()
-    _save_or_update_user(msg.from_user.id, data)
+    _save_or_update_user_by_tg(msg.from_user.id, data)
 
     await state.clear()
     await msg.answer("Готово! Открываю меню.", reply_markup=main_menu())
