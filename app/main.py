@@ -131,20 +131,30 @@ async def main() -> None:
 
     # Подключаем оба пространства имён
     for name in [
-        "shortcuts",
-        "onboarding",
-        "training",
-        "casting",
-        "progress",
-        "apply",
-        "premium",
-        "privacy",
-        "help",
-        "settings",
-        "system",
-    ]:
-        _include_router_try_both(dp, name)
+    # базовые служебные
+    "system",
+    "deeplink",         # если используешь deep link обработчики
+    "cancel",           # если cancel вынесен в отдельный модуль
 
+    # онбординг и сокращённые реплаи
+    "onboarding",
+    "reply_shortcuts",  # КНОПКИ «маленького меню»
+
+    # основная логика
+    "training",
+    "casting",
+    "progress",
+    "apply",
+    "premium",
+    "privacy",
+    "help",
+
+    # отзывы/реакции
+    "feedback",         # ЭМОДЗИ-ОЦЕНКИ и короткие фразы
+    "shortcuts",        # если у тебя есть ещё общий модуль шорткатов
+    "settings",
+]:
+    _include_router_try_both(dp, name)
     await _set_bot_commands_everywhere(bot)
 
     log.info("Bot is starting polling…")
