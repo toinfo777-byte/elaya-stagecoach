@@ -4,12 +4,12 @@ from aiogram import Router, F
 from aiogram.filters import Command
 from aiogram.types import Message
 
-from app.keyboards.menu import main_menu, BTN_PROGRESS if 'BTN_PROGRESS' in dir(__import__('app.keyboards.menu', fromlist=['*'])) else None
+from app.keyboards.menu import main_menu
 from app.storage.mvp_repo import progress_for
 
-# На случай если у вас константа называется иначе:
+# Пытаемся взять текст кнопки из ваших констант; если их нет — дефолт.
 try:
-    from app.keyboards.menu import BTN_PROGRESS  # noqa
+    from app.keyboards.menu import BTN_PROGRESS  # type: ignore
 except Exception:
     BTN_PROGRESS = "📈 Мой прогресс"
 
