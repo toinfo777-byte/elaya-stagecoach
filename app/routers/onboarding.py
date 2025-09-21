@@ -76,4 +76,150 @@ async def _try_call(module_name: str, candidates: list[str], msg: Message, **kwa
             # берем только поддерживаемые параметры
             sig = inspect.signature(fn)
             call_kwargs = {k: v for k, v in kwargs.items() if k in sig.parameters}
-            return await fn(
+            return await fn(msg, **call_kwargs)
+    # если вообще ничего не нашли — мягко в меню
+    await msg.answer("Готово. Вот меню.", reply_markup=main_menu())
+
+async def _route_by_payload(msg: Message, payload: str):
+    p = (payload or "").strip()
+
+    m = TRAINING_RE.match(p)
+    if m:
+        return await _try_call(
+            "app.routers.training",
+            ["open_training", "cmd_training", "start_training", "show_training"],
+            msg,
+            source=p,
+            post_id=m.group("id"),
+        )
+
+    m = CASTING_RE.match(p)
+    if m:
+        return await _try_call(
+            "app.routers.casting",
+            ["open_casting", "cmd_casting", "start_casting", "show_casting"],
+            msg,
+            source=p,
+            post_id=m.group("id"),
+        )
+
+    m = APPLY_RE.match(p)
+    if m:
+        return await _try_call(
+            "app.routers.apply",
+            ["open_apply", "cmd_apply", "start_apply", "show_apply"],
+            msg,
+            source=p,
+            post_id=m.group("id"),
+        )
+
+    # эвристика по префиксу — на всякий
+    if p.startswith("go_casting"):
+        return await _try_call("app.routers.casting",
+                               ["open_casting", "cmd_casting"], msg, source=p)
+    if p.startswith("go_training"):
+        return await _try_call("app.routers.training",
+                               ["open_training", "cmd_training"], msg, source=p)
+    if p.startswith("go_apply"):
+        return await _try_call("app.routers.apply",
+                               ["open_apply", "cmd_apply"], msg, source=p)
+
+    await msg.answer("Готово. Вот меню:", reply_markup=main_menu())
+
+# --- /start ---
+
+@router.message(StateFilter(None), CommandStart(deep_link=True))
+async def start_with_deeplink(msg: Message, state: FSMContext, command: CommandObject):
+    payload = (command.args or "").strip() if command else ""
+    existing = _get_user_by_tg(msg.from_user.id)
+
+    if existing:
+        if payload:
+            await _route_by_payload(msg, payload)
+            return
+        await msg.answer("Готово. Вот меню.", reply_markup=main_menu())
+        return
+
+    if payload:
+        await state.update_data(start_payload=payload)
+
+    await msg.answer(HELLO)
+    await msg.answer(ONBOARD_NAME_PROMPT)
+    await state.set_state(Onboarding.name)
+
+@router.message(StateFilter(None), CommandStart())
+async def start_plain(msg: Message, state: FSMContext):
+    existing = _get_user_by_tg(msg.from_user.id)
+    if existing:
+        await msg.answer("Готово. Вот меню.", reply_markup=main_menu())
+        return
+    await msg.answer(HELLO)
+    await msg.answer(ONBOARD_NAME_PROMPT)
+    await state.set_state(Onboarding.name)
+
+# Перезапуск из любого state — сохраняем payload
+@router.message(~StateFilter(None), CommandStart(deep_link=True))
+async def restart_with_deeplink(msg: Message, state: FSMContext, command: CommandObject):
+    await state.clear()
+    await start_with_deeplink(msg, state, command)
+
+@router.message(~StateFilter(None), CommandStart())
+async def restart_plain(msg: Message, state: FSMContext):
+    await state.clear()
+    await start_plain(msg, state)
+
+# Управление state
+@router.message(~StateFilter(None), Command("cancel"))
+async def cancel_anywhere(msg: Message, state: FSMContext):
+    await state.clear()
+    await msg.answer("Анкета сброшена. Возвращаю в меню.", reply_markup=main_menu())
+
+@router.message(~StateFilter(None), Command("menu"))
+async def menu_anywhere(msg: Message, state: FSMContext):
+    await state.clear()
+    await msg.answer("Готово. Вот меню:", reply_markup=main_menu())
+
+# Во время анкеты блокируем только slash-команды
+@router.message(~StateFilter(None), F.text.startswith("/"))
+async def in_form_but_command(msg: Message):
+    await msg.answer("Вы сейчас заполняете короткую анкету. Напишите ответ или /cancel, чтобы выйти.")
+
+# --- шаги анкеты ---
+
+@router.message(Onboarding.name, F.text.len() > 0)
+async def set_name(msg: Message, state: FSMContext):
+    await state.update_data(name=_norm(msg.text))
+    await msg.answer(ONBOARD_TZ_PROMPT)
+    await state.set_state(Onboarding.tz)
+
+@router.message(Onboarding.tz, F.text.len() > 0)
+async def set_tz(msg: Message, state: FSMContext):
+    await state.update_data(tz=_norm(msg.text))
+    await msg.answer(ONBOARD_GOAL_PROMPT)
+    await state.set_state(Onboarding.goal)
+
+@router.message(Onboarding.goal, F.text.len() > 0)
+async def set_goal(msg: Message, state: FSMContext):
+    await state.update_data(goal=_norm(msg.text))
+    await msg.answer(ONBOARD_EXP_PROMPT)
+    await state.set_state(Onboarding.exp)
+
+@router.message(Onboarding.exp, F.text.len() > 0)
+async def set_exp(msg: Message, state: FSMContext):
+    await state.update_data(exp=_norm(msg.text))
+    await msg.answer(CONSENT)
+    await state.set_state(Onboarding.consent)
+
+@router.message(Onboarding.consent, F.text.func(_is_yes_consent))
+async def finalize(msg: Message, state: FSMContext):
+    data = await state.get_data()
+    _save_or_update_user_by_tg(msg.from_user.id, data)
+    await state.clear()
+    await msg.answer("Готово! Открываю меню.", reply_markup=main_menu())
+
+    if data.get("start_payload"):
+        await _route_by_payload(msg, data["start_payload"])
+
+@router.message(Onboarding.consent)
+async def ask_consent_again(msg: Message):
+    await msg.answer("Пожалуйста, напишите «Согласен» (или /cancel, чтобы выйти).")
