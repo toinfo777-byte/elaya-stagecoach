@@ -1,27 +1,33 @@
 from __future__ import annotations
 
-from pydantic import AliasChoices, Field
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from typing import List, Optional
+from pydantic import BaseSettings, Field
 
 
 class Settings(BaseSettings):
-    # токен обязателен. Подхватит ЛЮБОЕ из названий ниже
-    bot_token: str = Field(
-        ...,
-        validation_alias=AliasChoices("BOT_TOKEN", "TELEGRAM_BOT_TOKEN", "TG_BOT_TOKEN"),
-    )
+    # токен бота
+    bot_token: str = Field(..., env="BOT_TOKEN")
 
-    # URL БД можно не задавать — по умолчанию локальный sqlite в /data
-    db_url: str = Field(
-        default="sqlite:////data/db.sqlite",
-        validation_alias=AliasChoices("DATABASE_URL", "DB_URL"),
-    )
+    # строка подключения к БД
+    db_url: str = Field("sqlite:////data/db.sqlite", env="DB_URL")
 
-    model_config = SettingsConfigDict(
-        env_file=".env",            # можно держать локально
-        env_file_encoding="utf-8",
-        extra="ignore",
-    )
+    # прочее (опционально)
+    admin_ids: str = Field("", env="ADMIN_IDS")
+    admin_alert_chat_id: Optional[int] = Field(None, env="ADMIN_ALERT_CHAT_ID")
+    channel_username: Optional[str] = Field(None, env="CHANNEL_USERNAME")
+    env: str = Field("staging", env="ENV")
+
+    # удобный доступ к admin_ids в виде списка int
+    @property
+    def admin_ids_list(self) -> List[int]:
+        raw = (self.admin_ids or "").replace(" ", "")
+        return [int(x) for x in raw.split(",") if x]
+
+    class Config:
+        # pydantic v1 совместимость
+        case_sensitive = False
+        env_file = ".env"
+        env_file_encoding = "utf-8"
 
 
 settings = Settings()
