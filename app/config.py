@@ -17,4 +17,40 @@ class Settings(BaseSettings):
 
     # базовые
     bot_token: str = Field(..., alias="BOT_TOKEN")
-    db_url: str = Field("sqlite:////data/db.sqlite", alias="DB_U
+    db_url: str = Field("sqlite:////data/db.sqlite", alias="DB_URL")
+    env: str = Field("prod", alias="ENV")
+
+    # админы/уведомления
+    admin_alert_chat_id: Optional[int] = Field(None, alias="ADMIN_ALERT_CHAT_ID")
+    admin_ids_raw: Optional[str] = Field("", alias="ADMIN_IDS")  # строка из ENV
+
+    # опциональные
+    channel_username: Optional[str] = Field(None, alias="CHANNEL_USERNAME")
+    coach_rate_sec: int = Field(2, alias="COACH_RATE_SEC")
+    coach_ttl_min: int = Field(30, alias="COACH_TTL_MIN")
+
+    @computed_field
+    @property
+    def admin_ids(self) -> List[int]:
+        s = (self.admin_ids_raw or "").strip()
+        if not s:
+            return []
+        # JSON: "[1,2,3]"
+        if s.startswith("[") and s.endswith("]"):
+            try:
+                return [int(x) for x in json.loads(s)]
+            except Exception:
+                pass
+        # "1,2,3" / "1 2 3" / "1;2;3"
+        parts = [p for p in s.replace(";", ",").replace(" ", ",").split(",") if p]
+        if parts:
+            return [int(p) for p in parts]
+        # одно значение
+        try:
+            return [int(s)]
+        except Exception:
+            return []
+
+
+settings = Settings()
+__all__ = ["Settings", "settings"]
