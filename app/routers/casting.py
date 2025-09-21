@@ -1,4 +1,3 @@
-# app/routers/casting.py
 from __future__ import annotations
 
 from aiogram import Router, F
@@ -9,12 +8,10 @@ from app.keyboards.menu import main_menu, BTN_CASTING
 
 router = Router(name="casting")
 
-
 @router.message(F.text == BTN_CASTING)
 @router.message(Command("casting"))
 async def casting_entry(m: Message) -> None:
     await m.answer("Мини-кастинг", reply_markup=main_menu())
-
 
 CASTING_START_RE = r"^/start(?:@\w+)?\s+go_casting_"
 
