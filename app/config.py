@@ -1,18 +1,16 @@
+# app/config.py
+from __future__ import annotations
 import os
-from dataclasses import dataclass
-from dotenv import load_dotenv
 
-load_dotenv()
 
-@dataclass
 class Settings:
-    bot_token: str = os.getenv("BOT_TOKEN", "")
-    admin_ids: tuple[int, ...] = tuple(
-        int(x.strip())
-        for x in os.getenv("ADMIN_IDS", "").split(",")
-        if x.strip()
-    )
-    db_url: str = os.getenv("DB_URL", "sqlite:///elaya.db")
-    env: str = os.getenv("ENV", "dev")
+    BOT_TOKEN: str
+    DB_URL: str
+
+    def __init__(self) -> None:
+        self.BOT_TOKEN = os.environ.get("BOT_TOKEN", "").strip()
+        # по умолчанию локальный файл в /data (Render), либо /tmp
+        self.DB_URL = os.environ.get("DATABASE_URL", "sqlite:////data/db.sqlite").strip()
+
 
 settings = Settings()
