@@ -1,4 +1,3 @@
-# app/storage/repo.py
 from __future__ import annotations
 
 import os
@@ -18,10 +17,10 @@ log = logging.getLogger("db")
 
 def _resolve_db_url(raw: str) -> str:
     """
-    Делает SQLite-путь рабочим:
-    - если путь относительный или каталог недоступен для записи — переносим в /tmp
-    - создаём директорию, если её нет
-    Остальные диалекты возвращаем как есть.
+    Чиним SQLite путь:
+    - если каталог недоступен для записи — переносим файл в /tmp
+    - создаём каталог при необходимости
+    Для остальных диалектов возвращаем как есть.
     """
     url: URL = make_url(raw)
     if url.get_backend_name() != "sqlite":
@@ -55,11 +54,16 @@ def _resolve_db_url(raw: str) -> str:
     return str(fixed)
 
 
-DB_URL = _resolve_db_url(settings.DB_URL)
+DB_URL = _resolve_db_url(settings.db_url)
+
 engine = create_engine(DB_URL, future=True)
-SessionLocal = sessionmaker(bind=engine,
-                            autoflush=False, autocommit=False,
-                            expire_on_commit=False, future=True)
+SessionLocal = sessionmaker(
+    bind=engine,
+    autoflush=False,
+    autocommit=False,
+    expire_on_commit=False,
+    future=True,
+)
 
 
 @contextmanager
@@ -76,7 +80,9 @@ def session_scope() -> Iterator:
 
 
 def ensure_schema() -> None:
-    """Создаём отсутствующие таблицы (безопасно, если всё уже есть)."""
+    """
+    Создаёт отсутствующие таблицы. Идempotентно.
+    """
     insp = inspect(engine)
     if not insp.has_table("users"):
         Base.metadata.create_all(bind=engine)
