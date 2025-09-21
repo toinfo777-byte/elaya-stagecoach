@@ -1,16 +1,13 @@
 from __future__ import annotations
-
 from aiogram import Router, F
 from aiogram.filters import Command
 from aiogram.types import Message
-
 from app.keyboards.menu import BTN_CASTING
 
 router = Router(name="casting")
 
-# единая точка входа (кнопка, /command, диплинк)
 async def open_casting(m: Message, source: str | None = None, post_id: str | None = None):
-    # TODO: если нужно — подгрузи сценарий по post_id
+    # при необходимости можно учесть post_id
     await m.answer("Мини-кастинг")
 
 @router.message(Command("casting"))
