@@ -7,12 +7,13 @@ from typing import Iterator
 
 from sqlalchemy import create_engine, inspect
 from sqlalchemy.engine.url import make_url, URL
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.orm import sessionmaker, Session
 
 from app.config import settings
-from app.storage.models import Base
+from app.storage.models import Base, Event, User
 
 log = logging.getLogger("db")
+
 
 def _resolve_db_url(raw: str) -> str:
     """
@@ -55,30 +56,26 @@ def _resolve_db_url(raw: str) -> str:
     fixed = url.set(database=abs_path)
     return str(fixed)
 
+
 DB_URL = _resolve_db_url(settings.db_url)
 
-# SQLite: никаких особых connect_args не нужно, оставим по умолчанию
+# SQLite: особых connect_args не нужно; future=True для новой API
 engine = create_engine(DB_URL, future=True)
-SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False, expire_on_commit=False, future=True)
+SessionLocal = sessionmaker(
+    bind=engine,
+    autoflush=False,
+    autocommit=False,
+    expire_on_commit=False,
+    future=True,
+)
+
 
 @contextmanager
-def session_scope() -> Iterator:
-    session = SessionLocal()
+def session_scope() -> Iterator[Session]:
+    session: Session = SessionLocal()
     try:
         yield session
         session.commit()
     except Exception:
         session.rollback()
         raise
-    finally:
-        session.close()
-
-def ensure_schema():
-    """
-    Dev-bootstrap: создаём отсутствующие таблицы.
-    Безопасно для существующей схемы (ничего не трогает, если всё есть).
-    """
-    insp = inspect(engine)
-    if not insp.has_table("users"):
-        Base.metadata.create_all(bind=engine)
-        log.info("✅ БД инициализирована (%s)", DB_URL)
