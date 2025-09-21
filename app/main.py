@@ -7,9 +7,10 @@ import os
 
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
-from aiogram.types import BotCommand, BotCommandScopeAllPrivateChats
+from aiogram.types import BotCommandScopeAllPrivateChats
 
 from app.config import settings
+from app.keyboards.menu import get_bot_commands  # единый источник /команд
 
 # === ЛОГИ =====================================================================
 logging.basicConfig(
@@ -53,47 +54,24 @@ def _include(dp: Dispatcher, name: str):
 
 
 async def _set_commands(bot: Bot):
-    await bot.set_my_commands(
-        [
-            BotCommand("start", "Запуск / онбординг"),
-            BotCommand("menu", "Открыть меню"),
-            BotCommand("training", "Тренировка"),
-            BotCommand("progress", "Мой прогресс"),
-            BotCommand("apply", "Путь лидера"),
-            BotCommand("privacy", "Политика"),
-            BotCommand("help", "Помощь"),
-            BotCommand("cancel", "Отменить текущее действие"),
-        ],
-        scope=BotCommandScopeAllPrivateChats(),
-    )
+    await bot.set_my_commands(get_bot_commands(), scope=BotCommandScopeAllPrivateChats())
     log.info("✅ Команды установлены")
 
 
 def build_dispatcher() -> Dispatcher:
     dp = Dispatcher()
 
-    # ВАЖНО: reply_shortcuts ставим ПЕРЕД onboarding, чтобы их текстовые кнопки
-    # не глушились FSM даже во время анкеты.
+    # Подключаем ТОЛЬКО реально существующие роутеры (минимальный стабильный набор)
     routers = [
-        "system",
         "reply_shortcuts",   # «В меню», «Настройки», «Удалить профиль» и т.п. (reply)
         "cancel",
-
-        "onboarding",        # весь /start (и deep-link) только здесь
-
-        # меню + разделы
-        "menu",
+        "onboarding",        # весь /start (и deep-link) здесь
+        "menu",              # хэндлеры нижнего меню и справки
         "training",
         "casting",
         "progress",
-        "apply",
-        "premium",
-        "privacy",
-        "help",
-
-        "feedback",
-        "shortcuts",
         "settings",
+        "feedback",
         "analytics",
     ]
     for name in routers:
