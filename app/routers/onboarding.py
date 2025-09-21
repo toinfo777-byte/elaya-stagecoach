@@ -23,6 +23,7 @@ from app.storage.models import User
 
 router = Router(name="onboarding")
 
+
 # === СТЕЙТЫ ===================================================================
 class Onboarding(StatesGroup):
     name = State()
@@ -32,16 +33,17 @@ class Onboarding(StatesGroup):
     consent = State()
 
 
-# === УТИЛИТЫ ==================================================================
+# === ВСПОМОГАТЕЛЬНОЕ ==========================================================
 def _norm(s: str | None) -> str:
     return (s or "").strip()
 
-
 def _is_yes_consent(text: str | None) -> bool:
     t = (_norm(text)).lower()
-    # принимаем "согласен", "согласна", "согласен.", "согласен!" и т.п.
-    return t.startswith("соглас")
+    return t.startswith("соглас")  # «согласен», «согласна», с точками/эмодзи — ок
 
+def _get_user(user_id: int) -> User | None:
+    with session_scope() as s:
+        return s.query(User).filter(User.id == user_id).one_or_none()
 
 def _save_or_update_user(user_id: int, data: dict):
     with session_scope() as s:
@@ -53,20 +55,51 @@ def _save_or_update_user(user_id: int, data: dict):
         u.tz = data.get("tz") or u.tz
         u.goal = data.get("goal") or u.goal
         u.exp = data.get("exp") or u.exp
-        u.source = data.get("source") or u.source
+        if "start_payload" in data and data["start_payload"]:
+            u.source = data["start_payload"]
         u.updated_at = datetime.utcnow()
         if not getattr(u, "created_at", None):
             u.created_at = datetime.utcnow()
         s.flush()
 
+async def _route_by_payload(msg: Message, payload: str):
+    """
+    Простая маршрутизация после старта по ссылке:
+      go_training*  -> в тренировку
+      go_casting*   -> в мини-кастинг
+    """
+    p = payload.strip()
+    if p.startswith("go_training"):
+        await msg.answer("Запускаю тренировку дня…")
+        # В реальном проекте вместо ответа можно триггерить нужный хэндлер
+        await msg.bot.send_message(msg.chat.id, "Тренировка дня")
+    elif p.startswith("go_casting"):
+        await msg.answer("Открою мини-кастинг…")
+        await msg.bot.send_message(msg.chat.id, "Мини-кастинг")
+    else:
+        # неизвестный payload — просто открываем меню
+        await msg.answer("Готово. Вот меню:", reply_markup=main_menu())
+
 
 # === ХЭНДЛЕРЫ =================================================================
+
+# ЕДИНСТВЕННАЯ точка входа для /start (и с payload).
 @router.message(StateFilter(None), CommandStart(deep_link=True))
 async def start(msg: Message, state: FSMContext, command: CommandObject):
-    # payload из deep link (/start <payload>)
     payload = (command.args or "").strip() if command else ""
+    existing = _get_user(msg.from_user.id)
+
+    if existing:
+        # Профиль уже есть → deep-link ведём сразу
+        if payload:
+            await _route_by_payload(msg, payload)
+            return
+        # Без payload — просто меню
+        await msg.answer("Готово. Вот меню.", reply_markup=main_menu())
+        return
+
+    # Профиля нет → начинаем онбординг. Запомним payload, чтобы дороутить потом.
     if payload:
-        # Сохраняем в FSM — используем после онбординга (роутинг в модуль)
         await state.update_data(start_payload=payload)
 
     await msg.answer(HELLO)
@@ -86,7 +119,7 @@ async def menu_anywhere(msg: Message, state: FSMContext):
     await msg.answer("Готово. Вот меню:", reply_markup=main_menu())
 
 
-# Блокируем ТОЛЬКО slash-команды во время анкеты (чтобы нижнее меню работало).
+# Блокируем ТОЛЬКО slash-команды во время анкеты (нижнее меню/эмодзи не трогаем)
 @router.message(~StateFilter(None), F.text.startswith("/"))
 async def in_form_but_command(msg: Message):
     await msg.answer("Вы сейчас заполняете короткую анкету. Напишите ответ или /cancel, чтобы выйти.")
@@ -125,24 +158,15 @@ async def set_exp(msg: Message, state: FSMContext):
 @router.message(Onboarding.consent, F.text.func(_is_yes_consent))
 async def finalize(msg: Message, state: FSMContext):
     data = await state.get_data()
-    # Сохраняем пользователя
-    _save_or_update_user(msg.from_user.id, data | {"source": data.get("start_payload", "")})
+    _save_or_update_user(msg.from_user.id, data)
 
     await state.clear()
     await msg.answer("Готово! Открываю меню.", reply_markup=main_menu())
 
-    # Если пришли по deep-link — отправим дальше
+    # Если стартовали по ссылке — дороутим
     payload = data.get("start_payload", "")
     if payload:
-        # Простые маршруты:
-        if payload.startswith("go_training"):
-            await msg.answer("Запускаю тренировку дня…")
-            # эмулируем нажатие команды/кнопки (зависит от твоей реализации)
-            await msg.bot.send_message(msg.chat.id, "Тренировка дня")
-        elif payload.startswith("go_casting"):
-            await msg.answer("Открою мини-кастинг…")
-            await msg.bot.send_message(msg.chat.id, "Мини-кастинг")
-        # добавляй свои варианты: go_training_post_XXXX, go_casting_post_YYYY, и т.д.
+        await _route_by_payload(msg, payload)
 
 
 @router.message(Onboarding.consent)
