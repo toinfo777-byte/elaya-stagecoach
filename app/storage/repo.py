@@ -1,3 +1,4 @@
+# app/storage/repo.py
 from __future__ import annotations
 
 import os
@@ -28,7 +29,7 @@ def _resolve_db_url(raw: str) -> str:
 
     db_path = url.database or ""
     if db_path in ("", ":memory:"):
-        return raw  # in-memory/пусто — ничего не делаем
+        return raw
 
     abs_path = db_path if os.path.isabs(db_path) else os.path.abspath(db_path)
     target_dir = os.path.dirname(abs_path) or "."
@@ -44,7 +45,6 @@ def _resolve_db_url(raw: str) -> str:
         except Exception:
             return False
 
-    # если директория не пишется — используем /tmp
     if not _writable_dir(target_dir):
         log.warning("DB dir '%s' недоступна для записи. Переношу БД в /tmp", target_dir)
         base = os.path.basename(abs_path) or "elaya.db"
@@ -55,13 +55,11 @@ def _resolve_db_url(raw: str) -> str:
     return str(fixed)
 
 
-DB_URL = _resolve_db_url(settings.db_url)
-
-# Для SQLite дополнительных connect_args не задаём — оставим по умолчанию
+DB_URL = _resolve_db_url(settings.DB_URL)
 engine = create_engine(DB_URL, future=True)
-SessionLocal = sessionmaker(
-    bind=engine, autoflush=False, autocommit=False, expire_on_commit=False, future=True
-)
+SessionLocal = sessionmaker(bind=engine,
+                            autoflush=False, autocommit=False,
+                            expire_on_commit=False, future=True)
 
 
 @contextmanager
@@ -78,10 +76,7 @@ def session_scope() -> Iterator:
 
 
 def ensure_schema() -> None:
-    """
-    Dev-bootstrap: создаём отсутствующие таблицы.
-    Безопасно для существующей схемы (ничего не трогает, если всё есть).
-    """
+    """Создаём отсутствующие таблицы (безопасно, если всё уже есть)."""
     insp = inspect(engine)
     if not insp.has_table("users"):
         Base.metadata.create_all(bind=engine)
