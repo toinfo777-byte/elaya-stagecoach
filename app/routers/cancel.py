@@ -1,16 +1,16 @@
-# app/routers/cancel.py
+from __future__ import annotations
+
 from aiogram import Router
 from aiogram.filters import Command
-from aiogram.filters.state import StateFilter
-from aiogram.types import Message
 from aiogram.fsm.context import FSMContext
+from aiogram.types import Message
 
-from app.keyboards.menu import main_menu  # <- держим единый импорт
+from app.keyboards.menu import main_menu
 
 router = Router(name="cancel")
 
 
-@router.message(StateFilter("*"), Command("cancel"))
-async def cancel_any(m: Message, state: FSMContext):
+@router.message(Command("cancel"))
+async def cancel_any_state(m: Message, state: FSMContext) -> None:
     await state.clear()
     await m.answer("Ок, всё сбросил. Открываю меню.", reply_markup=main_menu())
