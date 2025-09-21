@@ -1,4 +1,3 @@
-# app/main.py
 from __future__ import annotations
 
 import asyncio
@@ -9,27 +8,23 @@ from typing import Optional
 
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
-from aiogram.types import (
-    BotCommand,
-    BotCommandScopeAllPrivateChats,
-)
+from aiogram.types import BotCommand, BotCommandScopeAllPrivateChats
 
-# === Настройки ================================================================
-try:
-    from app.config import settings  # type: ignore
-except Exception:
-    settings = None  # noqa: N816
+from app.config import settings
 
-BOT_TOKEN = (settings and settings.BOT_TOKEN) or os.getenv("BOT_TOKEN")
-if not BOT_TOKEN:
-    raise RuntimeError("BOT_TOKEN is not set")
-
-# Логирование — включаем DEBUG, чтобы видеть подключение роутеров и фильтры
+# === Логирование ===============================================================
 logging.basicConfig(
     level=os.getenv("LOG_LEVEL", "DEBUG"),
     format="%(asctime)s | %(levelname)-8s | %(name)s | %(message)s",
 )
 log = logging.getLogger("main")
+
+# === Настройки ================================================================
+BOT_TOKEN = settings.bot_token or os.getenv("BOT_TOKEN")
+if not BOT_TOKEN:
+    raise RuntimeError("Не найден BOT_TOKEN. Укажи переменную окружения BOT_TOKEN или settings.bot_token")
+
+DATABASE_URL = settings.db_url or os.getenv("DATABASE_URL", "sqlite:///elaya.db")
 
 
 # === Вспомогалки ==============================================================
@@ -70,7 +65,6 @@ def _include_router_try_both(dp: Dispatcher, name: str):
 
 
 async def _set_commands(bot: Bot):
-    # Единый список команд (минимум)
     commands = [
         BotCommand(command="start", description="Запустить / перезапустить"),
         BotCommand(command="menu", description="Главное меню"),
@@ -87,20 +81,18 @@ async def _set_commands(bot: Bot):
 def build_dispatcher() -> Dispatcher:
     dp = Dispatcher()
 
-    # Порядок ВАЖЕН: сначала системные и разруливающие, потом FSM/меню, потом функциональные,
-    # в конце — отзывки/шорткаты/настройки.
     routers_order = [
         # базовые
         "system",
-        "deeplink",          # если используем диплинки
-        "cancel",            # общий /cancel вне зависимости от state
+        "deeplink",
+        "cancel",
 
-        # онбординг и «маленькое» меню
-        "onboarding",        # FSM name → tz → goal → exp → consent
-        "reply_shortcuts",   # «В меню», «Настройки», «Удалить профиль» (reply-кнопки)
+        # онбординг и маленькое меню
+        "onboarding",
+        "reply_shortcuts",
 
         # основное
-        "menu",              # если у тебя есть отдельный модуль роутера меню
+        "menu",
         "training",
         "casting",
         "progress",
@@ -109,14 +101,14 @@ def build_dispatcher() -> Dispatcher:
         "privacy",
         "help",
 
-        # отзывы/оценки (эмодзи и «✍️ 1 фраза»)
+        # отзывы/оценки
         "feedback",
 
-        # общие шорткаты и настройки (если есть)
+        # шорткаты и настройки
         "shortcuts",
         "settings",
 
-        # отчёты/аналитика (по желанию)
+        # отчёты/аналитика
         "analytics",
     ]
 
