@@ -1,27 +1,41 @@
 # app/keyboards/menu.py
 from __future__ import annotations
 
-from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, BotCommand
+from aiogram.types import (
+    ReplyKeyboardMarkup,
+    KeyboardButton,
+    InlineKeyboardMarkup,
+    InlineKeyboardButton,
+    BotCommand,
+)
 
-# Тексты кнопок
+# Тексты кнопок (основные)
 BTN_TRAINING   = "🎯 Тренировка дня"
-BTN_LEADER     = "🧭 Путь лидера"
-BTN_POLICY     = "🔐 Политика"
-BTN_SETTINGS   = "⚙️ Настройки"
-
 BTN_PROGRESS   = "📈 Мой прогресс"
+BTN_LEADER     = "🧭 Путь лидера"
 BTN_CASTING    = "🎭 Мини-кастинг"
+BTN_POLICY     = "🔐 Политика"
 BTN_HELP       = "💬 Помощь"
+BTN_SETTINGS   = "⚙️ Настройки"
 BTN_PREMIUM    = "⭐ Расширенная версия"
 
-# Шорткаты (маленькое меню)
-BTN_TO_MENU    = "🏠 В меню"
-BTN_TO_SETTINGS= "⚙️ Настройки"
-BTN_WIPE       = "🗑 Удалить профиль"
+# Альтернативные названия / расширенные
+BTN_MENU       = "Меню"
+BTN_APPLY      = BTN_LEADER
+BTN_EXTENDED   = BTN_PREMIUM
 
+# Шорткаты (маленькое меню)
+BTN_TO_MENU     = "🏠 В меню"
+BTN_TO_SETTINGS = "⚙️ Настройки"
+BTN_WIPE        = "🗑 Удалить профиль"
+
+
+# === Reply Keyboards ===========================================================
 
 def main_menu() -> ReplyKeyboardMarkup:
-    # 4 строки по 2 кнопки — как на твоих скриншотах
+    """
+    Основное меню — 4 строки по 2 кнопки (как на скриншотах).
+    """
     rows = [
         [KeyboardButton(text=BTN_TRAINING), KeyboardButton(text=BTN_PROGRESS)],
         [KeyboardButton(text=BTN_LEADER),   KeyboardButton(text=BTN_CASTING)],
@@ -32,6 +46,9 @@ def main_menu() -> ReplyKeyboardMarkup:
 
 
 def small_menu() -> ReplyKeyboardMarkup:
+    """
+    Мини-меню для настроек/удаления профиля.
+    """
     rows = [
         [KeyboardButton(text=BTN_TO_MENU)],
         [KeyboardButton(text=BTN_TO_SETTINGS)],
@@ -39,6 +56,19 @@ def small_menu() -> ReplyKeyboardMarkup:
     ]
     return ReplyKeyboardMarkup(keyboard=rows, resize_keyboard=True)
 
+
+# === Inline Keyboards ==========================================================
+
+def to_menu_inline() -> InlineKeyboardMarkup:
+    """
+    Кнопка возврата в меню (inline).
+    """
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🏠 В меню", callback_data="menu:open")]
+    ])
+
+
+# === Bot Commands =============================================================
 
 def get_bot_commands() -> list[BotCommand]:
     # aiogram v3 — ТОЛЬКО именованные аргументы!
