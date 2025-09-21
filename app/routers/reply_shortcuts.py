@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from aiogram import Router, F
 from aiogram.filters import Command
+from aiogram.fsm.context import FSMContext
 from aiogram.types import Message
 
 from app.keyboards.menu import (
@@ -13,24 +14,28 @@ from app.storage.models import User
 
 router = Router(name="reply_shortcuts")
 
-# 🏠 В меню
+
+# 🏠 В меню — всегда доступно, очищаем состояние, чтобы ничего не перехватывало
 @router.message(F.text == BTN_TO_MENU)
-async def to_menu(m: Message):
+@router.message(Command("menu"))
+async def to_menu(m: Message, state: FSMContext) -> None:
+    await state.clear()
     await m.answer("Меню", reply_markup=main_menu())
 
-# ⚙️ Настройки
+
+# ⚙️ Настройки — тоже доступно в любом состоянии
 @router.message(F.text == BTN_TO_SETTINGS)
-async def to_settings(m: Message):
-    await m.answer(
-        "Настройки. Можешь удалить профиль или вернуться в меню.",
-        reply_markup=small_menu(),
-    )
+@router.message(Command("settings"))
+async def to_settings(m: Message, state: FSMContext) -> None:
+    await state.clear()
+    await m.answer("Настройки. Можешь удалить профиль или вернуться в меню.", reply_markup=small_menu())
+
 
 # 🗑 Удалить профиль (и /wipe_me)
 @router.message(F.text == BTN_WIPE)
 @router.message(Command("wipe_me"))
-async def wipe_profile(m: Message):
-    # ВАЖНО: удаляем по tg_id, а не по внутреннему users.id
+async def wipe_profile(m: Message, state: FSMContext) -> None:
+    await state.clear()
     with session_scope() as s:
-        s.query(User).filter(User.tg_id == m.from_user.id).delete(synchronize_session=False)
-    await m.answer("Ок, всё сбросил. Открываю меню.", reply_markup=main_menu())
+        # важно: удаляем по tg_id, а не по внутреннему PK id
+        s.query(User).filter(User.tg_id ==_
