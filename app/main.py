@@ -12,18 +12,18 @@ from aiogram.types import BotCommand
 from app.config import settings
 from app.storage.repo import ensure_schema
 
-# 👇 ЯВНЫЕ ИМПОРТЫ РОУТЕРОВ (порядок важен)
-from app.routers import reply_shortcuts as r_short
-from app.routers import deeplink as r_deeplink
-from app.routers import training as r_training
-from app.routers import casting as r_casting
-from app.routers import progress as r_progress
-from app.routers import apply as r_apply
-from app.routers import privacy as r_privacy
-from app.routers import help as r_help
-from app.routers import settings as r_settings
-from app.routers import cancel as r_cancel
-# при необходимости добавляй остальные ниже (admin/analytics/feedback/shortcuts и т.д.)
+# ⬇️ ЯВНЫЕ ИМПОРТЫ РОУТЕРОВ (именно подмодули, а не пакет)
+from app.routers.reply_shortcuts import router as reply_shortcuts_router
+from app.routers.deeplink import router as deeplink_router
+from app.routers.training import router as training_router
+from app.routers.casting import router as casting_router
+from app.routers.progress import router as progress_router
+from app.routers.apply import router as apply_router
+from app.routers.privacy import router as privacy_router
+from app.routers.help import router as help_router
+from app.routers.settings import router as settings_router
+from app.routers.cancel import router as cancel_router
+# при необходимости добавь: admin/analytics/feedback/shortcuts и т.д.
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("main")
@@ -56,20 +56,18 @@ async def main() -> None:
     )
     dp = Dispatcher()
 
-    # 3) ПОДКЛЮЧЕНИЕ РОУТЕРОВ В НУЖНОМ ПОРЯДКЕ
-    # самые первые — перехваты «🏠 В меню»/«Настройки»
-    dp.include_router(r_short.router)
-    # /start + диплинки
-    dp.include_router(r_deeplink.router)
-    # основные сценарии
-    dp.include_router(r_training.router)
-    dp.include_router(r_casting.router)
-    dp.include_router(r_progress.router)
-    dp.include_router(r_apply.router)
-    dp.include_router(r_privacy.router)
-    dp.include_router(r_help.router)
-    dp.include_router(r_settings.router)
-    dp.include_router(r_cancel.router)
+    # 3) подключение роутеров в нужном порядке
+    dp.include_router(reply_shortcuts_router)  # быстрые выходы (🏠 меню/⚙️ настройки)
+    dp.include_router(deeplink_router)         # /start + диплинки
+
+    dp.include_router(training_router)
+    dp.include_router(casting_router)
+    dp.include_router(progress_router)
+    dp.include_router(apply_router)
+    dp.include_router(privacy_router)
+    dp.include_router(help_router)
+    dp.include_router(settings_router)
+    dp.include_router(cancel_router)
 
     # 4) команды
     await _set_commands(bot)
