@@ -7,26 +7,40 @@ from aiogram.filters import Command, StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.types import Message, CallbackQuery
 
-from app.flows.casting_flow import start_casting_flow, ApplyForm
-from app.keyboards.menu import main_menu, BTN_CASTING, BTN_APPLY
+from app.keyboards.reply import main_menu_kb, BTN_CASTING, BTN_APPLY
 from app.keyboards.inline import casting_skip_kb  # callback_data: "casting:skip_portfolio"
 from app.utils.admin import notify_admin
 from app.storage.repo import save_casting
 
 router = Router(name="casting")
 
+# ---- Фоллбэк: если нет flows/casting_flow.py, объявим стейты и старт тут ----
+try:
+    from app.flows.casting_flow import start_casting_flow, ApplyForm  # type: ignore
+except Exception:
+    from aiogram.fsm.state import StatesGroup, State
+
+    class ApplyForm(StatesGroup):
+        name = State()
+        age = State()
+        city = State()
+        experience = State()
+        contact = State()
+        portfolio = State()
+
+    async def start_casting_flow(m: Message, state: FSMContext):
+        await state.clear()
+        await state.set_state(ApplyForm.name)
+        await m.answer("Как тебя зовут?")
 
 def _looks_like_url(text: str) -> bool:
     return bool(re.match(r"^https?://", (text or "").strip(), re.I))
 
-
 # ==== СТАРТ ====
-@router.message(Command("casting"), StateFilter(None))
-@router.message(F.text.in_({BTN_CASTING, BTN_APPLY}), StateFilter(None))
+@router.message(StateFilter("*"), Command("casting"))
+@router.message(StateFilter("*"), F.text.in_({BTN_CASTING, BTN_APPLY}))
 async def casting_entry(m: Message, state: FSMContext):
-    # Унифицированный запуск сценария анкеты (общий flow)
     await start_casting_flow(m, state)
-
 
 # ==== ВОПРОСЫ ====
 @router.message(StateFilter(ApplyForm.name))
@@ -34,7 +48,6 @@ async def q_name(m: Message, state: FSMContext):
     await state.update_data(name=(m.text or "").strip())
     await state.set_state(ApplyForm.age)
     await m.answer("Сколько тебе лет?")
-
 
 @router.message(StateFilter(ApplyForm.age))
 async def q_age(m: Message, state: FSMContext):
@@ -49,13 +62,11 @@ async def q_age(m: Message, state: FSMContext):
     await state.set_state(ApplyForm.city)
     await m.answer("Из какого ты города?")
 
-
 @router.message(StateFilter(ApplyForm.city))
 async def q_city(m: Message, state: FSMContext):
     await state.update_data(city=(m.text or "").strip())
     await state.set_state(ApplyForm.experience)
     await m.answer("Какой у тебя опыт?\n– нет\n– 1–2 года\n– 3+ лет")
-
 
 @router.message(StateFilter(ApplyForm.experience))
 async def q_exp(m: Message, state: FSMContext):
@@ -63,36 +74,36 @@ async def q_exp(m: Message, state: FSMContext):
     await state.set_state(ApplyForm.contact)
     await m.answer("Контакт для связи\n@username / телефон / email")
 
-
 @router.message(StateFilter(ApplyForm.contact))
 async def q_contact(m: Message, state: FSMContext):
     await state.update_data(contact=(m.text or "").strip())
     await state.set_state(ApplyForm.portfolio)
     await m.answer("Ссылка на портфолио (если есть)", reply_markup=casting_skip_kb())
 
-
 # ==== ПОРТФОЛИО (опционально) ====
-@router.callback_query(F.data == "casting:skip_portfolio", StateFilter(ApplyForm.portfolio))
+@router.callback_query(StateFilter(ApplyForm.portfolio), F.data == "casting:skip_portfolio")
 async def skip_portfolio(c: CallbackQuery, state: FSMContext):
     await state.update_data(portfolio=None)
     await _finish(c.message, state)
     await c.answer()
 
+@router.message(StateFilter(ApplyForm.portfolio), F.text.casefold().in_({"пропустить", "нет", "пусто"}))
+async def portfolio_skip_text(m: Message, state: FSMContext):
+    await state.update_data(portfolio=None)
+    await _finish(m, state)
 
 @router.message(StateFilter(ApplyForm.portfolio))
 async def q_portfolio(m: Message, state: FSMContext):
     text = (m.text or "").strip()
-    portfolio = text if _looks_like_url(text) else None  # пусто/не-URL → считаем отсутствующим
+    portfolio = text if _looks_like_url(text) else None  # не-URL считаем «нет»
     await state.update_data(portfolio=portfolio)
     await _finish(m, state)
-
 
 # ==== ФИНИШ ====
 async def _finish(m: Message, state: FSMContext):
     data = await state.get_data()
     await state.clear()
 
-    # Сохраняем в БД
     await save_casting(
         tg_id=m.from_user.id,
         name=str(data.get("name", "")),
@@ -104,7 +115,6 @@ async def _finish(m: Message, state: FSMContext):
         agree_contact=True,
     )
 
-    # Уведомление админу
     summary = (
         "🎭 Новая заявка (кастинг / путь лидера)\n"
         f"Имя: {data.get('name')}\n"
@@ -117,11 +127,10 @@ async def _finish(m: Message, state: FSMContext):
     )
     await notify_admin(summary, m.bot)
 
-    await m.answer("✅ Заявка принята! Мы свяжемся в течение 1–2 дней.", reply_markup=main_menu())
-
+    await m.answer("✅ Заявка принята! Мы свяжемся в течение 1–2 дней.", reply_markup=main_menu_kb())
 
 # ==== ФОРС-ВЫХОД В МЕНЮ ====
-@router.message(Command("menu"))
+@router.message(StateFilter("*"), Command("menu"))
 async def force_menu(m: Message, state: FSMContext):
     await state.clear()
-    await m.answer("Меню", reply_markup=main_menu())
+    await m.answer("Готово! Открываю меню.", reply_markup=main_menu_kb())
