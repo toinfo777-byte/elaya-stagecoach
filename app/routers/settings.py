@@ -2,49 +2,41 @@
 from __future__ import annotations
 
 from aiogram import Router, F
-from aiogram.types import Message, ReplyKeyboardMarkup, KeyboardButton
+from aiogram.filters import Command, StateFilter
 from aiogram.fsm.context import FSMContext
+from aiogram.types import Message
 
-from app.keyboards.menu import main_menu
-from app.storage.repo import delete_user  # функция очистки профиля по tg_id
+from app.keyboards.reply import settings_kb, main_menu_kb, BTN_SETTINGS
+from app.storage.repo import delete_user  # должна быть async-функция удаления по tg_id
 
 router = Router(name="settings")
 
 
-def settings_kb() -> ReplyKeyboardMarkup:
-    return ReplyKeyboardMarkup(
-        resize_keyboard=True,
-        keyboard=[
-            [KeyboardButton(text="🏠 В меню")],
-            [KeyboardButton(text="🗑 Удалить профиль")],
-        ],
-    )
-
-
-@router.message(F.text == "⚙️ Настройки")
-@router.message(F.text == "/settings")
-async def settings_entry(msg: Message, state: FSMContext):
-    await state.clear()
-    await msg.answer(
-        "⚙️ Настройки. Можешь удалить профиль или вернуться в меню.",
-        reply_markup=settings_kb()
-    )
-
-
-@router.message(F.text == "🗑 Удалить профиль")
-async def settings_delete(msg: Message, state: FSMContext):
-    await state.clear()
-    await delete_user(msg.from_user.id)
-    await msg.answer(
-        "🗑 Профиль удалён. Открываю меню.",
-        reply_markup=main_menu()
+@router.message(Command("settings"))
+@router.message(F.text == BTN_SETTINGS, StateFilter(None))
+async def open_settings(m: Message):
+    """Открываем экран настроек, только когда не в форме (StateFilter(None))."""
+    await m.answer(
+        "Настройки. Можешь удалить профиль или вернуться в меню.",
+        reply_markup=settings_kb(),
     )
 
 
 @router.message(F.text == "🏠 В меню")
-async def settings_to_menu(msg: Message, state: FSMContext):
+async def back_to_menu(m: Message, state: FSMContext):
+    """Всегда выходим в меню и сбрасываем состояние формы."""
     await state.clear()
-    await msg.answer(
-        "Готово! Открываю меню.",
-        reply_markup=main_menu()
-    )
+    await m.answer("Меню", reply_markup=main_menu_kb())
+
+
+@router.message(F.text == "🗑 Удалить профиль")
+async def delete_profile_handler(m: Message, state: FSMContext):
+    """Удаляем профиль (если есть), чистим состояние и возвращаемся в меню."""
+    await state.clear()
+    try:
+        await delete_user(m.from_user.id)
+        text = "Готово. Профиль удалён."
+    except Exception:
+        # Мягко обрабатываем непредвиденные проблемы, чтобы не «залипать»
+        text = "Не удалось удалить профиль. Попробуй позже."
+    await m.answer(text, reply_markup=main_menu_kb())
