@@ -1,95 +1,46 @@
 # app/storage/repo.py
 from __future__ import annotations
 
-import os
+import asyncio
 import logging
-from contextlib import contextmanager
-from typing import Iterator
+from contextlib import asynccontextmanager
 from datetime import date, timedelta
 from typing import Optional, Dict, List
 
-from sqlalchemy import create_engine, inspect, select
-from sqlalchemy.engine.url import make_url, URL
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.config import settings
-from app.storage.models import Base, async_session_maker, TrainingLog
+from app.storage.models import Base, engine, async_session_maker, TrainingLog  # важно: engine + async_session_maker
 
 log = logging.getLogger("db")
 
 
-def _resolve_db_url(raw: str) -> str:
-    """
-    Чиним SQLite путь:
-    - если каталог недоступен для записи — переносим файл в /tmp
-    - создаём каталог при необходимости
-    Для остальных диалектов возвращаем как есть.
-    """
-    url: URL = make_url(raw)
-    if url.get_backend_name() != "sqlite":
-        return raw
-
-    db_path = url.database or ""
-    if db_path in ("", ":memory:"):
-        return raw
-
-    abs_path = db_path if os.path.isabs(db_path) else os.path.abspath(db_path)
-    target_dir = os.path.dirname(abs_path) or "."
-
-    def _writable_dir(path: str) -> bool:
-        try:
-            os.makedirs(path, exist_ok=True)
-            testfile = os.path.join(path, ".write_test")
-            with open(testfile, "w") as f:
-                f.write("ok")
-            os.remove(testfile)
-            return True
-        except Exception:
-            return False
-
-    if not _writable_dir(target_dir):
-        log.warning("DB dir '%s' недоступна для записи. Переношу БД в /tmp", target_dir)
-        base = os.path.basename(abs_path) or "elaya.db"
-        abs_path = os.path.join("/tmp", base)
-        os.makedirs("/tmp", exist_ok=True)
-
-    fixed = url.set(database=abs_path)
-    return str(fixed)
-
-
-DB_URL = _resolve_db_url(settings.db_url)
-
-engine = create_engine(DB_URL, future=True)
-SessionLocal = sessionmaker(
-    bind=engine,
-    autoflush=False,
-    autocommit=False,
-    expire_on_commit=False,
-    future=True,
-)
-
-
-@contextmanager
-def session_scope() -> Iterator:
-    session = SessionLocal()
-    try:
-        yield session
-        session.commit()
-    except Exception:
-        session.rollback()
-        raise
-    finally:
-        session.close()
-
-
 def ensure_schema() -> None:
     """
-    Создаёт отсутствующие таблицы. Идемпотентно.
+    Создаёт таблицы (если их нет). Вызывается из main.py перед стартом polling.
+    Работает поверх async-движка, но удобен для синхронного вызова.
     """
-    insp = inspect(engine)
-    if not insp.has_table("users"):
-        Base.metadata.create_all(bind=engine)
-    log.info("✅ БД инициализирована (%s)", DB_URL)
+    async def _run():
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        log.info("✅ БД инициализирована")
+
+    # Запускаем вне существующего цикла/внутри — безопасно
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        asyncio.run(_run())
+    else:
+        loop.create_task(_run())
+
+
+@asynccontextmanager
+async def get_session() -> AsyncSession:
+    """
+    Унифицированный способ получить AsyncSession.
+    """
+    async with async_session_maker() as session:
+        yield session
 
 
 # === Async repo API (для FSM-сценариев MVP) ==================================
