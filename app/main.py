@@ -12,19 +12,19 @@ from aiogram.types import BotCommand
 from app.config import settings
 from app.storage.repo import ensure_schema
 
-# 👇 ЯВНЫЕ ИМПОРТЫ РОУТЕРОВ (именно подмодули)
-from app.routers.reply_shortcuts import router as reply_shortcuts_router
-from app.routers.deeplink import router as deeplink_router
-
-from app.routers.training import router as training_router
-from app.routers.casting import router as casting_router
-from app.routers.progress import router as progress_router
-from app.routers.apply import router as apply_router
-from app.routers.privacy import router as privacy_router
-from app.routers.extended import router as extended_router
-from app.routers.help import router as help_router
-from app.routers.settings import router as settings_router
-from app.routers.cancel import router as cancel_router
+# ⬇️ ЯВНЫЕ ИМПОРТЫ РОУТЕРОВ (как просили)
+from app.routers import (
+    start as r_start,
+    common as r_common_guard,
+    help as r_help,
+    extended as r_extended,
+    settings as r_settings,
+    casting as r_casting,
+    apply as r_apply,
+    training as r_training,
+    progress as r_progress,
+    privacy as r_privacy,
+)
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("main")
@@ -59,22 +59,21 @@ async def main() -> None:
     dp = Dispatcher()
 
     # 3) ПОДКЛЮЧЕНИЕ РОУТЕРОВ (порядок ВАЖЕН!)
-    # --- ГЛОБАЛЬНЫЕ ШОРТКАТЫ (первыми, чтобы ловить из любого state) ---
-    dp.include_router(reply_shortcuts_router)
+    # старт и диплинки
+    dp.include_router(r_start.router)
 
-    # --- ДИПЛИНКИ (/start с payload) ---
-    dp.include_router(deeplink_router)
+    # guard — раньше всех командных роутеров
+    dp.include_router(r_common_guard.router)
 
-    # --- ОСНОВНЫЕ СЦЕНАРИИ ---
-    dp.include_router(training_router)
-    dp.include_router(casting_router)
-    dp.include_router(progress_router)
-    dp.include_router(apply_router)
-    dp.include_router(privacy_router)
-    dp.include_router(extended_router)
-    dp.include_router(help_router)
-    dp.include_router(settings_router)
-    dp.include_router(cancel_router)
+    # основные разделы/сценарии
+    dp.include_router(r_training.router)
+    dp.include_router(r_progress.router)
+    dp.include_router(r_casting.router)
+    dp.include_router(r_apply.router)
+    dp.include_router(r_privacy.router)
+    dp.include_router(r_help.router)
+    dp.include_router(r_extended.router)
+    dp.include_router(r_settings.router)
 
     # 4) команды
     await _set_commands(bot)
