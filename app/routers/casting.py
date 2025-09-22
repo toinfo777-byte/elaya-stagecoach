@@ -8,7 +8,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import Message, CallbackQuery
 
 from app.keyboards.reply import main_menu_kb, BTN_CASTING, BTN_APPLY
-from app.keyboards.inline import casting_skip_kb  # callback_data: "casting:skip_portfolio"
+from app.keyboards.inline import casting_skip_kb  # callback_data: "cast:skip_url"
 from app.utils.admin import notify_admin
 from app.storage.repo import save_casting
 
@@ -33,8 +33,7 @@ except Exception:
         await state.set_state(ApplyForm.name)
         await m.answer("Как тебя зовут?")
 
-def _looks_like_url(text: str) -> bool:
-    return bool(re.match(r"^https?://", (text or "").strip(), re.I))
+HTTP_RE = re.compile(r"^https?://", re.I)
 
 # ==== СТАРТ ====
 @router.message(StateFilter("*"), Command("casting"))
@@ -81,23 +80,30 @@ async def q_contact(m: Message, state: FSMContext):
     await m.answer("Ссылка на портфолио (если есть)", reply_markup=casting_skip_kb())
 
 # ==== ПОРТФОЛИО (опционально) ====
-@router.callback_query(StateFilter(ApplyForm.portfolio), F.data == "casting:skip_portfolio")
-async def skip_portfolio(c: CallbackQuery, state: FSMContext):
+# Кнопка «Пропустить»
+@router.callback_query(StateFilter(ApplyForm.portfolio), F.data == "cast:skip_url")
+async def skip_portfolio(cb: CallbackQuery, state: FSMContext):
     await state.update_data(portfolio=None)
-    await _finish(c.message, state)
-    await c.answer()
+    await _finish(cb.message, state)
+    await cb.answer()
 
+# Текстовые «пропустить/нет/пусто»
 @router.message(StateFilter(ApplyForm.portfolio), F.text.casefold().in_({"пропустить", "нет", "пусто"}))
 async def portfolio_skip_text(m: Message, state: FSMContext):
     await state.update_data(portfolio=None)
     await _finish(m, state)
 
-@router.message(StateFilter(ApplyForm.portfolio))
+# Текст на шаге портфолио — пропускаем слэш-команды «наверх» и принимаем только URL
+@router.message(StateFilter(ApplyForm.portfolio), F.text)
 async def q_portfolio(m: Message, state: FSMContext):
     text = (m.text or "").strip()
-    portfolio = text if _looks_like_url(text) else None  # не-URL считаем «нет»
-    await state.update_data(portfolio=portfolio)
-    await _finish(m, state)
+    if text.startswith("/"):
+        return  # ДАЙ ПРОЙТИ глобальным хендлерам (меню/помощь/политика и т.д.)
+    if HTTP_RE.match(text):
+        await state.update_data(portfolio=text)
+        await _finish(m, state)
+    else:
+        await m.answer("Нужна ссылка (http/https) или нажми «Пропустить».")
 
 # ==== ФИНИШ ====
 async def _finish(m: Message, state: FSMContext):
