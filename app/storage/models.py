@@ -2,184 +2,77 @@
 from __future__ import annotations
 
 from datetime import datetime, date
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
-from sqlalchemy import String, Integer, DateTime, Date, ForeignKey, JSON, Boolean
+from typing import Optional
 
-# === Базовый класс ===
-class Base(DeclarativeBase):
-    ...
+from sqlalchemy.orm import declarative_base, Mapped, mapped_column, synonym
+from sqlalchemy import String, Integer, Boolean, Date, DateTime, BigInteger
+from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine, AsyncSession
+from sqlalchemy.orm import sessionmaker
 
+# ---- Base ----
+Base = declarative_base()
 
-# --- Пользователь ---
-class User(Base):
-    __tablename__ = "users"
+# ---- ENGINE & SESSIONMAKER (экспортируются) ----
+# По умолчанию SQLite; через ENV можно пробросить Postgres, например:
+#   DB_URL=postgresql+asyncpg://user:pass@host:5432/dbname
+import os
+DB_URL = os.getenv("DB_URL", "sqlite+aiosqlite:////data/db.sqlite")
 
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    tg_id: Mapped[int] = mapped_column(Integer, unique=True, index=True)
-    username: Mapped[str | None] = mapped_column(String(255))
-    name: Mapped[str | None] = mapped_column(String(255))
-    tz: Mapped[str | None] = mapped_column(String(64))
-    goal: Mapped[str | None] = mapped_column(String(255))
-    exp_level: Mapped[int | None] = mapped_column(Integer)
-    streak: Mapped[int] = mapped_column(Integer, default=0)
-    last_seen: Mapped[datetime | None] = mapped_column(DateTime)
-    consent_at: Mapped[datetime | None] = mapped_column(DateTime)
+engine: AsyncEngine = create_async_engine(DB_URL, echo=False, future=True)
+async_session_maker = sessionmaker(
+    engine, expire_on_commit=False, class_=AsyncSession
+)
 
-    # источник deeplink
-    source: Mapped[str | None] = mapped_column(String(64), nullable=True)
+# ---- МОДЕЛИ ----
 
-    # связи
-    drill_runs: Mapped[list["DrillRun"]] = relationship(back_populates="user", cascade="all, delete-orphan")
-    leads: Mapped[list["Lead"]] = relationship(back_populates="user", cascade="all, delete-orphan")
-    events: Mapped[list["Event"]] = relationship(back_populates="user", cascade="all, delete-orphan")
-    test_results: Mapped[list["TestResult"]] = relationship(back_populates="user", cascade="all, delete-orphan")
-    feedbacks: Mapped[list["Feedback"]] = relationship(back_populates="user", cascade="all, delete-orphan")
-    training_logs: Mapped[list["TrainingLog"]] = relationship(back_populates="user", cascade="all, delete-orphan")
+class Profile(Base):
+    __tablename__ = "profiles"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    tg_id: Mapped[int] = mapped_column(BigInteger, unique=True, index=True)
+    username: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    name: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 
-# --- Журнал тренировок (MVP) ---
 class TrainingLog(Base):
     __tablename__ = "training_logs"
 
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
 
-    # храним колонку как "date", но в Python-атрибуте используем имя "day",
-    # чтобы не ломать существующий код (repo_* использует TrainingLog.day)
-    day: Mapped[date] = mapped_column("date", Date, index=True)
-
-    level: Mapped[str] = mapped_column(String(32))             # 'beginner' | 'medium' | 'pro'
-    done: Mapped[bool] = mapped_column(Boolean, default=False) # выполнено?
+    # базовый контракт
+    tg_id: Mapped[int] = mapped_column(BigInteger, index=True)
+    date: Mapped[date] = mapped_column(Date, index=True)
+    level: Mapped[str] = mapped_column(String(16))   # 'beginner' | 'medium' | 'pro'
+    done: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
-    # связь
-    user: Mapped["User"] = relationship(back_populates="training_logs")
+    # ✅ совместимость со старым кодом:
+    #   - repo.py использует user_id и day
+    user_id = synonym("tg_id")
+    day = synonym("date")
 
 
-# --- Этюд и прохождения ---
-class Drill(Base):
-    __tablename__ = "drills"
+class CastingForm(Base):
+    __tablename__ = "casting_forms"
 
-    id: Mapped[str] = mapped_column(String(64), primary_key=True)
-    payload_json: Mapped[dict] = mapped_column(JSON, default=dict)
-
-
-class DrillRun(Base):
-    __tablename__ = "drill_runs"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
-    drill_id: Mapped[str] = mapped_column(ForeignKey("drills.id", ondelete="CASCADE"))
-    ts: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    result_json: Mapped[dict] = mapped_column(JSON, default=dict)
-    success_bool: Mapped[bool] = mapped_column(Boolean, default=False)
-
-    user: Mapped["User"] = relationship(back_populates="drill_runs")
-    drill: Mapped["Drill"] = relationship()
-
-
-# --- Мини-кастинг ---
-class Test(Base):
-    __tablename__ = "tests"
-
-    id: Mapped[str] = mapped_column(String(64), primary_key=True)
-    payload_json: Mapped[dict] = mapped_column(JSON, default=dict)
-
-
-class TestResult(Base):
-    __tablename__ = "test_results"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
-    ts: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    axes_json: Mapped[dict] = mapped_column(JSON, default=dict)
-    score_total: Mapped[int] = mapped_column(Integer, default=0)
-
-    user: Mapped["User"] = relationship(back_populates="test_results")
-
-
-# --- События ---
-class Event(Base):
-    __tablename__ = "events"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
-    kind: Mapped[str] = mapped_column(String(64))
-    payload_json: Mapped[dict] = mapped_column(JSON, default=dict)
-    ts: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-
-    user: Mapped["User"] = relationship(back_populates="events")
-
-
-# --- Лиды ---
-class Lead(Base):
-    __tablename__ = "leads"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
-    channel: Mapped[str] = mapped_column(String(32))          # источник: tg/insta/site/...
-    contact: Mapped[str] = mapped_column(String(255))         # @username, телефон, e-mail
-    note: Mapped[str | None] = mapped_column(String(500), default=None)
-    track: Mapped[str | None] = mapped_column(String(32), default=None)
-    ts: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-
-    user: Mapped["User"] = relationship(back_populates="leads")
-
-
-# --- Обратная связь ---
-class Feedback(Base):
-    __tablename__ = "feedbacks"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
-
-    first_source: Mapped[str | None] = mapped_column(String(64), default=None)
-    context: Mapped[str] = mapped_column(String(32))                          # "training" | "casting" | "manual"
-    context_id: Mapped[str | None] = mapped_column(String(64), default=None)  # id этюда/теста
-    score: Mapped[int | None] = mapped_column(Integer, default=None)
-    text: Mapped[str | None] = mapped_column(String(2000), default=None)
-    voice_file_id: Mapped[str | None] = mapped_column(String(256), default=None)
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    tg_id: Mapped[int] = mapped_column(BigInteger, index=True)
+    name: Mapped[str] = mapped_column(String(128))
+    age: Mapped[int] = mapped_column(Integer)
+    city: Mapped[str] = mapped_column(String(64))
+    experience: Mapped[str] = mapped_column(String(32))
+    contact: Mapped[str] = mapped_column(String(128))
+    portfolio: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
+    agree_contact: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
-    user: Mapped["User"] = relationship(back_populates="feedbacks")
-
-
-# --- Заявки на Расширенную версию ---
-class PremiumRequest(Base):
-    __tablename__ = "premium_requests"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
-    tg_username: Mapped[str | None] = mapped_column(String(255), default=None)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    status: Mapped[str] = mapped_column(String(32), default="new")  # new | in_review | done | rejected
-    meta: Mapped[dict] = mapped_column(JSON, default=dict)
-
-
-# --- Асинхронный движок и фабрика сессий ---
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
-from sqlalchemy.engine.url import make_url
-from app.config import settings
-
-def _make_async_dsn(dsn: str) -> str:
-    url = make_url(dsn)
-    drv = url.drivername
-    if "+" not in drv:
-        if drv in ("sqlite",):
-            drv = "sqlite+aiosqlite"
-        elif drv in ("postgresql", "postgres"):
-            drv = "postgresql+asyncpg"
-    return str(url.set(drivername=drv))
-
-ASYNC_DB_URL = _make_async_dsn(settings.db_url)
-engine = create_async_engine(ASYNC_DB_URL, pool_pre_ping=True, future=True)
-async_session_maker = async_sessionmaker(bind=engine, class_=AsyncSession, expire_on_commit=False)
 
 __all__ = [
     "Base",
     "engine",
     "async_session_maker",
-    "User", "TrainingLog",
-    "Drill", "DrillRun", "Test", "TestResult",
-    "Event", "Lead", "Feedback", "PremiumRequest",
+    "Profile",
+    "TrainingLog",
+    "CastingForm",
 ]
