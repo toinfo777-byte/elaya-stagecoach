@@ -20,12 +20,10 @@ EXTENDED_PITCH = (
 
 ADMIN_IDS = [int(x) for x in os.getenv("ADMIN_CHAT_IDS", "").split(",") if x.strip()]
 
-
-@router.message(Command("extended"), StateFilter(None))
-@router.message(F.text == BTN_EXTENDED, StateFilter(None))
+@router.message(StateFilter("*"), Command("extended"))
+@router.message(StateFilter("*"), F.text == BTN_EXTENDED)
 async def extended_pitch(m: Message):
-    await m.answer(EXTENDED_PITCH)
-
+    await m.answer(EXTENDED_PITCH, reply_markup=main_menu_kb())
 
 @router.message(F.text.regexp("(?i)^хочу расширенную"))
 async def extended_request(m: Message):
