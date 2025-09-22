@@ -2,12 +2,9 @@
 from aiogram import Router, F
 from aiogram.filters import Command, StateFilter
 from aiogram.types import Message
+from aiogram.fsm.context import FSMContext
 
-try:
-    from app.keyboards.menu import main_menu, BTN_PRIVACY
-except Exception:
-    from app.keyboards.menu import main_menu  # type: ignore
-    BTN_PRIVACY = "🔐 Политика"
+from app.keyboards.reply import main_menu_kb, BTN_POLICY
 
 router = Router(name="privacy")
 
@@ -17,7 +14,10 @@ PRIVACY_TEXT = (
     "Подробнее: https://example.com/privacy"
 )
 
-@router.message(Command("privacy"), StateFilter(None))
-@router.message(F.text == BTN_PRIVACY, StateFilter(None))
-async def show_privacy(msg: Message):
-    await msg.answer(PRIVACY_TEXT, reply_markup=main_menu())
+# Глобально: работает из ЛЮБОГО состояния и выводит в меню
+@router.message(StateFilter("*"), Command("privacy"))
+@router.message(StateFilter("*"), F.text == BTN_POLICY)
+async def show_privacy(msg: Message, state: FSMContext):
+    await state.clear()
+    await msg.answer(PRIVACY_TEXT)
+    await msg.answer("Готово! Открываю меню.", reply_markup=main_menu_kb())
