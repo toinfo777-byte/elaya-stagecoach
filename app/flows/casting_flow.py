@@ -5,8 +5,9 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import StatesGroup, State
 from aiogram.types import Message
 
+
 class ApplyForm(StatesGroup):
-    """Единая FSM для мини-кастинга / пути лидера."""
+    """Единая FSM для мини-кастинга и «Пути лидера»."""
     name = State()
     age = State()
     city = State()
@@ -14,10 +15,11 @@ class ApplyForm(StatesGroup):
     contact = State()
     portfolio = State()
 
+
 async def start_casting_flow(message: Message, state: FSMContext) -> None:
     """
     Общая точка входа в анкету.
-    Сбрасывает состояние и задаёт первый вопрос.
+    Сбрасывает состояние, ставит первый шаг и задаёт вопрос.
     """
     await state.clear()
     await state.set_state(ApplyForm.name)
