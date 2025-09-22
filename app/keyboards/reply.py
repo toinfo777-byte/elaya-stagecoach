@@ -1,21 +1,19 @@
 # app/keyboards/reply.py
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
 
-# === ТЕКУЩИЕ КОНСТАНТЫ КНОПОК (ваша версия) =======================
 BTN_TRAINING = "🏋️ Тренировка дня"
 BTN_PROGRESS = "📈 Мой прогресс"
 BTN_CASTING  = "🎭 Мини-кастинг"
 BTN_APPLY    = "🧭 Путь лидера"
 BTN_HELP     = "💬 Помощь"
-BTN_POLICY   = "🔐 Политика"              # текущее имя
+BTN_POLICY   = "🔐 Политика"
 BTN_SETTINGS = "⚙️ Настройки"
 BTN_EXTENDED = "⭐ Расширенная версия"
 
 BTN_MENU   = "🏠 В меню"
 BTN_DELETE = "🗑 Удалить профиль"
 
-
-def main_menu() -> ReplyKeyboardMarkup:
+def main_menu_kb() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
         keyboard=[
             [KeyboardButton(text=BTN_TRAINING), KeyboardButton(text=BTN_PROGRESS)],
@@ -26,8 +24,10 @@ def main_menu() -> ReplyKeyboardMarkup:
         resize_keyboard=True
     )
 
+# для совместимости с твоими импортами из разных мест:
+main_menu = main_menu_kb
 
-def settings_menu() -> ReplyKeyboardMarkup:
+def settings_kb() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
         keyboard=[
             [KeyboardButton(text=BTN_MENU)],
@@ -36,20 +36,14 @@ def settings_menu() -> ReplyKeyboardMarkup:
         resize_keyboard=True
     )
 
-
-# === ОБРАТНАЯ СОВМЕСТИМОСТЬ (алиасы под старый публичный API) ====
-# Роутеры ждут main_menu_kb(), settings_kb() и BTN_PRIVACY.
-main_menu_kb = main_menu
-settings_kb  = settings_menu
+settings_menu = settings_kb
 BTN_PRIVACY  = BTN_POLICY
 
 __all__ = [
-    # новые имена
+    "main_menu_kb", "settings_kb",
     "main_menu", "settings_menu",
     "BTN_TRAINING", "BTN_PROGRESS", "BTN_CASTING", "BTN_APPLY",
     "BTN_HELP", "BTN_POLICY", "BTN_SETTINGS", "BTN_EXTENDED",
     "BTN_MENU", "BTN_DELETE",
-
-    # алиасы для совместимости
-    "main_menu_kb", "settings_kb", "BTN_PRIVACY",
+    "BTN_PRIVACY",
 ]
