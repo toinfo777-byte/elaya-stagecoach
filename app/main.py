@@ -1,3 +1,4 @@
+# app/main.py
 from __future__ import annotations
 
 import asyncio
@@ -19,6 +20,7 @@ from app.routers.casting import router as casting_router
 from app.routers.progress import router as progress_router
 from app.routers.apply import router as apply_router
 from app.routers.privacy import router as privacy_router
+from app.routers.extended import router as extended_router
 from app.routers.help import router as help_router
 from app.routers.settings import router as settings_router
 from app.routers.cancel import router as cancel_router
@@ -37,6 +39,7 @@ async def _set_commands(bot: Bot) -> None:
         BotCommand(command="progress", description="Мой прогресс"),
         BotCommand(command="apply", description="Путь лидера"),
         BotCommand(command="privacy", description="Политика"),
+        BotCommand(command="extended", description="Расширенная версия"),
         BotCommand(command="help", description="Помощь"),
         BotCommand(command="settings", description="Настройки"),
         BotCommand(command="cancel", description="Сбросить форму"),
@@ -64,6 +67,7 @@ async def main() -> None:
     dp.include_router(progress_router)
     dp.include_router(apply_router)
     dp.include_router(privacy_router)
+    dp.include_router(extended_router)         # ⭐ расширенная версия
     dp.include_router(help_router)
     dp.include_router(settings_router)
     dp.include_router(cancel_router)
