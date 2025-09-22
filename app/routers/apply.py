@@ -6,19 +6,14 @@ from aiogram.filters import Command
 from aiogram.types import Message
 from aiogram.fsm.context import FSMContext
 
-from app.keyboards.menu import main_menu, BTN_LEADER
+from app.keyboards.menu import BTN_APPLY
+from app.routers.casting import start_casting_flow  # переиспользуем сценарий кастинга
 
 router = Router(name="apply")
 
 
-@router.message(F.text == BTN_LEADER)
+@router.message(F.text == BTN_APPLY)
 @router.message(Command("apply"))
-async def apply_entry(m: Message) -> None:
-    await m.answer("Путь лидера — заявка. (Здесь будет форма/инструкция)", reply_markup=main_menu())
-
-
-# ── Сверхприоритетный выход в меню ────────────────────────────────
-@router.message(F.text.in_({"Меню", "/menu"}))
-async def leave_to_menu(m: Message, state: FSMContext):
-    await state.clear()
-    await m.answer("Готово! Открываю меню.", reply_markup=main_menu())
+async def apply_alias(message: Message, state: FSMContext) -> None:
+    """До выделенного сценария — просто отправляем в мини-кастинг."""
+    await start_casting_flow(message, state)
