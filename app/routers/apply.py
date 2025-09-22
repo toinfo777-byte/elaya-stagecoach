@@ -10,7 +10,7 @@ from app.keyboards.menu import BTN_APPLY
 
 router = Router(name="apply")
 
-# Мягкий импорт общего сценария кастинга
+# Мягкий импорт общего сценария кастинга (без циклических импортов)
 try:
     from app.flows.casting_flow import start_casting_flow
 except Exception:
@@ -20,8 +20,8 @@ except Exception:
 @router.message(Command("apply"), StateFilter(None))
 @router.message(F.text == BTN_APPLY, StateFilter(None))
 async def apply_entry(message: Message, state: FSMContext) -> None:
-    """Алиас: «Путь лидера» ведёт в мини-кастинг. 
-    Если flow недоступен — используем фоллбек."""
+    """Алиас: «Путь лидера» ведёт в мини-кастинг.
+    Если flow недоступен — мягкий фоллбек."""
     if start_casting_flow:
         return await start_casting_flow(message, state)
     await message.answer("Заявка временно недоступна. Попробуй позже 🙏")
