@@ -5,31 +5,34 @@ import os
 from datetime import datetime, date
 from typing import Optional
 
-from sqlalchemy.orm import declarative_base, Mapped, mapped_column, synonym
 from sqlalchemy import String, Integer, Boolean, Date, DateTime, BigInteger
-from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine, AsyncSession
-from sqlalchemy.orm import sessionmaker
 from sqlalchemy.engine import make_url  # нормализация URL
+from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine, AsyncSession
+from sqlalchemy.orm import declarative_base, Mapped, mapped_column, sessionmaker, synonym
 
-# ⛑ гарантируем, что каталог /data существует (для SQLite на Render и др.)
-os.makedirs("/data", exist_ok=True)
+# ---- Render / файловое хранилище ----
+# Для Render каталог /data доступен для записи между рестартами контейнера.
+# Если DB_URL не задан, соберём его из DB_PATH (default: /data/bot.db).
+DEFAULT_DB_PATH = "/data/bot.db"
+DB_PATH = os.getenv("DB_PATH", DEFAULT_DB_PATH)
 
-# ---- Base ----
-Base = declarative_base()
+# Гарантируем, что каталог существует (иначе SQLite упадёт "unable to open database file")
+try:
+    os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
+except Exception:
+    pass
 
-# ---- ENGINE & SESSIONMAKER (экспортируются) ----
-# По умолчанию пишем на постоянный диск /data; можно переопределить через ENV: DB_URL=...
-RAW_DB_URL = os.getenv("DB_URL", "sqlite+aiosqlite:////data/db.sqlite")
+# Если указан DB_URL — используем его. Иначе строим из DB_PATH.
+RAW_DB_URL = os.getenv("DB_URL") or f"sqlite+aiosqlite:///{DB_PATH}"
 
 def _to_async_url(url: str) -> str:
-    """Нормализуем строку подключения: добавляем async-драйверы."""
+    """Нормализуем строку подключения: усиливаем sync-драйверы на async-аналоги."""
     u = make_url(url)
-    backend = u.get_backend_name()  # 'sqlite' | 'postgresql' | ...
+    backend = u.get_backend_name()  # 'sqlite' | 'postgresql' | 'mysql' | ...
     driver = (u.drivername or "")
     # Уже async?
     if any(x in driver for x in ("+aiosqlite", "+asyncpg", "+aiomysql")):
         return str(u)
-
     if backend == "sqlite":
         return str(u.set(drivername="sqlite+aiosqlite"))
     if backend in ("postgresql", "postgres"):
@@ -40,7 +43,8 @@ def _to_async_url(url: str) -> str:
 
 DB_URL = _to_async_url(RAW_DB_URL)
 
-# ⛑ Автосоздание каталога для SQLite, чтобы не падать с "unable to open database file"
+# На всякий случай — если это sqlite://, создадим директорию файла ещё раз,
+# разобрав URL через make_url (важно для случаев с абсолютными путями).
 try:
     parsed = make_url(DB_URL)
     if parsed.get_backend_name() == "sqlite" and parsed.database:
@@ -48,8 +52,10 @@ try:
         if db_dir:
             os.makedirs(db_dir, exist_ok=True)
 except Exception:
-    # не мешаем загрузке даже если что-то пошло не так
     pass
+
+# ---- SQLAlchemy Base / Engine / Session ----
+Base = declarative_base()
 
 engine: AsyncEngine = create_async_engine(DB_URL, echo=False, future=True)
 async_session_maker = sessionmaker(
@@ -81,7 +87,6 @@ class TrainingLog(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
     # ✅ совместимость со старым кодом:
-    #   - repo.py использует user_id и day
     user_id = synonym("tg_id")
     day = synonym("date")
 
