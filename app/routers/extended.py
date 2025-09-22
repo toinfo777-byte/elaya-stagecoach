@@ -1,6 +1,10 @@
+# app/routers/extended.py
+from __future__ import annotations
+
 from aiogram import Router
 from aiogram.filters import Command
 from aiogram.types import Message
+
 from app.texts.strings import EXTENDED_TEXT
 from app.keyboards.menu import main_menu
 
