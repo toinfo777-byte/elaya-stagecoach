@@ -24,7 +24,7 @@ def main_menu_kb() -> ReplyKeyboardMarkup:
         resize_keyboard=True
     )
 
-# для совместимости с твоими импортами из разных мест:
+# для совместимости с импортами:
 main_menu = main_menu_kb
 
 def settings_kb() -> ReplyKeyboardMarkup:
