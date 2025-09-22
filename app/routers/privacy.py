@@ -1,9 +1,8 @@
 # app/routers/privacy.py
 from aiogram import Router, F
-from aiogram.filters import Command
+from aiogram.filters import Command, StateFilter
 from aiogram.types import Message
 
-# аккуратно тянем кнопки/меню; если константы переименованы — подставим дефолт
 try:
     from app.keyboards.menu import main_menu, BTN_PRIVACY
 except Exception:
@@ -18,7 +17,7 @@ PRIVACY_TEXT = (
     "Подробнее: https://example.com/privacy"
 )
 
-@router.message(Command("privacy"))
-@router.message(F.text == BTN_PRIVACY)  # нажали кнопку «Политика»
+@router.message(Command("privacy"), StateFilter(None))
+@router.message(F.text == BTN_PRIVACY, StateFilter(None))
 async def show_privacy(msg: Message):
     await msg.answer(PRIVACY_TEXT, reply_markup=main_menu())
