@@ -1,37 +1,40 @@
 # app/routers/extended.py
 from __future__ import annotations
 
+import os
 from aiogram import Router, F
-from aiogram.filters import Command
+from aiogram.filters import Command, StateFilter
 from aiogram.types import Message
 
-from app.keyboards.menu import main_menu, BTN_EXTENDED
-from app.utils.admin import notify_admin
+from app.keyboards.reply import main_menu_kb, BTN_EXTENDED
 
 router = Router(name="extended")
 
-EXT_TEXT = (
+EXTENDED_PITCH = (
     "⭐ Расширенная версия:\n"
-    "• Больше сценариев\n"
+    "• Больше сценариев тренировки\n"
     "• Персональные разборы\n"
     "• Расширенная метрика прогресса\n\n"
-    "Если интересно — напиши «Хочу расширенную»."
+    "Хочешь доступ? Напиши «Хочу расширенную»."
 )
 
+ADMIN_IDS = [int(x) for x in os.getenv("ADMIN_CHAT_IDS", "").split(",") if x.strip()]
 
-@router.message(Command("extended"))
-@router.message(F.text == BTN_EXTENDED)
-async def extended_info(msg: Message):
-    await msg.answer(EXT_TEXT)
+
+@router.message(Command("extended"), StateFilter(None))
+@router.message(F.text == BTN_EXTENDED, StateFilter(None))
+async def extended_pitch(m: Message):
+    await m.answer(EXTENDED_PITCH)
 
 
 @router.message(F.text.regexp("(?i)^хочу расширенную"))
-async def extended_interest(msg: Message):
-    await notify_admin(
-        msg.bot,
-        f"⭐ Заявка на расширенную: @{msg.from_user.username or msg.from_user.id}",
-    )
-    await msg.answer(
-        "Принято! Менеджер свяжется с тобой. Возвращаю меню.",
-        reply_markup=main_menu(),
-    )
+async def extended_request(m: Message):
+    for admin_id in ADMIN_IDS:
+        try:
+            await m.bot.send_message(
+                admin_id,
+                f"⭐ Запрос расширенной версии от @{m.from_user.username or m.from_user.id}",
+            )
+        except Exception:
+            pass
+    await m.answer("✅ Запрос принят. Мы свяжемся с тобой.", reply_markup=main_menu_kb())
