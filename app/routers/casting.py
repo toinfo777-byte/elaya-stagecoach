@@ -1,5 +1,7 @@
+# app/routers/casting.py
 from __future__ import annotations
 
+import os
 import json
 from typing import List, Dict, Any
 
@@ -9,11 +11,13 @@ from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.context import FSMContext
 from aiogram.types import Message, ReplyKeyboardMarkup, KeyboardButton
 
-from app.config import settings
 from app.keyboards.menu import main_menu, BTN_CASTING
-from app.storage.mvp_repo import save_casting_application
+from app.storage.repo import save_casting  # <-- сохраняем в новую БД-обвязку
 
 router = Router(name="casting")
+
+# ENV для алерта админу
+ADMIN_ALERT_CHAT_ID = int(os.getenv("ADMIN_ALERT_CHAT_ID", "0"))
 
 # Вопросы MVP (можно потом подменить на YAML)
 QUESTIONS: List[Dict[str, Any]] = [
@@ -35,25 +39,32 @@ class CastingSG(StatesGroup):
     q = State()
 
 
+# ==== Старт ====
 @router.message(F.text == BTN_CASTING)
 @router.message(Command("casting"))
 async def casting_entry(m: Message, state: FSMContext) -> None:
-    await state.clear()
-    await state.update_data(idx=0, answers={})
-    await ask_next(m, state)
+    await start_casting_flow(m, state)
 
 
 @router.message(Command("apply"))
 async def apply_entry(m: Message, state: FSMContext) -> None:
-    # По ТЗ: «Путь лидера» может дублировать кастинг — так и сделаем в MVP
-    await casting_entry(m, state)
+    # «Путь лидера» в MVP дублирует мини-кастинг
+    await start_casting_flow(m, state)
 
 
+async def start_casting_flow(message: Message, state: FSMContext):
+    """Публичная точка входа (используется диплинком)."""
+    await state.clear()
+    await state.update_data(idx=0, answers={})
+    await ask_next(message, state)
+
+
+# ==== Диалог ====
 async def ask_next(m: Message, state: FSMContext) -> None:
     data = await state.get_data()
     idx = int(data.get("idx", 0))
     if idx >= len(QUESTIONS):
-        await finish_form(m, state)
+        await finish_casting(m, state)
         return
 
     q = QUESTIONS[idx]
@@ -110,28 +121,38 @@ async def collect_answer(m: Message, state: FSMContext) -> None:
     await ask_next(m, state)
 
 
-async def finish_form(m: Message, state: FSMContext) -> None:
+# ==== Финиш ====
+async def finish_casting(message: Message, state: FSMContext):
     data = await state.get_data()
-    answers = data.get("answers", {})
+    answers = data.get("answers", {}) or {}
     await state.clear()
 
-    # Сохраним в БД
-    app_id = save_casting_application(m.from_user.id, json.dumps(answers, ensure_ascii=False))
+    # Сохраняем в БД
+    await save_casting(
+        tg_id=message.from_user.id,
+        name=str(answers.get("name", "")),
+        age=int(answers.get("age", 0) or 0),
+        city=str(answers.get("city", "")),
+        experience=str(answers.get("experience", "")),
+        contact=str(answers.get("contact", "")),
+        portfolio=(answers.get("portfolio") or None),
+        agree_contact=True,
+    )
 
-    # Уведомим админа (если настроен)
-    if settings.admin_alert_chat_id:
+    # Алерт админу (если настроен)
+    if ADMIN_ALERT_CHAT_ID:
         lines = [
-            "🎬 <b>Новая заявка (мини-кастинг)</b>",
-            f"• ID: {app_id}",
-            f"• Пользователь: @{m.from_user.username or '—'} (id {m.from_user.id})",
+            "🎬 Новая заявка:",
+            f"• Пользователь: @{message.from_user.username or '—'} (id {message.from_user.id})",
         ]
         for q in QUESTIONS:
             k, label = q["key"], q["label"]
             v = answers.get(k, "—")
             lines.append(f"• {label}: {v}")
-        await m.bot.send_message(settings.admin_alert_chat_id, "\n".join(lines))
+        await message.bot.send_message(ADMIN_ALERT_CHAT_ID, "\n".join(lines))
 
-    await m.answer(
-        "Заявка принята! Мы свяжемся в течение 1–2 дней. 🌟",
-        reply_markup=main_menu()
+    # Экран «заявка принята»
+    await message.answer(
+        "Заявка принята! Мы свяжемся в течение 1–2 дней.",
+        reply_markup=main_menu(),
     )
