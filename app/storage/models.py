@@ -11,12 +11,15 @@ from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine, AsyncSessio
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.engine import make_url  # нормализация URL
 
+# ⛑ гарантируем, что каталог /data существует (для SQLite на Render и др.)
+os.makedirs("/data", exist_ok=True)
+
 # ---- Base ----
 Base = declarative_base()
 
 # ---- ENGINE & SESSIONMAKER (экспортируются) ----
-# По умолчанию пишем во временный каталог (живёт до рестарта контейнера).
-RAW_DB_URL = os.getenv("DB_URL", "sqlite+aiosqlite:////tmp/bot.sqlite")
+# По умолчанию пишем на постоянный диск /data; можно переопределить через ENV: DB_URL=...
+RAW_DB_URL = os.getenv("DB_URL", "sqlite+aiosqlite:////data/db.sqlite")
 
 def _to_async_url(url: str) -> str:
     """Нормализуем строку подключения: добавляем async-драйверы."""
