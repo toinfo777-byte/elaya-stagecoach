@@ -12,7 +12,7 @@ from app.storage.repo import delete_user  # должна быть async-функ
 router = Router(name="settings")
 
 
-@router.message(Command("settings"))
+@router.message(Command("settings"), StateFilter(None))
 @router.message(F.text == BTN_SETTINGS, StateFilter(None))
 async def open_settings(m: Message):
     """Открываем экран настроек, только когда не в форме (StateFilter(None))."""
