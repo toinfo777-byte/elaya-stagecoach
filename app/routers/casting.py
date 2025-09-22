@@ -26,19 +26,23 @@ router = Router(name="casting")
 # ENV для алерта админу
 ADMIN_ALERT_CHAT_ID = int(os.getenv("ADMIN_ALERT_CHAT_ID", "0"))
 
-# Вопросы MVP (можно потом подменить на YAML)
+# Вопросы MVP
 QUESTIONS: List[Dict[str, Any]] = [
     {"key": "name",       "label": "Как тебя зовут?",         "type": "text",   "required": True,  "hint": "Имя и фамилия"},
     {"key": "age",        "label": "Сколько тебе лет?",       "type": "number", "required": True,  "min": 10, "max": 99},
     {"key": "city",       "label": "Из какого ты города?",    "type": "text",   "required": True},
     {"key": "experience", "label": "Какой у тебя опыт?",      "type": "choice", "required": True,  "options": ["нет", "1–2 года", "3+ лет"]},
     {"key": "contact",    "label": "Контакт для связи",       "type": "text",   "required": True,  "hint": "@username / телефон / email"},
-    # ⬇️ делаем необязательным URL и добавляем кнопку "Пропустить"
     {"key": "portfolio",  "label": "Ссылка на портфолио (если есть)", "type": "url", "required": False},
 ]
 
 URL_RE = re.compile(r"^https?://", re.I)
 BTN_SKIP = "Пропустить"
+
+SUCCESS_TEXT = (
+    "Заявка принята! Мы свяжемся в течение 1–2 дней.\n"
+    "Спасибо, что уделил(а) время. Возвращайся к тренировкам!"
+)
 
 def kb_choices(options: List[str]) -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
@@ -106,7 +110,7 @@ async def collect_answer(m: Message, state: FSMContext) -> None:
 
     text = (m.text or "").strip()
 
-    # простая валидация
+    # Валидация
     if q["type"] == "number":
         if not text.isdigit():
             await m.reply("Введите число.")
@@ -118,16 +122,13 @@ async def collect_answer(m: Message, state: FSMContext) -> None:
         answers[q["key"]] = val
 
     elif q["type"] == "url":
-        # необязательный URL: принимаем пустое/«нет»/валидную ссылку, иначе предлагаем «Пропустить»
-        is_optional = not q.get("required", False)
-        if not text:
-            answers[q["key"]] = ""
-        elif text.lower() in {"нет", "пусто", "no"} and is_optional:
-            answers[q["key"]] = ""
+        if not text or text.lower() in {"нет", "пусто", "no", "-"}:
+            answers[q["key"]] = None
         elif URL_RE.match(text):
             answers[q["key"]] = text
         else:
-            await m.answer("Нужно прислать ссылку (http/https) или нажми «Пропустить».", reply_markup=optional_url_kb())
+            await m.answer("Нужно прислать ссылку (http/https) или нажми «Пропустить».",
+                           reply_markup=optional_url_kb())
             return
 
     elif q["type"] == "choice":
@@ -156,17 +157,16 @@ async def casting_skip_url(c: CallbackQuery, state: FSMContext):
     idx = int(data.get("idx", 0))
     if 0 <= idx < len(QUESTIONS) and QUESTIONS[idx]["key"] == "portfolio":
         answers = dict(data.get("answers", {}))
-        answers["portfolio"] = ""
-        # скрываем инлайн-кнопки под предыдущим сообщением (если возможно)
+        answers["portfolio"] = None
         try:
             await c.message.edit_reply_markup(reply_markup=None)
         except Exception:
             pass
-        # двигаемся дальше
         idx += 1
         await state.update_data(idx=idx, answers=answers)
         await ask_next(c.message, state)
     await c.answer()
+
 
 # ==== Финиш ====
 async def finish_casting(message: Message, state: FSMContext):
@@ -182,7 +182,7 @@ async def finish_casting(message: Message, state: FSMContext):
         city=str(answers.get("city", "")),
         experience=str(answers.get("experience", "")),
         contact=str(answers.get("contact", "")),
-        portfolio=(answers.get("portfolio") or None),
+        portfolio=answers.get("portfolio"),
         agree_contact=True,
     )
 
@@ -199,7 +199,4 @@ async def finish_casting(message: Message, state: FSMContext):
         await message.bot.send_message(ADMIN_ALERT_CHAT_ID, "\n".join(lines))
 
     # Экран «заявка принята»
-    await message.answer(
-        "Заявка принята! Мы свяжемся в течение 1–2 дней.",
-        reply_markup=main_menu(),
-    )
+    await message.answer(SUCCESS_TEXT, reply_markup=main_menu())
