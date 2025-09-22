@@ -1,156 +1,116 @@
 # app/storage/repo.py
 from __future__ import annotations
 
-import asyncio
-import logging
-from contextlib import asynccontextmanager
 from datetime import date, timedelta
-from typing import Optional, Dict, List
+from typing import Optional, Dict
 
-from sqlalchemy import select
+from sqlalchemy import select, func, desc
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.storage.models import Base, engine, async_session_maker, TrainingLog  # важно: engine + async_session_maker
+from app.storage.models import (
+    Base,
+    engine,
+    async_session_maker,
+    Profile,
+    TrainingLog,
+    CastingForm,
+)
 
-log = logging.getLogger("db")
+
+# ---------- INIT ----------
+async def ensure_schema() -> None:
+    """Создаём таблицы, если их нет."""
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
 
 
-def ensure_schema() -> None:
+# ---------- Profile ----------
+async def upsert_profile(tg_id: int, username: str | None, name: str | None) -> None:
+    async with async_session_maker() as session:  # type: AsyncSession
+        q = await session.execute(select(Profile).where(Profile.tg_id == tg_id))
+        p = q.scalar_one_or_none()
+        if p is None:
+            p = Profile(tg_id=tg_id, username=username, name=name)
+            session.add(p)
+        else:
+            p.username = username or p.username
+            p.name = name or p.name
+        await session.commit()
+
+
+# ---------- Training ----------
+async def log_training(tg_id: int, level: str, done: bool) -> None:
+    async with async_session_maker() as session:
+        session.add(
+            TrainingLog(
+                tg_id=tg_id,
+                date=date.today(),
+                level=level,
+                done=done,
+            )
+        )
+        await session.commit()
+
+
+async def calc_progress(tg_id: int) -> tuple[int, int]:
     """
-    Создаёт таблицы (если их нет). Вызывается из main.py перед стартом polling.
-    Работает поверх async-движка, но удобен для синхронного вызова.
-    """
-    async def _run():
-        async with engine.begin() as conn:
-            await conn.run_sync(Base.metadata.create_all)
-        log.info("✅ БД инициализирована")
-
-    # Запускаем вне существующего цикла/внутри — безопасно
-    try:
-        loop = asyncio.get_running_loop()
-    except RuntimeError:
-        asyncio.run(_run())
-    else:
-        loop.create_task(_run())
-
-
-@asynccontextmanager
-async def get_session() -> AsyncSession:
-    """
-    Унифицированный способ получить AsyncSession.
+    Возвращает (streak, last7).
+    streak — подряд дней с done==True до сегодня включительно.
+    last7 — количество done за последние 7 дней.
     """
     async with async_session_maker() as session:
-        yield session
-
-
-# === Async repo API (для FSM-сценариев MVP) ==================================
-
-async def repo_add_training_entry(user_id: int, day: date, level: str, done: bool):
-    """
-    Добавляет запись о тренировке пользователя.
-    """
-    async with async_session_maker() as s:
-        row = TrainingLog(user_id=user_id, day=day, level=level, done=done)
-        s.add(row)
-        await s.commit()
-
-
-async def repo_get_today_training(user_id: int, day: date) -> Optional[TrainingLog]:
-    """Запись тренировки за конкретный день (если есть)."""
-    async with async_session_maker() as s:
-        q = (
-            select(TrainingLog)
-            .where(TrainingLog.user_id == user_id, TrainingLog.day == day)
-            .order_by(TrainingLog.id.desc())
-            .limit(1)
-        )
-        res = await s.execute(q)
-        return res.scalar_one_or_none()
-
-
-async def repo_get_stats(user_id: int, since: Optional[date] = None) -> Dict[str, object]:
-    """Сводка по тренировкам: всего / выполнено / пропусков / % выполнения."""
-    today = date.today()
-    if since is None:
-        since = today - timedelta(days=29)
-
-    async with async_session_maker() as s:
-        q = (
-            select(TrainingLog)
+        # last7
+        since = date.today() - timedelta(days=6)
+        r7 = await session.execute(
+            select(func.count())
+            .select_from(TrainingLog)
             .where(
-                TrainingLog.user_id == user_id,
-                TrainingLog.day >= since,
-                TrainingLog.day <= today,
-            )
-            .order_by(TrainingLog.day.asc(), TrainingLog.id.asc())
-        )
-        res = await s.execute(q)
-        rows: List[TrainingLog] = list(res.scalars())
-
-    total = len(rows)
-    done = sum(1 for r in rows if r.done)
-    skipped = sum(1 for r in rows if not r.done)
-    rate = (done / total * 100.0) if total else 0.0
-
-    return {
-        "total": total,
-        "done": done,
-        "skipped": skipped,
-        "completion_rate": round(rate, 1),
-        "since": since,
-        "until": today,
-    }
-
-
-async def repo_get_streak(user_id: int) -> int:
-    """Текущая непрерывная полоса выполнений (done=True), считая от сегодня назад."""
-    today = date.today()
-    async with async_session_maker() as s:
-        q = (
-            select(TrainingLog)
-            .where(TrainingLog.user_id == user_id, TrainingLog.done.is_(True))
-            .order_by(TrainingLog.day.desc(), TrainingLog.id.desc())
-            .limit(120)
-        )
-        res = await s.execute(q)
-        rows: List[TrainingLog] = list(res.scalars())
-
-    done_days = {r.day for r in rows}
-    streak = 0
-    d = today
-    while d in done_days:
-        streak += 1
-        d -= timedelta(days=1)
-    return streak
-
-
-async def repo_get_calendar(user_id: int, start: date, end: date) -> Dict[date, str]:
-    """Календарь: 'done' | 'skip' | 'none' за период [start; end]."""
-    async with async_session_maker() as s:
-        q = (
-            select(TrainingLog)
-            .where(
-                TrainingLog.user_id == user_id,
-                TrainingLog.day >= start,
-                TrainingLog.day <= end,
+                TrainingLog.tg_id == tg_id,
+                TrainingLog.done.is_(True),
+                TrainingLog.date >= since,
             )
         )
-        res = await s.execute(q)
-        rows: List[TrainingLog] = list(res.scalars())
+        last7 = int(r7.scalar() or 0)
 
-    status: Dict[date, str] = {}
-    for r in rows:
-        prev = status.get(r.day)
-        if r.done:
-            status[r.day] = "done"
-        else:
-            if prev != "done":
-                status[r.day] = "skip"
+        # streak
+        r = await session.execute(
+            select(TrainingLog.date)
+            .where(TrainingLog.tg_id == tg_id, TrainingLog.done.is_(True))
+            .order_by(desc(TrainingLog.date))
+        )
+        days = [row[0] for row in r.all()]
+        cur = date.today()
+        streak = 0
+        sset = set(days)
+        while cur in sset:
+            streak += 1
+            cur = cur - timedelta(days=1)
 
-    d = start
-    one = timedelta(days=1)
-    while d <= end:
-        status.setdefault(d, "none")
-        d += one
+        return streak, last7
 
-    return status
+
+# ---------- Casting ----------
+async def save_casting(
+    tg_id: int,
+    name: str,
+    age: int,
+    city: str,
+    experience: str,
+    contact: str,
+    portfolio: str | None,
+    agree_contact: bool,
+) -> None:
+    async with async_session_maker() as session:
+        session.add(
+            CastingForm(
+                tg_id=tg_id,
+                name=name,
+                age=age,
+                city=city,
+                experience=experience,
+                contact=contact,
+                portfolio=portfolio,
+                agree_contact=agree_contact,
+            )
+        )
+        await session.commit()
