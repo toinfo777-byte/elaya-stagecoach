@@ -1,39 +1,50 @@
+# app/routers/settings.py
 from __future__ import annotations
 
 from aiogram import Router, F
+from aiogram.types import Message, ReplyKeyboardMarkup, KeyboardButton
 from aiogram.fsm.context import FSMContext
-from aiogram.types import Message
 
-from app.keyboards.menu import (
-    BTN_SETTINGS, BTN_DELETE, BTN_MENU,
-    settings_menu, main_menu,
-)
-from app.storage.repo import Repo, async_session_maker
+from app.keyboards.menu import main_menu
+from app.storage.repo import delete_user  # функция очистки профиля по tg_id
 
 router = Router(name="settings")
 
 
-@router.message(F.text == BTN_SETTINGS)
-async def open_settings(message: Message):
-    await message.answer(
-        "Настройки. Можешь удалить профиль или вернуться в меню.",
-        reply_markup=settings_menu()
+def settings_kb() -> ReplyKeyboardMarkup:
+    return ReplyKeyboardMarkup(
+        resize_keyboard=True,
+        keyboard=[
+            [KeyboardButton(text="🏠 В меню")],
+            [KeyboardButton(text="🗑 Удалить профиль")],
+        ],
     )
 
 
-@router.message(F.text == BTN_DELETE)
-async def delete_profile(message: Message, state: FSMContext):
+@router.message(F.text == "⚙️ Настройки")
+@router.message(F.text == "/settings")
+async def settings_entry(msg: Message, state: FSMContext):
     await state.clear()
-    async with async_session_maker() as session:
-        repo = Repo(session)
-        await repo.delete_user(message.from_user.id)
-    await message.answer(
-        "🗑 Профиль удалён. Можем начать заново — жми «Меню».",
+    await msg.answer(
+        "⚙️ Настройки. Можешь удалить профиль или вернуться в меню.",
+        reply_markup=settings_kb()
+    )
+
+
+@router.message(F.text == "🗑 Удалить профиль")
+async def settings_delete(msg: Message, state: FSMContext):
+    await state.clear()
+    await delete_user(msg.from_user.id)
+    await msg.answer(
+        "🗑 Профиль удалён. Открываю меню.",
         reply_markup=main_menu()
     )
 
 
-@router.message(F.text == BTN_MENU)
-async def back_to_menu_from_settings(message: Message, state: FSMContext):
+@router.message(F.text == "🏠 В меню")
+async def settings_to_menu(msg: Message, state: FSMContext):
     await state.clear()
-    await message.answer("Готово! Открываю меню.", reply_markup=main_menu())
+    await msg.answer(
+        "Готово! Открываю меню.",
+        reply_markup=main_menu()
+    )
