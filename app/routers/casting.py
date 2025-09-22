@@ -1,7 +1,6 @@
 # app/routers/casting.py
 from __future__ import annotations
 
-import os
 import re
 from typing import List, Dict, Any
 
@@ -19,12 +18,10 @@ from aiogram.types import (
 )
 
 from app.keyboards.menu import main_menu, BTN_CASTING
-from app.storage.repo import save_casting  # сохраняем в БД
+from app.storage.repo import save_casting
+from app.utils.admin import notify_admin  # 👈 используем helper
 
 router = Router(name="casting")
-
-# ENV для алерта админу
-ADMIN_ALERT_CHAT_ID = int(os.getenv("ADMIN_ALERT_CHAT_ID", "0"))
 
 # Вопросы MVP
 QUESTIONS: List[Dict[str, Any]] = [
@@ -40,9 +37,10 @@ URL_RE = re.compile(r"^https?://", re.I)
 BTN_SKIP = "Пропустить"
 
 SUCCESS_TEXT = (
-    "Заявка принята! Мы свяжемся в течение 1–2 дней.\n"
+    "✅ Заявка принята! Мы свяжемся в течение 1–2 дней.\n"
     "Спасибо, что уделил(а) время. Возвращайся к тренировкам!"
 )
+
 
 def kb_choices(options: List[str]) -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
@@ -50,10 +48,12 @@ def kb_choices(options: List[str]) -> ReplyKeyboardMarkup:
         resize_keyboard=True
     )
 
+
 def optional_url_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text=BTN_SKIP, callback_data="cast:skip_url")]
     ])
+
 
 class CastingSG(StatesGroup):
     q = State()
@@ -68,7 +68,7 @@ async def casting_entry(m: Message, state: FSMContext) -> None:
 
 @router.message(Command("apply"))
 async def apply_entry(m: Message, state: FSMContext) -> None:
-    # «Путь лидера» в MVP дублирует мини-кастинг
+    # «Путь лидера» = алиас на мини-кастинг
     await start_casting_flow(m, state)
 
 
@@ -93,7 +93,6 @@ async def ask_next(m: Message, state: FSMContext) -> None:
     if q["type"] == "choice":
         await m.answer(f"{q['label']}{hint}", reply_markup=kb_choices(q["options"]))
     elif q["type"] == "url" and not q.get("required", False):
-        # Для необязательного URL сразу показываем кнопку «Пропустить»
         await m.answer(f"{q['label']}{hint}", reply_markup=optional_url_kb())
     else:
         await m.answer(f"{q['label']}{hint}")
@@ -186,17 +185,16 @@ async def finish_casting(message: Message, state: FSMContext):
         agree_contact=True,
     )
 
-    # Алерт админу (если настроен)
-    if ADMIN_ALERT_CHAT_ID:
-        lines = [
-            "🎬 Новая заявка:",
-            f"• Пользователь: @{message.from_user.username or '—'} (id {message.from_user.id})",
-        ]
-        for q in QUESTIONS:
-            k, label = q["key"], q["label"]
-            v = answers.get(k, "—")
-            lines.append(f"• {label}: {v}")
-        await message.bot.send_message(ADMIN_ALERT_CHAT_ID, "\n".join(lines))
+    # Алерт админу (helper)
+    lines = [
+        "🎬 Новая заявка (мини-кастинг):",
+        f"• Пользователь: @{message.from_user.username or '—'} (id {message.from_user.id})",
+    ]
+    for q in QUESTIONS:
+        k, label = q["key"], q["label"]
+        v = answers.get(k, "—")
+        lines.append(f"• {label}: {v}")
+    await notify_admin(message.bot, "\n".join(lines))
 
     # Экран «заявка принята»
     await message.answer(SUCCESS_TEXT, reply_markup=main_menu())
