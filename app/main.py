@@ -1,4 +1,3 @@
-# app/main.py
 from __future__ import annotations
 
 import asyncio
@@ -12,7 +11,7 @@ from aiogram.types import BotCommand
 from app.config import settings
 from app.storage.repo import ensure_schema
 
-# ⬇️ ЯВНЫЕ ИМПОРТЫ РОУТЕРОВ (именно подмодули, а не пакет)
+# 👇 ЯВНЫЕ ИМПОРТЫ РОУТЕРОВ
 from app.routers.reply_shortcuts import router as reply_shortcuts_router
 from app.routers.deeplink import router as deeplink_router
 from app.routers.training import router as training_router
@@ -46,18 +45,18 @@ async def _set_commands(bot: Bot) -> None:
 
 
 async def main() -> None:
-    # 1) гарантируем схему БД (async)
+    # 1) гарантируем схему БД
     await ensure_schema()
 
-    # 2) инициализация бота (aiogram 3.7+)
+    # 2) инициализация бота
     bot = Bot(
         token=settings.bot_token,
         default=DefaultBotProperties(parse_mode=ParseMode.HTML),
     )
     dp = Dispatcher()
 
-    # 3) подключение роутеров в нужном порядке
-    dp.include_router(reply_shortcuts_router)  # быстрые выходы (🏠 меню/⚙️ настройки)
+    # 3) подключение роутеров (порядок важен!)
+    dp.include_router(reply_shortcuts_router)  # быстрые выходы (🏠 меню / ⚙️ настройки)
     dp.include_router(deeplink_router)         # /start + диплинки
 
     dp.include_router(training_router)
