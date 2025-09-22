@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import asyncio
-import importlib
 import logging
 
 from aiogram import Bot, Dispatcher
@@ -13,45 +12,21 @@ from aiogram.types import BotCommand
 from app.config import settings
 from app.storage.repo import ensure_schema
 
+# 👇 ЯВНЫЕ ИМПОРТЫ РОУТЕРОВ (порядок важен)
+from app.routers import reply_shortcuts as r_short
+from app.routers import deeplink as r_deeplink
+from app.routers import training as r_training
+from app.routers import casting as r_casting
+from app.routers import progress as r_progress
+from app.routers import apply as r_apply
+from app.routers import privacy as r_privacy
+from app.routers import help as r_help
+from app.routers import settings as r_settings
+from app.routers import cancel as r_cancel
+# при необходимости добавляй остальные ниже (admin/analytics/feedback/shortcuts и т.д.)
+
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("main")
-
-# Порядок подключения модулей-роутеров
-ROUTER_NAMES = [
-    "reply_shortcuts",   # быстрые выходы (🏠 В меню, ⚙️ Настройки)
-    "deeplink",          # диплинки (/start=go_training …)
-    "admin",
-    "analytics",
-    "cancel",
-    "onboarding",
-    "menu",
-    "training",
-    "casting",
-    "progress",
-    "apply",
-    "privacy",
-    "help",
-    "settings",
-    "feedback",
-    "shortcuts",
-]
-
-
-def _import_router(name: str):
-    """
-    Пытаемся импортировать модуль и достать из него объект `router`.
-    Поддерживаем 2 варианта путей: app.routers.<name> и app.<name>.
-    """
-    for modname in (f"app.routers.{name}", f"app.{name}"):
-        try:
-            mod = importlib.import_module(modname)
-        except Exception as e:
-            log.debug("Import miss %s: %s", modname, e)
-            continue
-        router = getattr(mod, "router", None)
-        if router is not None:
-            return router
-    return None
 
 
 async def _set_commands(bot: Bot) -> None:
@@ -71,8 +46,8 @@ async def _set_commands(bot: Bot) -> None:
 
 
 async def main() -> None:
-    # 1) гарантируем схему БД
-    await ensure_schema()   # теперь асинхронно
+    # 1) гарантируем схему БД (async)
+    await ensure_schema()
 
     # 2) инициализация бота (aiogram 3.7+)
     bot = Bot(
@@ -81,19 +56,20 @@ async def main() -> None:
     )
     dp = Dispatcher()
 
-    # 3) подключаем роутеры без дублей
-    seen_router_ids: set[int] = set()
-    for name in ROUTER_NAMES:
-        r = _import_router(name)
-        if r is None:
-            log.warning("Router '%s' NOT found — пропускаю", name)
-            continue
-        if id(r) in seen_router_ids:
-            log.info("Router '%s' уже подключён — пропускаю дубликат", name)
-            continue
-        dp.include_router(r)
-        seen_router_ids.add(id(r))
-        log.info("✅ Router '%s' подключён", name)
+    # 3) ПОДКЛЮЧЕНИЕ РОУТЕРОВ В НУЖНОМ ПОРЯДКЕ
+    # самые первые — перехваты «🏠 В меню»/«Настройки»
+    dp.include_router(r_short.router)
+    # /start + диплинки
+    dp.include_router(r_deeplink.router)
+    # основные сценарии
+    dp.include_router(r_training.router)
+    dp.include_router(r_casting.router)
+    dp.include_router(r_progress.router)
+    dp.include_router(r_apply.router)
+    dp.include_router(r_privacy.router)
+    dp.include_router(r_help.router)
+    dp.include_router(r_settings.router)
+    dp.include_router(r_cancel.router)
 
     # 4) команды
     await _set_commands(bot)
