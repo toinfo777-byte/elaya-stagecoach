@@ -1,6 +1,9 @@
+# app/storage/repo.py
 from __future__ import annotations
 
 from datetime import date, timedelta
+from typing import Iterable
+
 from sqlalchemy import select, func, desc, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -19,13 +22,35 @@ async def ensure_schema() -> None:
         await conn.run_sync(Base.metadata.create_all)
 
 
+# ---------- Универсальное удаление пользователя ----------
+async def delete_user(tg_id: int) -> int:
+    """
+    Удаляет все записи, связанные с пользователем tg_id,
+    во всех моделях, где есть колонка 'tg_id'.
+    Возвращает количество затронутых строк (сумма по всем таблицам).
+    """
+    total = 0
+    async with async_session_maker() as session:
+        async with session.begin():
+            for mapper in Base.registry.mappers:  # type: ignore[attr-defined]
+                model = mapper.class_
+                if hasattr(model, "tg_id"):
+                    stmt = delete(model).where(getattr(model, "tg_id") == tg_id)
+                    result = await session.execute(stmt)
+                    try:
+                        total += int(getattr(result, "rowcount", 0) or 0)
+                    except Exception:
+                        pass
+    return total
+
+
 # ---------- Repo-класс ----------
 class Repo:
     def __init__(self, session: AsyncSession):
         self.session = session
 
     async def delete_user(self, tg_id: int) -> None:
-        """Удалить пользователя и все его записи."""
+        """Удалить пользователя и все его записи (точечный вариант по известным таблицам)."""
         await self.session.execute(delete(Profile).where(Profile.tg_id == tg_id))
         await self.session.execute(delete(TrainingLog).where(TrainingLog.tg_id == tg_id))
         await self.session.execute(delete(CastingForm).where(CastingForm.tg_id == tg_id))
@@ -61,7 +86,6 @@ async def log_training(tg_id: int, level: str, done: bool) -> None:
 
 
 async def calc_progress(tg_id: int) -> tuple[int, int]:
-    from datetime import date, timedelta
     async with async_session_maker() as session:
         # last7
         since = date.today() - timedelta(days=6)
