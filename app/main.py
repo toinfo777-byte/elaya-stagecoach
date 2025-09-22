@@ -12,18 +12,18 @@ from aiogram.types import BotCommand
 from app.config import settings
 from app.storage.repo import ensure_schema
 
-# ⬇️ ЯВНЫЕ ИМПОРТЫ РОУТЕРОВ (как просили)
+# ⬇️ ЯВНЫЕ ИМПОРТЫ РОУТЕРОВ
 from app.routers import (
     start as r_start,
     common as r_common_guard,
     help as r_help,
-    extended as r_extended,
-    settings as r_settings,
-    casting as r_casting,
-    apply as r_apply,
-    training as r_training,
-    progress as r_progress,
     privacy as r_privacy,
+    progress as r_progress,
+    settings as r_settings,
+    extended as r_extended,
+    training as r_training,
+    casting as r_casting,
+    apply as r_apply,  # если используешь отдельный алиас
 )
 
 logging.basicConfig(level=logging.INFO)
@@ -48,7 +48,7 @@ async def _set_commands(bot: Bot) -> None:
 
 
 async def main() -> None:
-    # 1) гарантируем схему БД (async)
+    # 1) гарантируем схему БД
     await ensure_schema()
 
     # 2) инициализация бота
@@ -59,21 +59,23 @@ async def main() -> None:
     dp = Dispatcher()
 
     # 3) ПОДКЛЮЧЕНИЕ РОУТЕРОВ (порядок ВАЖЕН!)
-    # старт и диплинки
+    # старт/диплинки
     dp.include_router(r_start.router)
 
-    # guard — раньше всех командных роутеров
+    # guard — раньше всех
     dp.include_router(r_common_guard.router)
 
-    # основные разделы/сценарии
-    dp.include_router(r_training.router)
-    dp.include_router(r_progress.router)
-    dp.include_router(r_casting.router)
-    dp.include_router(r_apply.router)
-    dp.include_router(r_privacy.router)
+    # ГЛОБАЛЬНЫЕ КОМАНДЫ (должны работать поверх состояний)
     dp.include_router(r_help.router)
-    dp.include_router(r_extended.router)
+    dp.include_router(r_privacy.router)
+    dp.include_router(r_progress.router)
     dp.include_router(r_settings.router)
+    dp.include_router(r_extended.router)
+
+    # СЦЕНАРНЫЕ / FSM-маршруты
+    dp.include_router(r_training.router)
+    dp.include_router(r_casting.router)
+    dp.include_router(r_apply.router)  # при необходимости
 
     # 4) команды
     await _set_commands(bot)
