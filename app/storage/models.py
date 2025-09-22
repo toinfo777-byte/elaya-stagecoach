@@ -9,13 +9,14 @@ from sqlalchemy.orm import declarative_base, Mapped, mapped_column, synonym
 from sqlalchemy import String, Integer, Boolean, Date, DateTime, BigInteger
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine, AsyncSession
 from sqlalchemy.orm import sessionmaker
-from sqlalchemy.engine.url import make_url  # для нормализации URL
+from sqlalchemy.engine import make_url  # нормализация URL
 
 # ---- Base ----
 Base = declarative_base()
 
 # ---- ENGINE & SESSIONMAKER (экспортируются) ----
-RAW_DB_URL = os.getenv("DB_URL", "sqlite+aiosqlite:////data/db.sqlite")
+# По умолчанию пишем во временный каталог (живёт до рестарта контейнера).
+RAW_DB_URL = os.getenv("DB_URL", "sqlite+aiosqlite:////tmp/bot.sqlite")
 
 def _to_async_url(url: str) -> str:
     """Нормализуем строку подключения: добавляем async-драйверы."""
@@ -23,7 +24,7 @@ def _to_async_url(url: str) -> str:
     backend = u.get_backend_name()  # 'sqlite' | 'postgresql' | ...
     driver = (u.drivername or "")
     # Уже async?
-    if any(x in driver for x in ["+aiosqlite", "+asyncpg", "+aiomysql"]):
+    if any(x in driver for x in ("+aiosqlite", "+asyncpg", "+aiomysql")):
         return str(u)
 
     if backend == "sqlite":
@@ -35,6 +36,17 @@ def _to_async_url(url: str) -> str:
     return str(u)
 
 DB_URL = _to_async_url(RAW_DB_URL)
+
+# ⛑ Автосоздание каталога для SQLite, чтобы не падать с "unable to open database file"
+try:
+    parsed = make_url(DB_URL)
+    if parsed.get_backend_name() == "sqlite" and parsed.database:
+        db_dir = os.path.dirname(parsed.database)
+        if db_dir:
+            os.makedirs(db_dir, exist_ok=True)
+except Exception:
+    # не мешаем загрузке даже если что-то пошло не так
+    pass
 
 engine: AsyncEngine = create_async_engine(DB_URL, echo=False, future=True)
 async_session_maker = sessionmaker(
