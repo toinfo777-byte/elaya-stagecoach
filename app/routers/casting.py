@@ -2,17 +2,24 @@
 from __future__ import annotations
 
 import os
-import json
+import re
 from typing import List, Dict, Any
 
 from aiogram import Router, F
 from aiogram.filters import Command
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.context import FSMContext
-from aiogram.types import Message, ReplyKeyboardMarkup, KeyboardButton
+from aiogram.types import (
+    Message,
+    ReplyKeyboardMarkup,
+    KeyboardButton,
+    InlineKeyboardMarkup,
+    InlineKeyboardButton,
+    CallbackQuery,
+)
 
 from app.keyboards.menu import main_menu, BTN_CASTING
-from app.storage.repo import save_casting  # <-- сохраняем в новую БД-обвязку
+from app.storage.repo import save_casting  # сохраняем в БД
 
 router = Router(name="casting")
 
@@ -26,14 +33,23 @@ QUESTIONS: List[Dict[str, Any]] = [
     {"key": "city",       "label": "Из какого ты города?",    "type": "text",   "required": True},
     {"key": "experience", "label": "Какой у тебя опыт?",      "type": "choice", "required": True,  "options": ["нет", "1–2 года", "3+ лет"]},
     {"key": "contact",    "label": "Контакт для связи",       "type": "text",   "required": True,  "hint": "@username / телефон / email"},
+    # ⬇️ делаем необязательным URL и добавляем кнопку "Пропустить"
     {"key": "portfolio",  "label": "Ссылка на портфолио (если есть)", "type": "url", "required": False},
 ]
+
+URL_RE = re.compile(r"^https?://", re.I)
+BTN_SKIP = "Пропустить"
 
 def kb_choices(options: List[str]) -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
         keyboard=[[KeyboardButton(text=o)] for o in options],
         resize_keyboard=True
     )
+
+def optional_url_kb() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text=BTN_SKIP, callback_data="cast:skip_url")]
+    ])
 
 class CastingSG(StatesGroup):
     q = State()
@@ -70,9 +86,11 @@ async def ask_next(m: Message, state: FSMContext) -> None:
     q = QUESTIONS[idx]
     hint = f"\n<i>{q.get('hint','')}</i>" if q.get("hint") else ""
 
-    # Если choice — даём клавиатуру с вариантами
     if q["type"] == "choice":
         await m.answer(f"{q['label']}{hint}", reply_markup=kb_choices(q["options"]))
+    elif q["type"] == "url" and not q.get("required", False):
+        # Для необязательного URL сразу показываем кнопку «Пропустить»
+        await m.answer(f"{q['label']}{hint}", reply_markup=optional_url_kb())
     else:
         await m.answer(f"{q['label']}{hint}")
 
@@ -98,17 +116,27 @@ async def collect_answer(m: Message, state: FSMContext) -> None:
             await m.reply(f"Допустимый диапазон: {q.get('min','?')}–{q.get('max','?')}.")
             return
         answers[q["key"]] = val
+
     elif q["type"] == "url":
-        if text and not (text.startswith("http://") or text.startswith("https://")):
-            await m.reply("Нужно прислать ссылку (http/https) или оставить пустым.")
+        # необязательный URL: принимаем пустое/«нет»/валидную ссылку, иначе предлагаем «Пропустить»
+        is_optional = not q.get("required", False)
+        if not text:
+            answers[q["key"]] = ""
+        elif text.lower() in {"нет", "пусто", "no"} and is_optional:
+            answers[q["key"]] = ""
+        elif URL_RE.match(text):
+            answers[q["key"]] = text
+        else:
+            await m.answer("Нужно прислать ссылку (http/https) или нажми «Пропустить».", reply_markup=optional_url_kb())
             return
-        answers[q["key"]] = text
+
     elif q["type"] == "choice":
         opts = set(q["options"])
         if text not in opts:
             await m.reply("Выберите вариант кнопкой ниже.")
             return
         answers[q["key"]] = text
+
     else:
         if q.get("required") and not text:
             await m.reply("Поле обязательно.")
@@ -120,6 +148,25 @@ async def collect_answer(m: Message, state: FSMContext) -> None:
     await state.update_data(idx=idx, answers=answers)
     await ask_next(m, state)
 
+
+# ==== Callback: Пропуск URL ====
+@router.callback_query(F.data == "cast:skip_url")
+async def casting_skip_url(c: CallbackQuery, state: FSMContext):
+    data = await state.get_data()
+    idx = int(data.get("idx", 0))
+    if 0 <= idx < len(QUESTIONS) and QUESTIONS[idx]["key"] == "portfolio":
+        answers = dict(data.get("answers", {}))
+        answers["portfolio"] = ""
+        # скрываем инлайн-кнопки под предыдущим сообщением (если возможно)
+        try:
+            await c.message.edit_reply_markup(reply_markup=None)
+        except Exception:
+            pass
+        # двигаемся дальше
+        idx += 1
+        await state.update_data(idx=idx, answers=answers)
+        await ask_next(c.message, state)
+    await c.answer()
 
 # ==== Финиш ====
 async def finish_casting(message: Message, state: FSMContext):
