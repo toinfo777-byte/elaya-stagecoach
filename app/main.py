@@ -13,6 +13,9 @@ from app.config import settings
 from app.storage.repo import ensure_schema
 
 # 👇 ЯВНЫЕ ИМПОРТЫ РОУТЕРОВ (именно подмодули)
+from app.routers.reply_shortcuts import router as reply_shortcuts_router
+from app.routers.deeplink import router as deeplink_router
+
 from app.routers.training import router as training_router
 from app.routers.casting import router as casting_router
 from app.routers.progress import router as progress_router
@@ -22,8 +25,6 @@ from app.routers.extended import router as extended_router
 from app.routers.help import router as help_router
 from app.routers.settings import router as settings_router
 from app.routers.cancel import router as cancel_router
-from app.routers.deeplink import router as deeplink_router
-from app.routers.reply_shortcuts import router as reply_shortcuts_router
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("main")
@@ -47,7 +48,7 @@ async def _set_commands(bot: Bot) -> None:
 
 
 async def main() -> None:
-    # 1) гарантируем схему БД
+    # 1) гарантируем схему БД (async)
     await ensure_schema()
 
     # 2) инициализация бота
@@ -58,7 +59,13 @@ async def main() -> None:
     dp = Dispatcher()
 
     # 3) ПОДКЛЮЧЕНИЕ РОУТЕРОВ (порядок ВАЖЕН!)
-    # --- СЦЕНАРИИ ---
+    # --- ГЛОБАЛЬНЫЕ ШОРТКАТЫ (первыми, чтобы ловить из любого state) ---
+    dp.include_router(reply_shortcuts_router)
+
+    # --- ДИПЛИНКИ (/start с payload) ---
+    dp.include_router(deeplink_router)
+
+    # --- ОСНОВНЫЕ СЦЕНАРИИ ---
     dp.include_router(training_router)
     dp.include_router(casting_router)
     dp.include_router(progress_router)
@@ -68,12 +75,6 @@ async def main() -> None:
     dp.include_router(help_router)
     dp.include_router(settings_router)
     dp.include_router(cancel_router)
-
-    # --- ДИПЛИНКИ ---
-    dp.include_router(deeplink_router)
-
-    # --- ГЛОБАЛЬНЫЕ ШОРТКАТЫ ---
-    dp.include_router(reply_shortcuts_router)
 
     # 4) команды
     await _set_commands(bot)
