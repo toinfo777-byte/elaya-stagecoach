@@ -1,6 +1,7 @@
 # app/storage/models.py
 from __future__ import annotations
 
+import os
 from datetime import datetime, date
 from typing import Optional
 
@@ -8,15 +9,32 @@ from sqlalchemy.orm import declarative_base, Mapped, mapped_column, synonym
 from sqlalchemy import String, Integer, Boolean, Date, DateTime, BigInteger
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine, AsyncSession
 from sqlalchemy.orm import sessionmaker
+from sqlalchemy.engine.url import make_url  # для нормализации URL
 
 # ---- Base ----
 Base = declarative_base()
 
 # ---- ENGINE & SESSIONMAKER (экспортируются) ----
-# По умолчанию SQLite; через ENV можно пробросить Postgres, например:
-#   DB_URL=postgresql+asyncpg://user:pass@host:5432/dbname
-import os
-DB_URL = os.getenv("DB_URL", "sqlite+aiosqlite:////data/db.sqlite")
+RAW_DB_URL = os.getenv("DB_URL", "sqlite+aiosqlite:////data/db.sqlite")
+
+def _to_async_url(url: str) -> str:
+    """Нормализуем строку подключения: добавляем async-драйверы."""
+    u = make_url(url)
+    backend = u.get_backend_name()  # 'sqlite' | 'postgresql' | ...
+    driver = (u.drivername or "")
+    # Уже async?
+    if any(x in driver for x in ["+aiosqlite", "+asyncpg", "+aiomysql"]):
+        return str(u)
+
+    if backend == "sqlite":
+        return str(u.set(drivername="sqlite+aiosqlite"))
+    if backend in ("postgresql", "postgres"):
+        return str(u.set(drivername="postgresql+asyncpg"))
+    if backend == "mysql":
+        return str(u.set(drivername="mysql+aiomysql"))
+    return str(u)
+
+DB_URL = _to_async_url(RAW_DB_URL)
 
 engine: AsyncEngine = create_async_engine(DB_URL, echo=False, future=True)
 async_session_maker = sessionmaker(
