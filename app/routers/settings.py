@@ -6,37 +6,34 @@ from aiogram.filters import Command, StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.types import Message
 
-from app.keyboards.reply import settings_kb, main_menu_kb, BTN_SETTINGS
-from app.storage.repo import delete_user  # должна быть async-функция удаления по tg_id
+from app.keyboards.reply import settings_kb, main_menu_kb, BTN_SETTINGS, BTN_MENU, BTN_DELETE
+from app.storage.repo import delete_user  # async-функция удаления по tg_id
 
 router = Router(name="settings")
 
+SETTINGS_LOCK_KEY = "settings_shown"
 
-@router.message(Command("settings"), StateFilter(None))
-@router.message(F.text == BTN_SETTINGS, StateFilter(None))
-async def open_settings(m: Message):
-    """Открываем экран настроек, только когда не в форме (StateFilter(None))."""
-    await m.answer(
-        "Настройки. Можешь удалить профиль или вернуться в меню.",
-        reply_markup=settings_kb(),
-    )
+# Глобально + антидубль
+@router.message(StateFilter("*"), Command("settings"))
+@router.message(StateFilter("*"), F.text == BTN_SETTINGS)
+async def open_settings(m: Message, state: FSMContext):
+    data = await state.get_data()
+    if data.get(SETTINGS_LOCK_KEY):
+        return
+    await state.update_data(**{SETTINGS_LOCK_KEY: True})
+    await m.answer("Настройки. Можешь удалить профиль или вернуться в меню.", reply_markup=settings_kb())
 
-
-@router.message(F.text == "🏠 В меню")
+@router.message(StateFilter("*"), F.text == BTN_MENU)
 async def back_to_menu(m: Message, state: FSMContext):
-    """Всегда выходим в меню и сбрасываем состояние формы."""
-    await state.clear()
-    await m.answer("Меню", reply_markup=main_menu_kb())
+    await state.clear()  # чистим и флаг, и возможные сценарии
+    await m.answer("Готово! Открываю меню.", reply_markup=main_menu_kb())
 
-
-@router.message(F.text == "🗑 Удалить профиль")
+@router.message(StateFilter("*"), F.text == BTN_DELETE)
 async def delete_profile_handler(m: Message, state: FSMContext):
-    """Удаляем профиль (если есть), чистим состояние и возвращаемся в меню."""
     await state.clear()
     try:
         await delete_user(m.from_user.id)
         text = "Готово. Профиль удалён."
     except Exception:
-        # Мягко обрабатываем непредвиденные проблемы, чтобы не «залипать»
         text = "Не удалось удалить профиль. Попробуй позже."
     await m.answer(text, reply_markup=main_menu_kb())
