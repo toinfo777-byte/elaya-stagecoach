@@ -1,10 +1,11 @@
+# app/storage/models.py
 from __future__ import annotations
 
 from datetime import datetime
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 from sqlalchemy import String, Integer, DateTime, ForeignKey, JSON, Boolean
 
-
+# === Базовый класс ===
 class Base(DeclarativeBase):
     ...
 
@@ -24,10 +25,8 @@ class User(Base):
     last_seen: Mapped[datetime | None] = mapped_column(DateTime)
     consent_at: Mapped[datetime | None] = mapped_column(DateTime)
 
-    # ⬇️ источник deeplink
     source: Mapped[str | None] = mapped_column(String(64), nullable=True)
 
-    # связи
     drill_runs: Mapped[list["DrillRun"]] = relationship(back_populates="user", cascade="all, delete-orphan")
     leads: Mapped[list["Lead"]] = relationship(back_populates="user", cascade="all, delete-orphan")
     events: Mapped[list["Event"]] = relationship(back_populates="user", cascade="all, delete-orphan")
@@ -96,8 +95,8 @@ class Lead(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
-    channel: Mapped[str] = mapped_column(String(32))          # источник: tg/insta/site/...
-    contact: Mapped[str] = mapped_column(String(255))         # @username, телефон, e-mail
+    channel: Mapped[str] = mapped_column(String(32))
+    contact: Mapped[str] = mapped_column(String(255))
     note: Mapped[str | None] = mapped_column(String(500), default=None)
     track: Mapped[str | None] = mapped_column(String(32), default=None)
     ts: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
@@ -113,8 +112,8 @@ class Feedback(Base):
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
 
     first_source: Mapped[str | None] = mapped_column(String(64), default=None)
-    context: Mapped[str] = mapped_column(String(32))                          # "training" | "casting" | "manual"
-    context_id: Mapped[str | None] = mapped_column(String(64), default=None)  # id этюда/теста
+    context: Mapped[str] = mapped_column(String(32))
+    context_id: Mapped[str | None] = mapped_column(String(64), default=None)
     score: Mapped[int | None] = mapped_column(Integer, default=None)
     text: Mapped[str | None] = mapped_column(String(2000), default=None)
     voice_file_id: Mapped[str | None] = mapped_column(String(256), default=None)
@@ -131,8 +130,33 @@ class PremiumRequest(Base):
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
     tg_username: Mapped[str | None] = mapped_column(String(255), default=None)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    status: Mapped[str] = mapped_column(String(32), default="new")  # new | in_review | done | rejected
+    status: Mapped[str] = mapped_column(String(32), default="new")
     meta: Mapped[dict] = mapped_column(JSON, default=dict)
 
-    # (по желанию) связь:
-    # user: Mapped["User"] = relationship()
+
+# --- Асинхронный движок и фабрика сессий ---
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.engine.url import make_url
+from app.config import settings
+
+def _make_async_dsn(dsn: str) -> str:
+    url = make_url(dsn)
+    drv = url.drivername
+    if "+" not in drv:
+        if drv in ("sqlite",):
+            drv = "sqlite+aiosqlite"
+        elif drv in ("postgresql", "postgres"):
+            drv = "postgresql+asyncpg"
+    return str(url.set(drivername=drv))
+
+ASYNC_DB_URL = _make_async_dsn(settings.db_url)
+engine = create_async_engine(ASYNC_DB_URL, pool_pre_ping=True, future=True)
+async_session_maker = async_sessionmaker(bind=engine, class_=AsyncSession, expire_on_commit=False)
+
+__all__ = [
+    "Base",
+    "engine",
+    "async_session_maker",
+    "User", "Drill", "DrillRun", "Test", "TestResult",
+    "Event", "Lead", "Feedback", "PremiumRequest",
+]
