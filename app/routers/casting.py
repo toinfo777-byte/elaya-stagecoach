@@ -1,200 +1,116 @@
 # app/routers/casting.py
 from __future__ import annotations
 
-import re
-from typing import List, Dict, Any
-
+import os, re
 from aiogram import Router, F
 from aiogram.filters import Command
-from aiogram.fsm.state import State, StatesGroup
+from aiogram.fsm.state import StatesGroup, State
 from aiogram.fsm.context import FSMContext
-from aiogram.types import (
-    Message,
-    ReplyKeyboardMarkup,
-    KeyboardButton,
-    InlineKeyboardMarkup,
-    InlineKeyboardButton,
-    CallbackQuery,
-)
+from aiogram.types import Message, CallbackQuery
+from aiogram.filters import StateFilter
 
-from app.keyboards.menu import main_menu, BTN_CASTING
+from app.keyboards.reply import main_menu, BTN_CASTING, BTN_APPLY
+from app.keyboards.inline import casting_skip_kb
+from app.utils.admin import notify_admin
 from app.storage.repo import save_casting
-from app.utils.admin import notify_admin  # 👈 используем helper
 
 router = Router(name="casting")
 
-# Вопросы MVP
-QUESTIONS: List[Dict[str, Any]] = [
-    {"key": "name",       "label": "Как тебя зовут?",         "type": "text",   "required": True,  "hint": "Имя и фамилия"},
-    {"key": "age",        "label": "Сколько тебе лет?",       "type": "number", "required": True,  "min": 10, "max": 99},
-    {"key": "city",       "label": "Из какого ты города?",    "type": "text",   "required": True},
-    {"key": "experience", "label": "Какой у тебя опыт?",      "type": "choice", "required": True,  "options": ["нет", "1–2 года", "3+ лет"]},
-    {"key": "contact",    "label": "Контакт для связи",       "type": "text",   "required": True,  "hint": "@username / телефон / email"},
-    {"key": "portfolio",  "label": "Ссылка на портфолио (если есть)", "type": "url", "required": False},
-]
+class ApplyForm(StatesGroup):
+    name = State()
+    age = State()
+    city = State()
+    experience = State()
+    contact = State()
+    portfolio = State()
 
-URL_RE = re.compile(r"^https?://", re.I)
-BTN_SKIP = "Пропустить"
+def _looks_like_url(text: str) -> bool:
+    return bool(re.match(r"^https?://", text.strip(), re.I))
 
-SUCCESS_TEXT = (
-    "✅ Заявка принята! Мы свяжемся в течение 1–2 дней.\n"
-    "Спасибо, что уделил(а) время. Возвращайся к тренировкам!"
-)
-
-
-def kb_choices(options: List[str]) -> ReplyKeyboardMarkup:
-    return ReplyKeyboardMarkup(
-        keyboard=[[KeyboardButton(text=o)] for o in options],
-        resize_keyboard=True
-    )
-
-
-def optional_url_kb() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text=BTN_SKIP, callback_data="cast:skip_url")]
-    ])
-
-
-class CastingSG(StatesGroup):
-    q = State()
-
-
-# ==== Старт ====
-@router.message(F.text == BTN_CASTING)
 @router.message(Command("casting"))
-async def casting_entry(m: Message, state: FSMContext) -> None:
-    await start_casting_flow(m, state)
+@router.message(F.text.in_({BTN_CASTING, BTN_APPLY}))
+async def start_casting(m: Message, state: FSMContext):
+    await state.set_state(ApplyForm.name)
+    await m.answer("Как тебя зовут?\n<i>Имя и фамилия</i>")
 
+@router.message(StateFilter(ApplyForm.name))
+async def q_name(m: Message, state: FSMContext):
+    await state.update_data(name=m.text.strip())
+    await state.set_state(ApplyForm.age)
+    await m.answer("Сколько тебе лет?")
 
-@router.message(Command("apply"))
-async def apply_entry(m: Message, state: FSMContext) -> None:
-    # «Путь лидера» = алиас на мини-кастинг
-    await start_casting_flow(m, state)
-
-
-async def start_casting_flow(message: Message, state: FSMContext):
-    """Публичная точка входа (используется диплинком)."""
-    await state.clear()
-    await state.update_data(idx=0, answers={})
-    await ask_next(message, state)
-
-
-# ==== Диалог ====
-async def ask_next(m: Message, state: FSMContext) -> None:
-    data = await state.get_data()
-    idx = int(data.get("idx", 0))
-    if idx >= len(QUESTIONS):
-        await finish_casting(m, state)
+@router.message(StateFilter(ApplyForm.age))
+async def q_age(m: Message, state: FSMContext):
+    try:
+        age = int(m.text.strip())
+        if not (10 <= age <= 99):
+            raise ValueError
+    except Exception:
+        await m.answer("Допустимый диапазон: 10–99. Введи число.")
         return
+    await state.update_data(age=age)
+    await state.set_state(ApplyForm.city)
+    await m.answer("Из какого ты города?")
 
-    q = QUESTIONS[idx]
-    hint = f"\n<i>{q.get('hint','')}</i>" if q.get("hint") else ""
+@router.message(StateFilter(ApplyForm.city))
+async def q_city(m: Message, state: FSMContext):
+    await state.update_data(city=m.text.strip())
+    await state.set_state(ApplyForm.experience)
+    await m.answer("Какой у тебя опыт?\n– нет\n– 1–2 года\n– 3+ лет")
 
-    if q["type"] == "choice":
-        await m.answer(f"{q['label']}{hint}", reply_markup=kb_choices(q["options"]))
-    elif q["type"] == "url" and not q.get("required", False):
-        await m.answer(f"{q['label']}{hint}", reply_markup=optional_url_kb())
-    else:
-        await m.answer(f"{q['label']}{hint}")
+@router.message(StateFilter(ApplyForm.experience))
+async def q_exp(m: Message, state: FSMContext):
+    await state.update_data(experience=m.text.strip())
+    await state.set_state(ApplyForm.contact)
+    await m.answer("Контакт для связи\n@username / телефон / email")
 
-    await state.set_state(CastingSG.q)
+@router.message(StateFilter(ApplyForm.contact))
+async def q_contact(m: Message, state: FSMContext):
+    await state.update_data(contact=m.text.strip())
+    await state.set_state(ApplyForm.portfolio)
+    await m.answer("Ссылка на портфолио (если есть)", reply_markup=casting_skip_kb())
 
+# --- финальный шаг (портфолио опционально) ---
 
-@router.message(CastingSG.q)
-async def collect_answer(m: Message, state: FSMContext) -> None:
-    data = await state.get_data()
-    idx = int(data.get("idx", 0))
-    answers = dict(data.get("answers", {}))
-    q = QUESTIONS[idx]
+@router.callback_query(F.data == "cast:skip_url", StateFilter(ApplyForm.portfolio))
+async def skip_portfolio(c: CallbackQuery, state: FSMContext):
+    await state.update_data(portfolio=None)
+    await _finish(c.message, state)
 
+@router.message(StateFilter(ApplyForm.portfolio))
+async def q_portfolio(m: Message, state: FSMContext):
     text = (m.text or "").strip()
+    portfolio = text if _looks_like_url(text) else None
+    await state.update_data(portfolio=portfolio)
+    await _finish(m, state)
 
-    # Валидация
-    if q["type"] == "number":
-        if not text.isdigit():
-            await m.reply("Введите число.")
-            return
-        val = int(text)
-        if ("min" in q and val < q["min"]) or ("max" in q and val > q["max"]):
-            await m.reply(f"Допустимый диапазон: {q.get('min','?')}–{q.get('max','?')}.")
-            return
-        answers[q["key"]] = val
-
-    elif q["type"] == "url":
-        if not text or text.lower() in {"нет", "пусто", "no", "-"}:
-            answers[q["key"]] = None
-        elif URL_RE.match(text):
-            answers[q["key"]] = text
-        else:
-            await m.answer("Нужно прислать ссылку (http/https) или нажми «Пропустить».",
-                           reply_markup=optional_url_kb())
-            return
-
-    elif q["type"] == "choice":
-        opts = set(q["options"])
-        if text not in opts:
-            await m.reply("Выберите вариант кнопкой ниже.")
-            return
-        answers[q["key"]] = text
-
-    else:
-        if q.get("required") and not text:
-            await m.reply("Поле обязательно.")
-            return
-        answers[q["key"]] = text
-
-    # Следующий вопрос
-    idx += 1
-    await state.update_data(idx=idx, answers=answers)
-    await ask_next(m, state)
-
-
-# ==== Callback: Пропуск URL ====
-@router.callback_query(F.data == "cast:skip_url")
-async def casting_skip_url(c: CallbackQuery, state: FSMContext):
+async def _finish(m: Message, state: FSMContext):
     data = await state.get_data()
-    idx = int(data.get("idx", 0))
-    if 0 <= idx < len(QUESTIONS) and QUESTIONS[idx]["key"] == "portfolio":
-        answers = dict(data.get("answers", {}))
-        answers["portfolio"] = None
-        try:
-            await c.message.edit_reply_markup(reply_markup=None)
-        except Exception:
-            pass
-        idx += 1
-        await state.update_data(idx=idx, answers=answers)
-        await ask_next(c.message, state)
-    await c.answer()
-
-
-# ==== Финиш ====
-async def finish_casting(message: Message, state: FSMContext):
-    data = await state.get_data()
-    answers = data.get("answers", {}) or {}
     await state.clear()
 
     # Сохраняем в БД
     await save_casting(
-        tg_id=message.from_user.id,
-        name=str(answers.get("name", "")),
-        age=int(answers.get("age", 0) or 0),
-        city=str(answers.get("city", "")),
-        experience=str(answers.get("experience", "")),
-        contact=str(answers.get("contact", "")),
-        portfolio=answers.get("portfolio"),
+        tg_id=m.from_user.id,
+        name=str(data.get("name", "")),
+        age=int(data.get("age", 0) or 0),
+        city=str(data.get("city", "")),
+        experience=str(data.get("experience", "")),
+        contact=str(data.get("contact", "")),
+        portfolio=data.get("portfolio"),
         agree_contact=True,
     )
 
-    # Алерт админу (helper)
-    lines = [
-        "🎬 Новая заявка (мини-кастинг):",
-        f"• Пользователь: @{message.from_user.username or '—'} (id {message.from_user.id})",
-    ]
-    for q in QUESTIONS:
-        k, label = q["key"], q["label"]
-        v = answers.get(k, "—")
-        lines.append(f"• {label}: {v}")
-    await notify_admin(message.bot, "\n".join(lines))
+    # Отправляем админу
+    summary = (
+        "🎭 Новая заявка (кастинг / путь лидера)\n"
+        f"Имя: {data.get('name')}\n"
+        f"Возраст: {data.get('age')}\n"
+        f"Город: {data.get('city')}\n"
+        f"Опыт: {data.get('experience')}\n"
+        f"Контакт: {data.get('contact')}\n"
+        f"Портфолио: {data.get('portfolio') or '—'}\n"
+        f"От: @{m.from_user.username or m.from_user.id}"
+    )
+    await notify_admin(summary, m.bot)
 
-    # Экран «заявка принята»
-    await message.answer(SUCCESS_TEXT, reply_markup=main_menu())
+    await m.answer("✅ Заявка принята! Мы свяжемся в течение 1–2 дней.", reply_markup=main_menu())
