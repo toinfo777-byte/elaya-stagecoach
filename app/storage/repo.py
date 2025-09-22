@@ -1,10 +1,7 @@
-# app/storage/repo.py
 from __future__ import annotations
 
 from datetime import date, timedelta
-from typing import Optional, Dict
-
-from sqlalchemy import select, func, desc
+from sqlalchemy import select, func, desc, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.storage.models import (
@@ -16,17 +13,28 @@ from app.storage.models import (
     CastingForm,
 )
 
-
 # ---------- INIT ----------
 async def ensure_schema() -> None:
-    """Создаём таблицы, если их нет."""
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
 
 
+# ---------- Repo-класс ----------
+class Repo:
+    def __init__(self, session: AsyncSession):
+        self.session = session
+
+    async def delete_user(self, tg_id: int) -> None:
+        """Удалить пользователя и все его записи."""
+        await self.session.execute(delete(Profile).where(Profile.tg_id == tg_id))
+        await self.session.execute(delete(TrainingLog).where(TrainingLog.tg_id == tg_id))
+        await self.session.execute(delete(CastingForm).where(CastingForm.tg_id == tg_id))
+        await self.session.commit()
+
+
 # ---------- Profile ----------
 async def upsert_profile(tg_id: int, username: str | None, name: str | None) -> None:
-    async with async_session_maker() as session:  # type: AsyncSession
+    async with async_session_maker() as session:
         q = await session.execute(select(Profile).where(Profile.tg_id == tg_id))
         p = q.scalar_one_or_none()
         if p is None:
@@ -53,11 +61,7 @@ async def log_training(tg_id: int, level: str, done: bool) -> None:
 
 
 async def calc_progress(tg_id: int) -> tuple[int, int]:
-    """
-    Возвращает (streak, last7).
-    streak — подряд дней с done==True до сегодня включительно.
-    last7 — количество done за последние 7 дней.
-    """
+    from datetime import date, timedelta
     async with async_session_maker() as session:
         # last7
         since = date.today() - timedelta(days=6)
