@@ -15,15 +15,17 @@ from app.storage.repo import ensure_schema
 # ⬇️ ЯВНЫЕ ИМПОРТЫ РОУТЕРОВ
 from app.routers import (
     start as r_start,
-    common as r_common_guard,
+    common as r_common_guard,   # глобальный выход в меню (/menu, /start)
     help as r_help,
     privacy as r_privacy,
     progress as r_progress,
     settings as r_settings,
     extended as r_extended,
     training as r_training,
-    casting as r_casting,
-    apply as r_apply,  # если используешь отдельный алиас
+    casting as r_casting,       # анкета (P0 фикс портфолио включён)
+    apply as r_apply,           # если используешь отдельный алиас
+    minicasting as r_minicasting,  # 🎭 мини-кастинг (P1)
+    leader as r_leader,            # 🧭 путь лидера (P1)
 )
 
 logging.basicConfig(level=logging.INFO)
@@ -62,7 +64,7 @@ async def main() -> None:
     # старт/диплинки
     dp.include_router(r_start.router)
 
-    # guard — раньше всех
+    # guard — раньше всех (глобальный выход в меню/старт из любого состояния)
     dp.include_router(r_common_guard.router)
 
     # ГЛОБАЛЬНЫЕ КОМАНДЫ (должны работать поверх состояний)
@@ -72,10 +74,15 @@ async def main() -> None:
     dp.include_router(r_settings.router)
     dp.include_router(r_extended.router)
 
-    # СЦЕНАРНЫЕ / FSM-маршруты
+    # СЦЕНАРИИ (FSM)
+    # отдельные ветки P1:
+    dp.include_router(r_minicasting.router)  # 🎭 Мини-кастинг
+    dp.include_router(r_leader.router)       # 🧭 Путь лидера
+
+    # прочие сценарные роутеры
     dp.include_router(r_training.router)
     dp.include_router(r_casting.router)
-    dp.include_router(r_apply.router)  # при необходимости
+    dp.include_router(r_apply.router)        # если используешь отдельный алиас
 
     # 4) команды
     await _set_commands(bot)
