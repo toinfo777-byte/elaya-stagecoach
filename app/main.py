@@ -1,3 +1,4 @@
+# app/main.py
 from __future__ import annotations
 
 import asyncio
@@ -17,9 +18,10 @@ log = logging.getLogger("main")
 
 # Порядок подключения модулей-роутеров
 ROUTER_NAMES = [
+    "reply_shortcuts",   # быстрые выходы (🏠 В меню, ⚙️ Настройки)
+    "deeplink",          # диплинки (/start=go_training …)
     "admin",
     "analytics",
-    "reply_shortcuts",
     "cancel",
     "onboarding",
     "menu",
@@ -32,7 +34,6 @@ ROUTER_NAMES = [
     "settings",
     "feedback",
     "shortcuts",
-    "deeplink",
 ]
 
 
@@ -71,7 +72,7 @@ async def _set_commands(bot: Bot) -> None:
 
 async def main() -> None:
     # 1) гарантируем схему БД
-    ensure_schema()
+    await ensure_schema()   # теперь асинхронно
 
     # 2) инициализация бота (aiogram 3.7+)
     bot = Bot(
