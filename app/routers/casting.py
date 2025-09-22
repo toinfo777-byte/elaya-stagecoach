@@ -9,7 +9,7 @@ from aiogram.types import Message, CallbackQuery
 
 from app.flows.casting_flow import start_casting_flow, ApplyForm
 from app.keyboards.menu import main_menu, BTN_CASTING, BTN_APPLY
-from app.keyboards.inline import casting_skip_kb
+from app.keyboards.inline import casting_skip_kb  # callback_data: "casting:skip_portfolio"
 from app.utils.admin import notify_admin
 from app.storage.repo import save_casting
 
@@ -24,7 +24,7 @@ def _looks_like_url(text: str) -> bool:
 @router.message(Command("casting"), StateFilter(None))
 @router.message(F.text.in_({BTN_CASTING, BTN_APPLY}), StateFilter(None))
 async def casting_entry(m: Message, state: FSMContext):
-    # Унифицированный запуск сценария анкеты
+    # Унифицированный запуск сценария анкеты (общий flow)
     await start_casting_flow(m, state)
 
 
@@ -82,7 +82,7 @@ async def skip_portfolio(c: CallbackQuery, state: FSMContext):
 @router.message(StateFilter(ApplyForm.portfolio))
 async def q_portfolio(m: Message, state: FSMContext):
     text = (m.text or "").strip()
-    portfolio = text if _looks_like_url(text) else None
+    portfolio = text if _looks_like_url(text) else None  # пусто/не-URL → считаем отсутствующим
     await state.update_data(portfolio=portfolio)
     await _finish(m, state)
 
