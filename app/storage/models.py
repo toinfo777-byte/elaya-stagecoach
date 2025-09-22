@@ -1,9 +1,9 @@
 # app/storage/models.py
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, date
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
-from sqlalchemy import String, Integer, DateTime, ForeignKey, JSON, Boolean
+from sqlalchemy import String, Integer, DateTime, Date, ForeignKey, JSON, Boolean
 
 # === Базовый класс ===
 class Base(DeclarativeBase):
@@ -25,13 +25,35 @@ class User(Base):
     last_seen: Mapped[datetime | None] = mapped_column(DateTime)
     consent_at: Mapped[datetime | None] = mapped_column(DateTime)
 
+    # источник deeplink
     source: Mapped[str | None] = mapped_column(String(64), nullable=True)
 
+    # связи
     drill_runs: Mapped[list["DrillRun"]] = relationship(back_populates="user", cascade="all, delete-orphan")
     leads: Mapped[list["Lead"]] = relationship(back_populates="user", cascade="all, delete-orphan")
     events: Mapped[list["Event"]] = relationship(back_populates="user", cascade="all, delete-orphan")
     test_results: Mapped[list["TestResult"]] = relationship(back_populates="user", cascade="all, delete-orphan")
     feedbacks: Mapped[list["Feedback"]] = relationship(back_populates="user", cascade="all, delete-orphan")
+    training_logs: Mapped[list["TrainingLog"]] = relationship(back_populates="user", cascade="all, delete-orphan")
+
+
+# --- Журнал тренировок (MVP) ---
+class TrainingLog(Base):
+    __tablename__ = "training_logs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+
+    # храним колонку как "date", но в Python-атрибуте используем имя "day",
+    # чтобы не ломать существующий код (repo_* использует TrainingLog.day)
+    day: Mapped[date] = mapped_column("date", Date, index=True)
+
+    level: Mapped[str] = mapped_column(String(32))             # 'beginner' | 'medium' | 'pro'
+    done: Mapped[bool] = mapped_column(Boolean, default=False) # выполнено?
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+    # связь
+    user: Mapped["User"] = relationship(back_populates="training_logs")
 
 
 # --- Этюд и прохождения ---
@@ -95,8 +117,8 @@ class Lead(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
-    channel: Mapped[str] = mapped_column(String(32))
-    contact: Mapped[str] = mapped_column(String(255))
+    channel: Mapped[str] = mapped_column(String(32))          # источник: tg/insta/site/...
+    contact: Mapped[str] = mapped_column(String(255))         # @username, телефон, e-mail
     note: Mapped[str | None] = mapped_column(String(500), default=None)
     track: Mapped[str | None] = mapped_column(String(32), default=None)
     ts: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
@@ -112,8 +134,8 @@ class Feedback(Base):
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
 
     first_source: Mapped[str | None] = mapped_column(String(64), default=None)
-    context: Mapped[str] = mapped_column(String(32))
-    context_id: Mapped[str | None] = mapped_column(String(64), default=None)
+    context: Mapped[str] = mapped_column(String(32))                          # "training" | "casting" | "manual"
+    context_id: Mapped[str | None] = mapped_column(String(64), default=None)  # id этюда/теста
     score: Mapped[int | None] = mapped_column(Integer, default=None)
     text: Mapped[str | None] = mapped_column(String(2000), default=None)
     voice_file_id: Mapped[str | None] = mapped_column(String(256), default=None)
@@ -130,7 +152,7 @@ class PremiumRequest(Base):
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
     tg_username: Mapped[str | None] = mapped_column(String(255), default=None)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    status: Mapped[str] = mapped_column(String(32), default="new")
+    status: Mapped[str] = mapped_column(String(32), default="new")  # new | in_review | done | rejected
     meta: Mapped[dict] = mapped_column(JSON, default=dict)
 
 
@@ -157,6 +179,7 @@ __all__ = [
     "Base",
     "engine",
     "async_session_maker",
-    "User", "Drill", "DrillRun", "Test", "TestResult",
+    "User", "TrainingLog",
+    "Drill", "DrillRun", "Test", "TestResult",
     "Event", "Lead", "Feedback", "PremiumRequest",
 ]
