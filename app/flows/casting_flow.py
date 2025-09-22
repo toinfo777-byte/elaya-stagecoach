@@ -1,7 +1,24 @@
 # app/flows/casting_flow.py
-from aiogram.types import Message
-from aiogram.fsm.context import FSMContext
+from __future__ import annotations
 
-async def start_casting_flow(message: Message, state: FSMContext):
-    # общий сценарий
-    ...
+from aiogram.fsm.context import FSMContext
+from aiogram.fsm.state import StatesGroup, State
+from aiogram.types import Message
+
+class ApplyForm(StatesGroup):
+    """Единая FSM для мини-кастинга / пути лидера."""
+    name = State()
+    age = State()
+    city = State()
+    experience = State()
+    contact = State()
+    portfolio = State()
+
+async def start_casting_flow(message: Message, state: FSMContext) -> None:
+    """
+    Общая точка входа в анкету.
+    Сбрасывает состояние и задаёт первый вопрос.
+    """
+    await state.clear()
+    await state.set_state(ApplyForm.name)
+    await message.answer("Как тебя зовут?\n<i>Имя и фамилия</i>")
