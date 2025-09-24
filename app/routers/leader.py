@@ -1,5 +1,6 @@
 # app/routers/leader.py
 from aiogram import Router, F
+from aiogram.filters import Command, StateFilter
 from aiogram.types import Message, CallbackQuery
 from aiogram.fsm.state import StatesGroup, State
 from aiogram.fsm.context import FSMContext
@@ -25,10 +26,17 @@ def intent_kb():
     kb.adjust(2,2,1)
     return kb.as_markup()
 
-@router.message(F.text == BTN_APPLY)
-async def leader_start(msg: Message, state: FSMContext):
+async def start_leader_cmd(msg: Message, state: FSMContext):
     await state.set_state(LeaderFSM.intent)
     await msg.answer("Путь лидера — твой вектор. 3 шага, 2–4 минуты.\nЧто важнее сейчас?", reply_markup=intent_kb())
+
+@router.message(F.text == BTN_APPLY)
+async def leader_start_btn(msg: Message, state: FSMContext):
+    await start_leader_cmd(msg, state)
+
+@router.message(StateFilter("*"), Command("apply"))
+async def leader_start_cmd(msg: Message, state: FSMContext):
+    await start_leader_cmd(msg, state)
 
 @router.callback_query(F.data.startswith("intent:"), LeaderFSM.intent)
 async def select_intent(cb: CallbackQuery, state: FSMContext):
