@@ -64,20 +64,19 @@ async def main() -> None:
     # старт/диплинки
     dp.include_router(r_start.router)
 
-    # guard — раньше всех (глобальный выход в меню/старт из любого состояния)
+    # СЦЕНАРИИ (FSM) — ставим ПЕРЕД common, чтобы их колбэки не перехватывались эвакуаторами
+    dp.include_router(r_minicasting.router)  # 🎭 Мини-кастинг
+    dp.include_router(r_leader.router)       # 🧭 Путь лидера
+
+    # guard — глобальный выход в меню/старт/отмена
     dp.include_router(r_common_guard.router)
 
-    # ГЛОБАЛЬНЫЕ КОМАНДЫ (должны работать поверх состояний)
+    # ГЛОБАЛЬНЫЕ КОМАНДЫ
     dp.include_router(r_help.router)
     dp.include_router(r_privacy.router)
     dp.include_router(r_progress.router)
     dp.include_router(r_settings.router)
     dp.include_router(r_extended.router)
-
-    # СЦЕНАРИИ (FSM)
-    # отдельные ветки P1:
-    dp.include_router(r_minicasting.router)  # 🎭 Мини-кастинг
-    dp.include_router(r_leader.router)       # 🧭 Путь лидера
 
     # прочие сценарные роутеры
     dp.include_router(r_training.router)
