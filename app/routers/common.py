@@ -10,23 +10,26 @@ from app.keyboards.reply import main_menu_kb
 
 router = Router(name="common")
 
-async def _to_menu_msg(msg: Message, state: FSMContext):
+async def _open_menu(msg: Message, state: FSMContext, greet: bool = False):
     await state.clear()
+    if greet:
+        await msg.answer("Привет! Я Элайя — тренер сцены. Помогу прокачать голос и уверенность.")
     await msg.answer("Готово! Открываю меню.", reply_markup=main_menu_kb())
 
-# /menu, /start, /cancel и текстовые кнопки — из ЛЮБОГО состояния
-@router.message(StateFilter("*"), Command({"menu", "start", "cancel"}))
-@router.message(StateFilter("*"), F.text.in_({"В меню", "Меню", "🏠 В меню"}))
-async def go_menu(msg: Message, state: FSMContext):
-    # /start — короткое приветствие перед меню (не обязательно)
-    if isinstance(msg, Message) and msg.text and msg.text.strip().lower() == "/start":
-        await state.clear()
-        await msg.answer("Привет! Я Элайя — тренер сцены. Помогу прокачать голос и уверенность.")
-    await _to_menu_msg(msg, state)
+# ✅ один хендлер на несколько команд — корректный синтаксис
+@router.message(StateFilter("*"), Command(commands=["menu", "start", "cancel"]))
+async def menu_start_cancel(message: Message, state: FSMContext):
+    cmd = (message.text or "").lstrip("/").split()[0].lower()
+    await _open_menu(message, state, greet=(cmd == "start"))
 
-# инлайн «в меню»
+# текстовые кнопки «в меню»
+@router.message(StateFilter("*"), F.text.in_({"В меню", "Меню", "🏠 В меню"}))
+async def text_to_menu(message: Message, state: FSMContext):
+    await _open_menu(message, state)
+
+# инлайн «в меню» из callback’ов
 @router.callback_query(StateFilter("*"), F.data.in_({"go:menu", "to_menu"}))
-async def cb_go_menu(cb: CallbackQuery, state: FSMContext):
+async def cb_to_menu(cb: CallbackQuery, state: FSMContext):
     await state.clear()
     await cb.answer()
     await cb.message.answer("Готово! Открываю меню.", reply_markup=main_menu_kb())
