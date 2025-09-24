@@ -30,7 +30,8 @@ HELP_HEADER = "Команды и разделы: выбери нужное ⤵�
 async def help_cmd(m: Message, state: FSMContext):
     await m.answer(HELP_HEADER, reply_markup=help_kb())
 
-@router.callback_query(F.data.startswith("go:"))
+# ⬇️ добавили StateFilter("*"), чтобы ловить колбэки из любого FSM-состояния
+@router.callback_query(StateFilter("*"), F.data.startswith("go:"))
 async def help_jump(cq: CallbackQuery, state: FSMContext):
     action = cq.data.split(":", 1)[1]
     await state.clear()  # безопасный выход из любых сценариев
@@ -66,7 +67,7 @@ async def help_jump(cq: CallbackQuery, state: FSMContext):
         await cq.message.answer(PRIVACY_TEXT, reply_markup=main_menu_kb())
 
     elif action == "settings":
-        await open_settings(cq.message, state)  # ← передаём state
+        await open_settings(cq.message, state)  # ← важно передать state
 
     elif action == "extended":
         try:
