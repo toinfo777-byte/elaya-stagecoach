@@ -33,19 +33,26 @@ async def help_cmd(m: Message, state: FSMContext):
 @router.callback_query(F.data.startswith("go:"))
 async def help_jump(cq: CallbackQuery, state: FSMContext):
     action = cq.data.split(":", 1)[1]
-    # выходим из любых сценариев
-    await state.clear()
+    await state.clear()  # безопасный выход из любых сценариев
 
     if action == "menu":
         await cq.message.answer("Готово! Открываю меню.", reply_markup=main_menu_kb())
 
-    elif action in {"casting", "apply"}:
-        # Старт анкеты (кастинг/путь лидера) — делегируем в роутер casting
+    elif action == "casting":
+        # Открываем НОВЫЙ мини-кастинг
         try:
-            from app.routers.casting import casting_entry  # локальный импорт, чтобы избежать циклов
-            await casting_entry(cq.message, state)
+            from app.routers.minicasting import start_minicasting_cmd
+            await start_minicasting_cmd(cq.message, state)
         except Exception:
-            await cq.message.answer("Открой меню и нажми «🎭 Мини-кастинг» или «🧭 Путь лидера».", reply_markup=main_menu_kb())
+            await cq.message.answer("Открой меню и нажми «🎭 Мини-кастинг».", reply_markup=main_menu_kb())
+
+    elif action == "apply":
+        # Открываем НОВЫЙ «Путь лидера»
+        try:
+            from app.routers.leader import start_leader_cmd
+            await start_leader_cmd(cq.message, state)
+        except Exception:
+            await cq.message.answer("Открой меню и нажми «🧭 Путь лидера».", reply_markup=main_menu_kb())
 
     elif action == "progress":
         await cq.message.answer(
@@ -59,12 +66,12 @@ async def help_jump(cq: CallbackQuery, state: FSMContext):
         await cq.message.answer(PRIVACY_TEXT, reply_markup=main_menu_kb())
 
     elif action == "settings":
-        await open_settings(cq.message)  # наш хендлер настроек
+        await open_settings(cq.message, state)  # ← передаём state
 
     elif action == "extended":
         try:
             from app.routers.extended import extended_pitch
-            await extended_pitch(cq.message)  # покажем пич
+            await extended_pitch(cq.message)
         except Exception:
             await cq.message.answer("⭐ Расширенная версия скоро. Возвращаю в меню.", reply_markup=main_menu_kb())
 
