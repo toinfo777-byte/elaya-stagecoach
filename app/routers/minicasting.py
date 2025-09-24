@@ -1,5 +1,6 @@
 # app/routers/minicasting.py
 from aiogram import Router, F
+from aiogram.filters import Command, StateFilter
 from aiogram.types import Message, CallbackQuery
 from aiogram.fsm.state import StatesGroup, State
 from aiogram.fsm.context import FSMContext
@@ -31,11 +32,18 @@ def yn_kb():
     kb.adjust(2, 2)
     return kb.as_markup()
 
-@router.message(F.text == BTN_CASTING)
-async def start_minicasting(msg: Message, state: FSMContext):
+async def _start_minicasting_core(msg: Message, state: FSMContext):
     await state.set_state(MiniCasting.q)
     await state.update_data(q=0, answers=[])
     await msg.answer("Это мини-кастинг: 2–3 мин. Отвечай коротко. Готов?", reply_markup=yn_kb())
+
+@router.message(F.text == BTN_CASTING)
+async def start_minicasting(msg: Message, state: FSMContext):
+    await _start_minicasting_core(msg, state)
+
+@router.message(StateFilter("*"), Command("casting"))
+async def start_minicasting_cmd(msg: Message, state: FSMContext):
+    await _start_minicasting_core(msg, state)
 
 @router.callback_query(F.data.startswith("mini:"), MiniCasting.q)
 async def on_answer(cb: CallbackQuery, state: FSMContext):
@@ -45,6 +53,7 @@ async def on_answer(cb: CallbackQuery, state: FSMContext):
 
     if cb.data == "mini:menu":
         await state.clear()
+        await cb.answer()
         return await cb.message.answer("В меню.", reply_markup=main_menu_kb())
 
     if cb.data in {"mini:yes", "mini:no"}:
@@ -55,7 +64,6 @@ async def on_answer(cb: CallbackQuery, state: FSMContext):
         await state.update_data(q=q, answers=answers)
         await cb.message.edit_text(QUESTIONS[q-1], reply_markup=yn_kb())
     else:
-        # мини-результат
         tip = "Точка роста: не давай паузе проваливаться." if answers[:2].count("no") >= 1 else "Отлично! Держи курс и темп."
         await cb.message.edit_text(f"Итог: {tip}")
         kb = InlineKeyboardBuilder()
