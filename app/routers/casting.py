@@ -7,7 +7,7 @@ from aiogram.filters import Command, StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.types import Message, CallbackQuery
 
-from app.keyboards.reply import main_menu_kb, BTN_CASTING, BTN_APPLY
+from app.keyboards.reply import main_menu_kb
 from app.keyboards.inline import casting_skip_kb  # callback_data: "cast:skip_url"
 from app.utils.admin import notify_admin
 from app.storage.repo import save_casting
@@ -35,9 +35,9 @@ except Exception:
 
 HTTP_RE = re.compile(r"^https?://", re.I)
 
-# ==== СТАРТ ====
-@router.message(StateFilter("*"), Command("casting"))
-@router.message(StateFilter("*"), F.text.in_({BTN_CASTING, BTN_APPLY}))
+# ВНИМАНИЕ: Больше НЕ перехватываем /casting и кнопку 🎭 — это мини-кастинг.
+# Если хочешь запускать длинную форму вручную — оставил скрытую команду:
+@router.message(StateFilter("*"), Command("apply_form"))
 async def casting_entry(m: Message, state: FSMContext):
     await start_casting_flow(m, state)
 
@@ -80,25 +80,22 @@ async def q_contact(m: Message, state: FSMContext):
     await m.answer("Ссылка на портфолио (если есть)", reply_markup=casting_skip_kb())
 
 # ==== ПОРТФОЛИО (опционально) ====
-# Кнопка «Пропустить»
 @router.callback_query(StateFilter(ApplyForm.portfolio), F.data == "cast:skip_url")
 async def skip_portfolio(cb: CallbackQuery, state: FSMContext):
     await state.update_data(portfolio=None)
     await _finish(cb.message, state)
     await cb.answer()
 
-# Текстовые «пропустить/нет/пусто»
 @router.message(StateFilter(ApplyForm.portfolio), F.text.casefold().in_({"пропустить", "нет", "пусто"}))
 async def portfolio_skip_text(m: Message, state: FSMContext):
     await state.update_data(portfolio=None)
     await _finish(m, state)
 
-# Текст на шаге портфолио — пропускаем слэш-команды «наверх» и принимаем только URL
 @router.message(StateFilter(ApplyForm.portfolio), F.text)
 async def q_portfolio(m: Message, state: FSMContext):
     text = (m.text or "").strip()
     if text.startswith("/"):
-        return  # ДАЙ ПРОЙТИ глобальным хендлерам (меню/помощь/политика и т.д.)
+        return  # дай пройти глобальным командам
     if HTTP_RE.match(text):
         await state.update_data(portfolio=text)
         await _finish(m, state)
@@ -134,9 +131,3 @@ async def _finish(m: Message, state: FSMContext):
     await notify_admin(summary, m.bot)
 
     await m.answer("✅ Заявка принята! Мы свяжемся в течение 1–2 дней.", reply_markup=main_menu_kb())
-
-# ==== ФОРС-ВЫХОД В МЕНЮ ====
-@router.message(StateFilter("*"), Command("menu"))
-async def force_menu(m: Message, state: FSMContext):
-    await state.clear()
-    await m.answer("Готово! Открываю меню.", reply_markup=main_menu_kb())
