@@ -7,16 +7,15 @@ from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, C
 
 from app.keyboards.reply import main_menu_kb, BTN_HELP
 from app.routers.settings import open_settings  # для перехода из help
-from app.routers.training import training_cmd   # ← добавили импорт
 
 router = Router(name="help")
 
 def help_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🏠 Меню", callback_data="go:menu")],
-        [InlineKeyboardButton(text="🏋️ Тренировка дня", callback_data="go:training")],  # ← добавили
         [InlineKeyboardButton(text="🎭 Мини-кастинг", callback_data="go:casting")],
         [InlineKeyboardButton(text="🧭 Путь лидера", callback_data="go:apply")],
+        [InlineKeyboardButton(text="🏋️ Тренировка дня", callback_data="go:training")],  # ← добавили
         [InlineKeyboardButton(text="📈 Мой прогресс", callback_data="go:progress")],
         [InlineKeyboardButton(text="🔐 Политика", callback_data="go:privacy")],
         [InlineKeyboardButton(text="⚙️ Настройки", callback_data="go:settings")],
@@ -38,29 +37,24 @@ async def help_jump(cq: CallbackQuery, state: FSMContext):
     if action == "menu":
         await cq.message.answer("Готово! Открываю меню.", reply_markup=main_menu_kb())
 
-    elif action == "training":
-        await training_cmd(cq.message, state)
-
     elif action == "casting":
-        try:
-            from app.routers.minicasting import start_minicasting_cmd
-            await start_minicasting_cmd(cq.message, state)
-        except Exception:
-            await cq.message.answer("Открой меню и нажми «🎭 Мини-кастинг».", reply_markup=main_menu_kb())
+        from app.routers.minicasting import start_minicasting_cmd
+        await start_minicasting_cmd(cq.message, state)
 
     elif action == "apply":
-        try:
-            from app.routers.leader import start_leader_cmd
-            await start_leader_cmd(cq.message, state)
-        except Exception:
-            await cq.message.answer("Открой меню и нажми «🧭 Путь лидера».", reply_markup=main_menu_kb())
+        from app.routers.leader import start_leader_cmd
+        await start_leader_cmd(cq.message, state)
+
+    elif action == "training":
+        from app.routers.training import training_start
+        await training_start(cq.message, state)
 
     elif action == "progress":
-        await cq.message.answer(
-            "📈 Мой прогресс\n\n• Стрик: 0\n• Этюдов за 7 дней: 0\n\n"
-            "Продолжай каждый день — тренировка дня в один клик 👇",
-            reply_markup=main_menu_kb()
-        )
+        try:
+            from app.routers.progress import show_progress
+            await show_progress(cq.message)
+        except Exception:
+            await cq.message.answer("📈 Статистика недоступна. Открываю меню.", reply_markup=main_menu_kb())
 
     elif action == "privacy":
         from app.routers.privacy import PRIVACY_TEXT
