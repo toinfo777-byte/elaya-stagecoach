@@ -27,8 +27,8 @@ async def menu_start_cancel(message: Message, state: FSMContext):
 async def text_to_menu(message: Message, state: FSMContext):
     await _open_menu(message, state)
 
-# инлайн «в меню» из callback’ов
-@router.callback_query(StateFilter("*"), F.data.in_({"go:menu", "to_menu"}))
+# инлайн «в меню» из callback’ов (добавили core:menu)
+@router.callback_query(StateFilter("*"), F.data.in_({"go:menu", "to_menu", "core:menu"}))
 async def cb_to_menu(cb: CallbackQuery, state: FSMContext):
     await state.clear()
     await cb.answer()
