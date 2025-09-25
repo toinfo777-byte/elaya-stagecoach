@@ -98,6 +98,13 @@ async def on_skip_or_menu(cb: CallbackQuery, state: FSMContext):
     await finish_to_menu(cb.message, state)
     await cb.answer()
 
+# универсальный возврат в меню (если прилетит core:menu от внешних клавиатур)
+@router.callback_query(StateFilter("*"), F.data == "core:menu")
+async def leader_core_menu(cb: CallbackQuery, state: FSMContext):
+    await state.clear()
+    await cb.message.answer("Готово! Открываю меню.", reply_markup=main_menu_kb())
+    await cb.answer()
+
 async def finish_to_menu(target: Message, state: FSMContext):
     await state.clear()
     await target.answer("✅ Заявка принята. Мы вернёмся с предложением.", reply_markup=main_menu_kb())
