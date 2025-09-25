@@ -69,11 +69,18 @@ async def on_answer(cb: CallbackQuery, state: FSMContext):
         kb = InlineKeyboardBuilder()
         for emo in ("🔥", "👌", "😐"):
             kb.button(text=emo, callback_data=f"fb:{emo}")
-        kb.adjust(3)
+        kb.button(text="Пропустить", callback_data="mc:skip")
+        kb.adjust(3,1)
         await cb.message.answer("Оцени опыт 🔥/👌/😐 и добавь 1 слово-ощущение (необязательно).", reply_markup=kb.as_markup())
         await state.set_state(MiniCasting.feedback)
         await save_casting_session(cb.from_user.id, answers=answers, result=("pause" if "no" in answers[:2] else "ok"))
 
+    await cb.answer()
+
+@router.callback_query(F.data == "mc:skip", StateFilter(MiniCasting.feedback, MiniCasting.q))
+async def mc_skip(cb: CallbackQuery, state: FSMContext):
+    await state.clear()
+    await cb.message.answer("Ок, вернёмся завтра. Возвращаю в меню.", reply_markup=main_menu_kb())
     await cb.answer()
 
 @router.callback_query(F.data.startswith("fb:"), MiniCasting.feedback)
@@ -82,11 +89,12 @@ async def on_fb_emoji(cb: CallbackQuery, state: FSMContext):
     await cb.message.answer("Принял эмодзи. Можешь одним словом дописать ощущение (до 140 симв) или напиши «/menu».")
     await cb.answer()
 
-@router.message(MiniCasting.feedback, F.text)
+# ⬇️ принимаем ЛЮБОЙ текст в состоянии feedback (без F.text)
+@router.message(MiniCasting.feedback)
 async def on_fb_phrase(msg: Message, state: FSMContext):
     data = await state.get_data()
     emoji = data.get("emoji", "👌")
-    phrase = (msg.text or "")[:140]
+    phrase = (msg.text or "")[:140] if msg.text else ""
     await save_feedback(msg.from_user.id, emoji=emoji, phrase=phrase)
     await state.clear()
-    await msg.answer("Спасибо! Возвращаю в меню.", reply_markup=main_menu_kb())
+    await msg.answer("Спасибо! Записал. Возвращаю в меню.", reply_markup=main_menu_kb())
