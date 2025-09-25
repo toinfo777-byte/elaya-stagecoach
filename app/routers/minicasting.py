@@ -5,8 +5,10 @@ from aiogram.types import Message, CallbackQuery
 from aiogram.fsm.state import StatesGroup, State
 from aiogram.fsm.context import FSMContext
 from aiogram.utils.keyboard import InlineKeyboardBuilder
+
 from app.storage.repo_extras import save_casting_session, save_feedback
 from app.keyboards.reply import main_menu_kb, BTN_CASTING
+from app.keyboards.inline import mc_feedback_kb
 
 router = Router(name="minicasting")
 
@@ -53,8 +55,8 @@ async def on_answer(cb: CallbackQuery, state: FSMContext):
 
     if cb.data == "mini:menu":
         await state.clear()
-        await cb.answer()
-        return await cb.message.answer("В меню.", reply_markup=main_menu_kb())
+        await cb.message.answer("Готово! Открываю меню.", reply_markup=main_menu_kb())
+        return await cb.answer()
 
     if cb.data in {"mini:yes", "mini:no"}:
         answers.append(cb.data.split(":")[1])
@@ -63,39 +65,47 @@ async def on_answer(cb: CallbackQuery, state: FSMContext):
     if q <= len(QUESTIONS):
         await state.update_data(q=q, answers=answers)
         await cb.message.edit_text(QUESTIONS[q-1], reply_markup=yn_kb())
-    else:
-        tip = "Точка роста: не давай паузе проваливаться." if answers[:2].count("no") >= 1 else "Отлично! Держи курс и темп."
-        await cb.message.edit_text(f"Итог: {tip}")
-        kb = InlineKeyboardBuilder()
-        for emo in ("🔥", "👌", "😐"):
-            kb.button(text=emo, callback_data=f"fb:{emo}")
-        kb.button(text="Пропустить", callback_data="mc:skip")
-        kb.adjust(3, 1)
-        await cb.message.answer("Оцени опыт 🔥/👌/😐 и добавь 1 слово-ощущение (необязательно).", reply_markup=kb.as_markup())
-        await state.set_state(MiniCasting.feedback)
-        await save_casting_session(cb.from_user.id, answers=answers, result=("pause" if "no" in answers[:2] else "ok"))
+        return await cb.answer()
 
+    # итог
+    tip = "Точка роста: не давай паузе проваливаться." if answers[:2].count("no") >= 1 else "Отлично! Держи курс и темп."
+    await cb.message.edit_text(f"Итог: {tip}")
+    await cb.message.answer("Оцени опыт 🔥/👌/😐 и добавь 1 слово-ощущение (необязательно).", reply_markup=mc_feedback_kb())
+    await state.set_state(MiniCasting.feedback)
+    try:
+        await save_casting_session(cb.from_user.id, answers=answers, result=("pause" if "no" in answers[:2] else "ok"))
+    except Exception:
+        pass
     await cb.answer()
 
-# ⬇️ делаем skip универсальным (из любого состояния)
-@router.callback_query(StateFilter("*"), F.data == "mc:skip")
+# Пропуск отзыва
+@router.callback_query(F.data == "mc:skip", StateFilter(MiniCasting.feedback, MiniCasting.q))
 async def mc_skip(cb: CallbackQuery, state: FSMContext):
     await state.clear()
     await cb.message.answer("Ок, вернёмся завтра. Возвращаю в меню.", reply_markup=main_menu_kb())
     await cb.answer()
 
+# Эмодзи (совместимо с текущими fb:* payload'ами)
 @router.callback_query(F.data.startswith("fb:"), MiniCasting.feedback)
 async def on_fb_emoji(cb: CallbackQuery, state: FSMContext):
-    await state.update_data(emoji=cb.data.split(":", 1)[1])
-    await cb.message.answer("Принял эмодзи. Можешь одним словом дописать ощущение (до 140 симв) или напиши «/menu».")
+    # fb:fire | fb:ok | fb:meh  (не эмодзи-сам символ, а код)
+    emoji_code = cb.data.split(":", 1)[1]
+    mapping = {"fire": "🔥", "ok": "👌", "meh": "😐"}
+    emoji = mapping.get(emoji_code, "👌")
+    try:
+        await save_feedback(cb.from_user.id, emoji=emoji, phrase=None)
+    except Exception:
+        pass
+    await cb.message.answer("Принял. Можешь одним словом дописать ощущение (до 140 симв) или нажми «В меню».")
     await cb.answer()
 
-# ⬇️ принимаем ЛЮБОЙ текст в состоянии feedback (без F.text)
+# Любой текст — сохраняем и в меню
 @router.message(MiniCasting.feedback)
 async def on_fb_phrase(msg: Message, state: FSMContext):
-    data = await state.get_data()
-    emoji = data.get("emoji", "👌")
-    phrase = (msg.text or "")[:140] if msg.text else ""
-    await save_feedback(msg.from_user.id, emoji=emoji, phrase=phrase)
+    phrase = (msg.text or "").strip()[:140] if msg.text else ""
+    try:
+        await save_feedback(msg.from_user.id, emoji="👌", phrase=phrase or None)
+    except Exception:
+        pass
     await state.clear()
     await msg.answer("Спасибо! Записал. Возвращаю в меню.", reply_markup=main_menu_kb())
