@@ -1,4 +1,3 @@
-# app/routers/help.py
 from __future__ import annotations
 
 from aiogram import Router, F
@@ -8,12 +7,14 @@ from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, C
 
 from app.keyboards.reply import main_menu_kb, BTN_HELP
 from app.routers.settings import open_settings  # для перехода из help
+from app.routers.training import training_cmd   # ← добавили импорт
 
 router = Router(name="help")
 
 def help_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🏠 Меню", callback_data="go:menu")],
+        [InlineKeyboardButton(text="🏋️ Тренировка дня", callback_data="go:training")],  # ← добавили
         [InlineKeyboardButton(text="🎭 Мини-кастинг", callback_data="go:casting")],
         [InlineKeyboardButton(text="🧭 Путь лидера", callback_data="go:apply")],
         [InlineKeyboardButton(text="📈 Мой прогресс", callback_data="go:progress")],
@@ -24,13 +25,11 @@ def help_kb() -> InlineKeyboardMarkup:
 
 HELP_HEADER = "Команды и разделы: выбери нужное ⤵️"
 
-# Глобально: из любого состояния
 @router.message(StateFilter("*"), Command("help"))
 @router.message(StateFilter("*"), F.text == BTN_HELP)
 async def help_cmd(m: Message, state: FSMContext):
     await m.answer(HELP_HEADER, reply_markup=help_kb())
 
-# ⬇️ обрабатываем колбэки из любого состояния
 @router.callback_query(StateFilter("*"), F.data.startswith("go:"))
 async def help_jump(cq: CallbackQuery, state: FSMContext):
     action = cq.data.split(":", 1)[1]
@@ -38,6 +37,9 @@ async def help_jump(cq: CallbackQuery, state: FSMContext):
 
     if action == "menu":
         await cq.message.answer("Готово! Открываю меню.", reply_markup=main_menu_kb())
+
+    elif action == "training":
+        await training_cmd(cq.message, state)
 
     elif action == "casting":
         try:
