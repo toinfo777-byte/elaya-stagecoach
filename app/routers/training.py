@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from aiogram import Router, F
-from aiogram.filters import Command, StateFilter, Text
+from aiogram.filters import Command, StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.types import Message, CallbackQuery
 from aiogram.utils.keyboard import InlineKeyboardBuilder
@@ -48,7 +48,7 @@ TRAINING_PLANS = {
 # ——— Entry points ———
 
 async def training_start(msg: Message, state: FSMContext | None = None) -> None:
-    """Универсальный старт тренировки (используется командами, кнопками и диплинками)."""
+    """Универсальный старт тренировки (команды, кнопки, диплинки)."""
     if state is not None:
         await state.clear()
     await msg.answer(
@@ -65,7 +65,7 @@ async def cmd_training(msg: Message, state: FSMContext):
     await training_start(msg, state)
 
 # Кнопка из ReplyKeyboard («🏋️ Тренировка дня»)
-@router.message(StateFilter("*"), Text(equals=BTN_TRAINING))
+@router.message(StateFilter("*"), F.text == BTN_TRAINING)
 async def btn_training(msg: Message, state: FSMContext):
     await training_start(msg, state)
 
@@ -86,7 +86,7 @@ async def show_plan(cb: CallbackQuery):
 @router.callback_query(F.data == "tr:done")
 async def training_done(cb: CallbackQuery, state: FSMContext):
     await cb.answer()
-    # Здесь можно инкрементировать прогресс/стрик в БД
+    # здесь можно инкрементировать прогресс/стрик
     await cb.message.answer("🔥 Отлично! День засчитан. Увидимся завтра!")
     await state.clear()
     await cb.message.answer("Готово! Открываю меню.", reply_markup=main_menu_kb())
