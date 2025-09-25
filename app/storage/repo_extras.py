@@ -15,11 +15,12 @@ async def save_casting_session(user_id: int, answers: list, result: str):
         ))
         await s.commit()
 
-async def save_feedback(user_id: int, emoji: str, phrase: str | None):
+# emoji делаем Optional[str], чтобы можно было сохранять «только текст»
+async def save_feedback(user_id: int, emoji: str | None, phrase: str | None):
     async with async_session() as s:
         await s.execute(insert(Feedback).values(
             user_id=user_id,
-            emoji=emoji,
+            emoji=emoji or "",
             phrase=phrase,
         ))
         await s.commit()
