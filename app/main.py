@@ -22,6 +22,7 @@ from app.routers import (
     settings as r_settings,
     extended as r_extended,
     training as r_training,
+    entrypoints as r_entrypoints,   # 🔘 Кнопки нижнего меню (текстовые)
     casting as r_casting,       # анкета (P0 фикс портфолио включён)
     apply as r_apply,           # если используешь отдельный алиас
     minicasting as r_minicasting,  # 🎭 мини-кастинг (P1)
@@ -66,6 +67,7 @@ async def main() -> None:
     # 3) ПОДКЛЮЧЕНИЕ РОУТЕРОВ (порядок ВАЖЕН!)
     # старт/диплинки
     dp.include_router(r_start.router)
+    dp.include_router(r_entrypoints.router)  # текстовые кнопки меню, из любого состояния
 
     # СЦЕНАРИИ (FSM) — ставим ПЕРЕД common
     dp.include_router(r_minicasting.router)  # 🎭 Мини-кастинг
