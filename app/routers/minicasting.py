@@ -1,23 +1,19 @@
-# app/routers/minicasting.py
-from __future__ import annotations
-
 from aiogram import Router, F
 from aiogram.filters import Command, StateFilter
 from aiogram.types import Message, CallbackQuery
 from aiogram.fsm.state import StatesGroup, State
 from aiogram.fsm.context import FSMContext
 from aiogram.utils.keyboard import InlineKeyboardBuilder
-
+from app.storage.repo_extras import save_casting_session, save_feedback
 from app.keyboards.reply import main_menu_kb, BTN_CASTING
 from app.keyboards.common import menu_btn
-from app.storage.repo_extras import save_casting_session, save_feedback
 
 router = Router(name="minicasting")
 
 class MiniCasting(StatesGroup):
     q = State()
     answers = State()
-    feedback = State()   # ждём эмодзи и/или слово-ощущение
+    feedback = State()
 
 QUESTIONS = [
     "Удержал ли 2 сек тишины перед фразой? (Да/Нет)",
@@ -41,17 +37,21 @@ async def _start_minicasting_core(msg: Message, state: FSMContext):
     await state.update_data(q=0, answers=[])
     await msg.answer("Это мини-кастинг: 2–3 мин. Отвечай коротко. Готов?", reply_markup=yn_kb())
 
-@router.message(StateFilter("*"), F.text == BTN_CASTING)
+# экспорт для reply-меню/хелпов
 async def start_minicasting(msg: Message, state: FSMContext):
+    await _start_minicasting_core(msg, state)
+
+@router.message(F.text == BTN_CASTING)
+async def start_minicasting_btn(msg: Message, state: FSMContext):
     await _start_minicasting_core(msg, state)
 
 @router.message(StateFilter("*"), Command("casting"))
 async def start_minicasting_cmd(msg: Message, state: FSMContext):
     await _start_minicasting_core(msg, state)
 
-# быстрый ACK на любые наши mini/fb/mc колбэки — убирает «крутилку»
-@router.callback_query(F.data.startswith(("mini:", "fb:", "mc:")))
-async def _ack_any(cb: CallbackQuery):
+# быстрый ACK для любых mini:* чтобы убрать «крутилку»
+@router.callback_query(F.data.startswith("mini:"))
+async def _ack_mini(cb: CallbackQuery):
     await cb.answer(cache_time=1)
 
 @router.callback_query(F.data.startswith("mini:"), MiniCasting.q)
@@ -67,41 +67,38 @@ async def on_answer(cb: CallbackQuery, state: FSMContext):
     if q <= len(QUESTIONS):
         await state.update_data(q=q, answers=answers)
         await cb.message.edit_text(QUESTIONS[q-1], reply_markup=yn_kb())
-        return
-
-    # финал: мини-совет + запрос отзыва
-    tip = "Точка роста: не давай паузе проваливаться." if answers[:2].count("no") >= 1 else "Отлично! Держи курс и темп."
-    await cb.message.edit_text(f"Итог: {tip}")
-
-    kb = InlineKeyboardBuilder()
-    for emo, code in (("🔥", "fire"), ("👌", "ok"), ("😐", "meh")):
-        kb.button(text=emo, callback_data=f"fb:{code}")
-    kb.button(text="Пропустить", callback_data="mc:skip")
-    kb.adjust(3, 1)
-    await cb.message.answer("Оцени опыт 🔥/👌/😐 и добавь 1 слово-ощущение (до 140 симв) или нажми «🏠 В меню».", reply_markup=kb.as_markup())
-    await state.set_state(MiniCasting.feedback)
-    await save_casting_session(cb.from_user.id, answers=answers, result=("pause" if "no" in answers[:2] else "ok"))
-
-@router.callback_query(F.data.startswith("fb:"), MiniCasting.feedback)
-async def on_fb_emoji(cb: CallbackQuery, state: FSMContext):
-    await state.update_data(emoji=cb.data.split(":", 1)[1])  # fire|ok|meh
-    await cb.message.answer("Принял эмодзи. Можешь одним словом дописать ощущение (до 140 симв) или нажми «🏠 В меню».", reply_markup=menu_btn())
+    else:
+        tip = "Точка роста: не давай паузе проваливаться." if answers[:2].count("no") >= 1 else "Отлично! Держи курс и темп."
+        await cb.message.edit_text(f"Итог: {tip}")
+        kb = InlineKeyboardBuilder()
+        for emo in ("🔥", "👌", "😐"):
+            kb.button(text=emo, callback_data=f"fb:{emo}")
+        kb.button(text="Пропустить", callback_data="mc:skip")
+        kb.adjust(3,1)
+        await cb.message.answer("Оцени опыт 🔥/👌/😐 и добавь 1 слово-ощущение (необязательно).", reply_markup=kb.as_markup())
+        await state.set_state(MiniCasting.feedback)
+        await save_casting_session(cb.from_user.id, answers=answers, result=("pause" if "no" in answers[:2] else "ok"))
 
 @router.callback_query(F.data == "mc:skip", StateFilter(MiniCasting.feedback, MiniCasting.q))
 async def mc_skip(cb: CallbackQuery, state: FSMContext):
-    # если уже был emoji — запишем без текста
-    data = await state.get_data()
-    if data.get("emoji"):
-        await save_feedback(cb.from_user.id, emoji=data["emoji"], phrase=None)
+    await cb.answer()
     await state.clear()
     await cb.message.answer("Ок, вернёмся завтра. Возвращаю в меню.", reply_markup=main_menu_kb())
 
-# принимаем ЛЮБОЙ текст как слово-отзыв
+@router.callback_query(F.data.startswith("fb:"), MiniCasting.feedback)
+async def on_fb_emoji(cb: CallbackQuery, state: FSMContext):
+    await cb.answer()
+    emoji = cb.data.split(":", 1)[1]  # '🔥' | '👌' | '😐'
+    await state.update_data(emoji=emoji)
+    await cb.message.answer("Принял эмодзи. Можешь одним словом дописать ощущение (до 140 симв) или нажми кнопку:",
+                            reply_markup=menu_btn())
+
+# принимаем ЛЮБОЙ апдейт в состоянии feedback → сохраняем слово и выходим в меню
 @router.message(MiniCasting.feedback)
 async def on_fb_phrase(msg: Message, state: FSMContext):
     data = await state.get_data()
-    emoji = data.get("emoji") or "ok"
-    phrase = (msg.text or "")[:140] if msg.text else ""
-    await save_feedback(msg.from_user.id, emoji=emoji, phrase=phrase or None)
+    emoji = data.get("emoji")
+    phrase = (msg.text or "")[:140] if msg.text else None
+    await save_feedback(msg.from_user.id, emoji=emoji or "👌", phrase=phrase)
     await state.clear()
     await msg.answer("Спасибо! Записал. Возвращаю в меню.", reply_markup=main_menu_kb())
