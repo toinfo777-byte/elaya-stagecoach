@@ -1,3 +1,4 @@
+# app/routers/training.py
 from __future__ import annotations
 
 from aiogram import Router, F
@@ -31,6 +32,10 @@ async def _start_training_core(message: Message, state: FSMContext):
     )
     await state.set_state(Training.wait_done)
 
+# ← новое: совместимая точка входа, чтобы её мог импортировать start.py
+async def training_start(message: Message, state: FSMContext):
+    await _start_training_core(message, state)
+
 @router.message(StateFilter("*"), F.text == BTN_TRAINING)
 async def training_btn(message: Message, state: FSMContext):
     await _start_training_core(message, state)
@@ -49,3 +54,6 @@ async def training_actions(call: CallbackQuery, state: FSMContext):
         return await call.message.answer("Готово! Открываю меню.", reply_markup=main_menu_kb())
     # переключение уровней — просто подтверждаем
     await call.message.answer("Выбери «✅ Выполнил(а)», когда закончишь.")
+
+# ← алиас для legacy-импорта: from app.routers.training import training_entry
+training_entry = training_start
