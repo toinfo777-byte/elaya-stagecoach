@@ -1,3 +1,4 @@
+# app/routers/help.py
 from __future__ import annotations
 
 from aiogram import Router, F
@@ -13,9 +14,9 @@ router = Router(name="help")
 def help_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🏠 Меню", callback_data="go:menu")],
+        [InlineKeyboardButton(text="🏋️ Тренировка дня", callback_data="go:training")],
         [InlineKeyboardButton(text="🎭 Мини-кастинг", callback_data="go:casting")],
         [InlineKeyboardButton(text="🧭 Путь лидера", callback_data="go:apply")],
-        [InlineKeyboardButton(text="🏋️ Тренировка дня", callback_data="go:training")],  # ← добавили
         [InlineKeyboardButton(text="📈 Мой прогресс", callback_data="go:progress")],
         [InlineKeyboardButton(text="🔐 Политика", callback_data="go:privacy")],
         [InlineKeyboardButton(text="⚙️ Настройки", callback_data="go:settings")],
@@ -37,6 +38,10 @@ async def help_jump(cq: CallbackQuery, state: FSMContext):
     if action == "menu":
         await cq.message.answer("Готово! Открываю меню.", reply_markup=main_menu_kb())
 
+    elif action == "training":
+        from app.routers.training import training_from_help
+        await training_from_help(cq)
+
     elif action == "casting":
         from app.routers.minicasting import start_minicasting_cmd
         await start_minicasting_cmd(cq.message, state)
@@ -45,16 +50,12 @@ async def help_jump(cq: CallbackQuery, state: FSMContext):
         from app.routers.leader import start_leader_cmd
         await start_leader_cmd(cq.message, state)
 
-    elif action == "training":
-        from app.routers.training import training_start
-        await training_start(cq.message, state)
-
     elif action == "progress":
-        try:
-            from app.routers.progress import show_progress
-            await show_progress(cq.message)
-        except Exception:
-            await cq.message.answer("📈 Статистика недоступна. Открываю меню.", reply_markup=main_menu_kb())
+        await cq.message.answer(
+            "📈 Мой прогресс\n\n• Стрик: 0\n• Этюдов за 7 дней: 0\n\n"
+            "Продолжай каждый день — тренировка дня в один клик 👇",
+            reply_markup=main_menu_kb()
+        )
 
     elif action == "privacy":
         from app.routers.privacy import PRIVACY_TEXT
