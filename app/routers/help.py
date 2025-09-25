@@ -30,17 +30,16 @@ HELP_HEADER = "Команды и разделы: выбери нужное ⤵�
 async def help_cmd(m: Message, state: FSMContext):
     await m.answer(HELP_HEADER, reply_markup=help_kb())
 
-# ⬇️ добавили StateFilter("*"), чтобы ловить колбэки из любого FSM-состояния
+# ⬇️ добавили StateFilter("*")
 @router.callback_query(StateFilter("*"), F.data.startswith("go:"))
 async def help_jump(cq: CallbackQuery, state: FSMContext):
     action = cq.data.split(":", 1)[1]
-    await state.clear()  # безопасный выход из любых сценариев
+    await state.clear()
 
     if action == "menu":
         await cq.message.answer("Готово! Открываю меню.", reply_markup=main_menu_kb())
 
     elif action == "casting":
-        # Открываем НОВЫЙ мини-кастинг
         try:
             from app.routers.minicasting import start_minicasting_cmd
             await start_minicasting_cmd(cq.message, state)
@@ -48,7 +47,6 @@ async def help_jump(cq: CallbackQuery, state: FSMContext):
             await cq.message.answer("Открой меню и нажми «🎭 Мини-кастинг».", reply_markup=main_menu_kb())
 
     elif action == "apply":
-        # Открываем НОВЫЙ «Путь лидера»
         try:
             from app.routers.leader import start_leader_cmd
             await start_leader_cmd(cq.message, state)
@@ -67,7 +65,7 @@ async def help_jump(cq: CallbackQuery, state: FSMContext):
         await cq.message.answer(PRIVACY_TEXT, reply_markup=main_menu_kb())
 
     elif action == "settings":
-        await open_settings(cq.message, state)  # ← важно передать state
+        await open_settings(cq.message, state)
 
     elif action == "extended":
         try:
