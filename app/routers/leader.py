@@ -7,104 +7,94 @@ from aiogram.filters import Command, StateFilter
 from aiogram.fsm.state import StatesGroup, State
 from aiogram.fsm.context import FSMContext
 from aiogram.types import Message, CallbackQuery
-from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from app.keyboards.reply import main_menu_kb, BTN_APPLY
-from app.storage.repo_extras import save_leader_intent, save_premium_request
+from app.keyboards.inline import leader_intent_kb, leader_skip_kb
+from app.storage.repo_extras import save_leader_intent, save_premium_request  # оставим как есть
 
 router = Router(name="leader")
 
-ADMIN_ALERT_CHAT_ID = int(os.getenv("ADMIN_ALERT_CHAT_ID", "0"))
+ADMIN_ALERT_CHAT_ID = int(os.getenv("ADMIN_ALERT_CHAT_ID", "0") or 0)
 
-class LeaderStates(StatesGroup):
-    intent = State()
-    micro = State()
-    premium = State()
+class Leader(StatesGroup):
+    waiting_micro = State()    # короткая заметка «одним словом»
+    waiting_request = State()  # опциональная фраза для premium-заявки
 
-def intent_kb():
-    kb = InlineKeyboardBuilder()
-    kb.button(text="Голос", callback_data="leader:intent:voice")
-    kb.button(text="Публичные выступления", callback_data="leader:intent:public")
-    kb.button(text="Сцена", callback_data="leader:intent:stage")
-    kb.button(text="Другое", callback_data="leader:intent:other")
-    kb.adjust(1)
-    kb.button(text="В меню", callback_data="leader:menu")
-    return kb.as_markup()
-
-def skip_kb():
-    kb = InlineKeyboardBuilder()
-    kb.button(text="Пропустить", callback_data="leader:skip")
-    kb.button(text="В меню", callback_data="leader:menu")
-    return kb.as_markup()
-
-async def _start_leader_core(msg: Message, state: FSMContext):
-    await state.set_state(LeaderStates.intent)
+async def _start(msg: Message, state: FSMContext):
+    await state.clear()
     await msg.answer(
         "Путь лидера — твой вектор. 3 шага, 2–4 минуты.\nЧто важнее сейчас?",
-        reply_markup=intent_kb(),
+        reply_markup=leader_intent_kb(),
     )
 
 # старт и по кнопке, и по команде
 @router.message(StateFilter("*"), F.text == BTN_APPLY)
 async def start_leader_btn(msg: Message, state: FSMContext):
-    await _start_leader_core(msg, state)
+    await _start(msg, state)
 
 @router.message(StateFilter("*"), Command("apply"))
 async def start_leader_cmd(msg: Message, state: FSMContext):
-    await _start_leader_core(msg, state)
+    await _start(msg, state)
 
-@router.callback_query(StateFilter(LeaderStates.intent), F.data.startswith("leader:intent:"))
-async def on_intent(cb: CallbackQuery, state: FSMContext):
-    intent = cb.data.split(":")[-1]
-    await state.update_data(intent=intent)
-    # первичная запись (без заметки)
-    await save_leader_intent(cb.from_user.id, intent=intent, micro_note=None)
-    await state.set_state(LeaderStates.micro)
-    await cb.message.edit_text("Сделай 1 круг. Одним словом: что изменилось?", reply_markup=skip_kb())
-    await cb.answer()
+# ЕДИНЫЙ разбор leader:* (intent/menu/skip/submit ...)
+@router.callback_query(StateFilter("*"), F.data.startswith("leader:"))
+async def leader_router(cb: CallbackQuery, state: FSMContext):
+    # leader:<action>:<value?>
+    parts = (cb.data or "").split(":")
+    action = parts[1] if len(parts) > 1 else ""
+    value  = parts[2] if len(parts) > 2 else None
 
-@router.message(StateFilter(LeaderStates.micro), F.text)
-async def on_micro(msg: Message, state: FSMContext):
-    note = (msg.text or "")[:140]
-    data = await state.get_data()
-    await save_leader_intent(msg.from_user.id, intent=data["intent"], micro_note=note, upsert=True)
-    await state.set_state(LeaderStates.premium)
-    await msg.answer("Оставь 1 фразу о цели. Это поможет подобрать формат.", reply_markup=skip_kb())
-
-@router.message(StateFilter(LeaderStates.premium), F.text)
-async def on_premium_text(msg: Message, state: FSMContext):
-    # сохраняем заявку и алертим админа
-    data = await state.get_data()
-    text = (msg.text or "")[:280]
-    await save_premium_request(user_id=msg.from_user.id, text=text, source="leader")
-    if ADMIN_ALERT_CHAT_ID:
-        u = msg.from_user
-        alert = (f"⭐️ Premium request\n"
-                 f"User: {u.full_name} (@{u.username}) id {u.id}\n"
-                 f"Intent: {data.get('intent')}\n"
-                 f"Source: leader\n"
-                 f"Text: {text}")
+    if action == "intent":
+        intent = value or "other"
+        await state.update_data(intent=intent)
+        # первичная запись (без заметки)
         try:
-            await msg.bot.send_message(ADMIN_ALERT_CHAT_ID, alert)
+            await save_leader_intent(cb.from_user.id, intent=intent, micro_note=None)
         except Exception:
             pass
-    await finish_to_menu(msg, state)
+        await cb.message.edit_reply_markup()  # снимаем старые кнопки
+        await cb.message.answer("Сделай 1 круг. Одним словом: что изменилось? (до 140 симв)", reply_markup=leader_skip_kb())
+        await state.set_state(Leader.waiting_micro)
+        return await cb.answer()
 
-@router.callback_query(
-    StateFilter(LeaderStates.intent, LeaderStates.micro, LeaderStates.premium),
-    F.data.in_({"leader:skip", "leader:menu"})
-)
-async def on_skip_or_menu(cb: CallbackQuery, state: FSMContext):
-    await finish_to_menu(cb.message, state)
-    await cb.answer()
+    if action in {"menu", "skip"}:
+        await state.clear()
+        await cb.message.edit_reply_markup()
+        await cb.message.answer("Готово! Открываю меню.", reply_markup=main_menu_kb())
+        return await cb.answer()
 
-# универсальный возврат в меню (если прилетит core:menu от внешних клавиатур)
-@router.callback_query(StateFilter("*"), F.data == "core:menu")
-async def leader_core_menu(cb: CallbackQuery, state: FSMContext):
+    # неизвестное действие — не молчим
+    await cb.answer("Команда обновлена. Нажми «В меню» и попробуй снова.", show_alert=False)
+
+@router.message(StateFilter(Leader.waiting_micro), F.text)
+async def leader_micro_note(msg: Message, state: FSMContext):
+    note = (msg.text or "").strip()[:140]
+    data = await state.get_data()
+    intent = data.get("intent", "other")
+    try:
+        await save_leader_intent(msg.from_user.id, intent=intent, micro_note=note, upsert=True)
+    except Exception:
+        pass
+
+    # Предложим оставить короткую цель (premium request) ИЛИ сразу в меню.
+    await msg.answer("Оставь 1 фразу о цели (до 280 симв) — поможем подобрать формат.\nИли нажми «В меню».", reply_markup=leader_skip_kb())
+    await state.set_state(Leader.waiting_request)
+
+@router.message(StateFilter(Leader.waiting_request), F.text)
+async def leader_premium_request(msg: Message, state: FSMContext):
+    text = (msg.text or "").strip()[:280]
+    try:
+        await save_premium_request(user_id=msg.from_user.id, text=text, source="leader")
+        if ADMIN_ALERT_CHAT_ID:
+            u = msg.from_user
+            await msg.bot.send_message(
+                ADMIN_ALERT_CHAT_ID,
+                f"⭐️ Premium request\n"
+                f"User: {u.full_name} (@{u.username}) id {u.id}\n"
+                f"Text: {text}"
+            )
+    except Exception:
+        pass
+
     await state.clear()
-    await cb.message.answer("Готово! Открываю меню.", reply_markup=main_menu_kb())
-    await cb.answer()
-
-async def finish_to_menu(target: Message, state: FSMContext):
-    await state.clear()
-    await target.answer("✅ Заявка принята. Мы вернёмся с предложением.", reply_markup=main_menu_kb())
+    await msg.answer("✅ Заявка принята. Мы вернёмся с предложением.", reply_markup=main_menu_kb())
