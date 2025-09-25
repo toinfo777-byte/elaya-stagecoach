@@ -30,7 +30,7 @@ HELP_HEADER = "Команды и разделы: выбери нужное ⤵�
 async def help_cmd(m: Message, state: FSMContext):
     await m.answer(HELP_HEADER, reply_markup=help_kb())
 
-# ⬇️ добавили StateFilter("*")
+# ⬇️ обрабатываем колбэки из любого состояния
 @router.callback_query(StateFilter("*"), F.data.startswith("go:"))
 async def help_jump(cq: CallbackQuery, state: FSMContext):
     action = cq.data.split(":", 1)[1]
