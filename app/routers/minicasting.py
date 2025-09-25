@@ -70,14 +70,15 @@ async def on_answer(cb: CallbackQuery, state: FSMContext):
         for emo in ("🔥", "👌", "😐"):
             kb.button(text=emo, callback_data=f"fb:{emo}")
         kb.button(text="Пропустить", callback_data="mc:skip")
-        kb.adjust(3,1)
+        kb.adjust(3, 1)
         await cb.message.answer("Оцени опыт 🔥/👌/😐 и добавь 1 слово-ощущение (необязательно).", reply_markup=kb.as_markup())
         await state.set_state(MiniCasting.feedback)
         await save_casting_session(cb.from_user.id, answers=answers, result=("pause" if "no" in answers[:2] else "ok"))
 
     await cb.answer()
 
-@router.callback_query(F.data == "mc:skip", StateFilter(MiniCasting.feedback, MiniCasting.q))
+# ⬇️ делаем skip универсальным (из любого состояния)
+@router.callback_query(StateFilter("*"), F.data == "mc:skip")
 async def mc_skip(cb: CallbackQuery, state: FSMContext):
     await state.clear()
     await cb.message.answer("Ок, вернёмся завтра. Возвращаю в меню.", reply_markup=main_menu_kb())
