@@ -11,19 +11,19 @@ from app.keyboards.reply import main_menu_kb, BTN_TRAINING
 
 router = Router(name="training")
 
-# ——— UI ———
 
 def kb_training_levels():
     kb = InlineKeyboardBuilder()
-    kb.button(text="Уровень 1 · 5 мин", callback_data="tr:l1")
+    kb.button(text="Уровень 1 · 5 мин",  callback_data="tr:l1")
     kb.button(text="Уровень 2 · 10 мин", callback_data="tr:l2")
     kb.button(text="Уровень 3 · 15 мин", callback_data="tr:l3")
-    kb.button(text="✅ Выполнил(а)",    callback_data="tr:done")
-    kb.button(text="🏠 В меню",         callback_data="go:menu")
+    kb.button(text="✅ Выполнил(а)",     callback_data="tr:done")
+    kb.button(text="🏠 В меню",          callback_data="go:menu")
     kb.adjust(1, 1, 1, 1, 1)
     return kb.as_markup()
 
-TRAINING_PLANS = {
+
+PLANS = {
     "l1": (
         "Разогрев · 5 минут\n"
         "1) Дыхание — 1 мин\n"
@@ -45,10 +45,9 @@ TRAINING_PLANS = {
     ),
 }
 
-# ——— Entry points ———
 
 async def training_start(msg: Message, state: FSMContext | None = None) -> None:
-    """Универсальный старт тренировки (команды, кнопки, диплинки)."""
+    """Единая точка входа в тренировку (кнопка, /training, диплинк, entrypoints)."""
     if state is not None:
         await state.clear()
     await msg.answer(
@@ -56,38 +55,41 @@ async def training_start(msg: Message, state: FSMContext | None = None) -> None:
         reply_markup=kb_training_levels(),
     )
 
+
 # ✅ алиас для совместимости со старыми импортами
 training_entry = training_start
 
-# Команда /training — из любого состояния
+
 @router.message(StateFilter("*"), Command("training"))
 async def cmd_training(msg: Message, state: FSMContext):
     await training_start(msg, state)
 
-# Кнопка из ReplyKeyboard («🏋️ Тренировка дня»)
+
 @router.message(StateFilter("*"), F.text == BTN_TRAINING)
 async def btn_training(msg: Message, state: FSMContext):
     await training_start(msg, state)
 
-# Переход из инлайн-меню (help / go-кнопки)
+
 @router.callback_query(StateFilter("*"), F.data == "go:training")
 async def go_training(cb: CallbackQuery, state: FSMContext):
     await cb.answer()
     await training_start(cb.message, state)
 
-# ——— Callbacks ———
 
 @router.callback_query(F.data.in_({"tr:l1", "tr:l2", "tr:l3"}))
 async def show_plan(cb: CallbackQuery):
     await cb.answer()
     key = cb.data.split(":")[1]
-    await cb.message.answer(TRAINING_PLANS[key])
+    await cb.message.answer(PLANS[key])
+
 
 @router.callback_query(F.data == "tr:done")
 async def training_done(cb: CallbackQuery, state: FSMContext):
     await cb.answer()
-    # здесь можно инкрементировать прогресс/стрик
+    # тут можно инкрементировать прогресс/стрик
     await cb.message.answer("🔥 Отлично! День засчитан. Увидимся завтра!")
     await state.clear()
     await cb.message.answer("Готово! Открываю меню.", reply_markup=main_menu_kb())
 
+
+__all__ = ["router", "training_entry", "training_start"]
