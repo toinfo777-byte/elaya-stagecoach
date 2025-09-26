@@ -14,7 +14,7 @@ router = Router(name="help")
 def help_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🏠 Меню", callback_data="go:menu")],
-        [InlineKeyboardButton(text="🏋️ Тренировка дня", callback_data="go:training")],
+        [InlineKeyboardButton(text="🏋️ Тренировка дня", callback_data="go:training")],  # ← добавили
         [InlineKeyboardButton(text="🎭 Мини-кастинг", callback_data="go:casting")],
         [InlineKeyboardButton(text="🧭 Путь лидера", callback_data="go:apply")],
         [InlineKeyboardButton(text="📈 Мой прогресс", callback_data="go:progress")],
@@ -25,6 +25,7 @@ def help_kb() -> InlineKeyboardMarkup:
 
 HELP_HEADER = "Команды и разделы: выбери нужное ⤵️"
 
+# Глобально: из любого состояния
 @router.message(StateFilter("*"), Command("help"))
 @router.message(StateFilter("*"), F.text == BTN_HELP)
 async def help_cmd(m: Message, state: FSMContext):
@@ -39,16 +40,25 @@ async def help_jump(cq: CallbackQuery, state: FSMContext):
         await cq.message.answer("Готово! Открываю меню.", reply_markup=main_menu_kb())
 
     elif action == "training":
-        from app.routers.training import training_from_help
-        await training_from_help(cq)
+        try:
+            from app.routers.training import training_start
+            await training_start(cq.message, state)
+        except Exception:
+            await cq.message.answer("Открой меню и нажми «🏋️ Тренировка дня».", reply_markup=main_menu_kb())
 
     elif action == "casting":
-        from app.routers.minicasting import start_minicasting_cmd
-        await start_minicasting_cmd(cq.message, state)
+        try:
+            from app.routers.minicasting import minicasting_entry
+            await minicasting_entry(cq.message, state)
+        except Exception:
+            await cq.message.answer("Открой меню и нажми «🎭 Мини-кастинг».", reply_markup=main_menu_kb())
 
     elif action == "apply":
-        from app.routers.leader import start_leader_cmd
-        await start_leader_cmd(cq.message, state)
+        try:
+            from app.routers.leader import _start_leader_core as start_leader  # внутренний старт
+            await start_leader(cq.message, state)
+        except Exception:
+            await cq.message.answer("Открой меню и нажми «🧭 Путь лидера».", reply_markup=main_menu_kb())
 
     elif action == "progress":
         await cq.message.answer(
