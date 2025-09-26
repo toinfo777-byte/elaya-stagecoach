@@ -17,19 +17,17 @@ from app.storage.models_extras import (
 
 logger = logging.getLogger(__name__)
 
-# --- Мини-кастинг: сессия и отзыв --------------------------------------------
+# --- Мини-кастинг ------------------------------------------------------------
 
 async def save_casting_session(user_id: int, answers: list, result: str) -> None:
-    """
-    Сохраняем итог мини-кастинга (набор ответов + простой результат).
-    """
+    """Сохраняем итог мини-кастинга (ответы + простой результат)."""
     async with async_session() as s:
         await s.execute(
             insert(CastingSession).values(
                 user_id=user_id,
                 answers=answers,
                 result=result,
-                finished_at=datetime.utcnow(),  # придерживаемся вашего naive-UTC
+                finished_at=datetime.utcnow(),  # naive-UTC в проекте
                 source="mini",
             )
         )
@@ -37,9 +35,7 @@ async def save_casting_session(user_id: int, answers: list, result: str) -> None
 
 
 async def save_feedback(user_id: int, emoji: str, phrase: str | None) -> None:
-    """
-    Сохраняем быстрый отзыв пользователя (эмодзи + опциональное слово).
-    """
+    """Сохраняем быстрый отзыв (эмодзи + опциональное слово)."""
     async with async_session() as s:
         await s.execute(
             insert(Feedback).values(
@@ -51,7 +47,7 @@ async def save_feedback(user_id: int, emoji: str, phrase: str | None) -> None:
         await s.commit()
 
 
-# --- Путь лидера --------------------------------------------------------------
+# --- Путь лидера -------------------------------------------------------------
 
 async def save_leader_intent(
     user_id: int,
@@ -59,10 +55,7 @@ async def save_leader_intent(
     micro_note: str | None,
     upsert: bool = False,
 ) -> None:
-    """
-    Сохраняем намерение пользователя в «Пути лидера».
-    Если upsert=True — обновляем запись по user_id.
-    """
+    """Сохраняем/обновляем намерение и микро-заметку в «Пути лидера»."""
     async with async_session() as s:
         if upsert:
             await s.execute(
@@ -83,9 +76,7 @@ async def save_leader_intent(
 
 
 async def save_premium_request(user_id: int, text: str, source: str) -> None:
-    """
-    Сохраняем короткую заявку пользователя в «Расширенную версию».
-    """
+    """Сохраняем короткую заявку в «Расширенную версию»."""
     async with async_session() as s:
         await s.execute(
             insert(PremiumRequest).values(
@@ -97,7 +88,7 @@ async def save_premium_request(user_id: int, text: str, source: str) -> None:
         await s.commit()
 
 
-# --- Прогресс / события (заглушка, чтобы не падать) --------------------------
+# --- Прогресс / события ------------------------------------------------------
 
 async def log_progress_event(
     user_id: int,
@@ -106,10 +97,8 @@ async def log_progress_event(
     at: Optional[datetime] = None,
 ) -> None:
     """
-    Минимальная реализация, чтобы модуль не падал при импорте.
-
-    Сейчас просто пишет событие в лог. Когда будете готовы —
-    замените тело на запись в БД (например, в таблицу progress_events).
+    Минимальная реализация: пишет событие в лог.
+    Замените на запись в БД, когда будет готова таблица.
     """
     at = at or datetime.utcnow()
     try:
@@ -120,15 +109,18 @@ async def log_progress_event(
             at.isoformat(),
             meta,
         )
-        # Пример будущей реализации:
-        # async with async_session() as s:
-        #     await s.execute(insert(ProgressEvent).values(
-        #         user_id=user_id, kind=kind, created_at=at, meta=meta or {}
-        #     ))
-        #     await s.commit()
     except Exception:
-        # даже если логирование упадёт — не роняем обработчик
         logger.exception("Failed to log progress event")
+
+
+async def get_progress(user_id: int) -> dict[str, int]:
+    """
+    Заглушка для раздела «📈 Мой прогресс».
+    Вернёт нули, чтобы бот не падал на импорте.
+    При необходимости перепишите на реальный расчёт из БД.
+    """
+    logger.info("get_progress(user_id=%s) -> stub zeros", user_id)
+    return {"streak": 0, "episodes_7d": 0}
 
 
 __all__ = [
@@ -137,4 +129,5 @@ __all__ = [
     "save_leader_intent",
     "save_premium_request",
     "log_progress_event",
+    "get_progress",
 ]
