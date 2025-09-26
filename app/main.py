@@ -1,3 +1,4 @@
+# app/main.py
 from __future__ import annotations
 
 import asyncio
@@ -52,18 +53,21 @@ async def _set_commands(bot: Bot) -> None:
 
 
 async def main() -> None:
+    # 1) схема БД
     await ensure_schema()
 
+    # 2) бот/DP
     bot = Bot(
         token=settings.bot_token,
         default=DefaultBotProperties(parse_mode=ParseMode.HTML),
     )
     dp = Dispatcher()
 
-    # срезаем webhook/очередь висячих апдейтов
+    # 3) срезать webhook и висячие апдейты (анти-конфликт polling)
     await bot.delete_webhook(drop_pending_updates=True)
 
-    # ПОДКЛЮЧЕНИЕ (порядок важен)
+    # 4) подключение роутеров (порядок важен)
+    # старт/диплинки/кнопки reply
     dp.include_router(r_start.router)
     dp.include_router(r_entrypoints.router)  # текстовые кнопки reply-клавиатуры
 
@@ -79,14 +83,16 @@ async def main() -> None:
     dp.include_router(r_settings.router)
     dp.include_router(r_extended.router)
 
-    # остальные сценарии
+    # прочие сценарии
     dp.include_router(r_training.router)
     dp.include_router(r_casting.router)
     dp.include_router(r_apply.router)
 
+    # 5) команды
     await _set_commands(bot)
     log.info("✅ Команды установлены")
 
+    # 6) polling
     log.info("🚀 Start polling…")
     await dp.start_polling(bot)
 
