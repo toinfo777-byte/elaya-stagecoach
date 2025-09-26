@@ -1,162 +1,162 @@
 from __future__ import annotations
 
 from aiogram import Router, F
-from aiogram.filters import StateFilter
-from aiogram.fsm.context import FSMContext
+from aiogram.filters import Command, StateFilter
+from aiogram.types import Message, CallbackQuery
 from aiogram.fsm.state import StatesGroup, State
-from aiogram.types import CallbackQuery, Message, InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.fsm.context import FSMContext
+from aiogram.utils.keyboard import InlineKeyboardBuilder
 
-from app.keyboards.reply import main_menu_kb
-from app.storage.repo_extras import save_casting_session, save_feedback
+from app.keyboards.reply import main_menu_kb, BTN_CASTING
+from app.storage.repo_extras import (
+    save_casting_session, save_feedback, log_progress_event
+)
 
-# единый роутер этого модуля
-mc_router = Router(name="minicasting")
-router = mc_router  # совместимость с импортом r_minicasting.router
+router = Router(name="minicasting")
 
-# ── keyboards ────────────────────────────────────────────────────────────────
-def kb_mc_start() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="Да",     callback_data="mc:s0:yes"),
-         InlineKeyboardButton(text="Нет",    callback_data="mc:s0:no")],
-        [InlineKeyboardButton(text="Дальше", callback_data="mc:s0:next")],
-        [InlineKeyboardButton(text="🏠 В меню", callback_data="go:menu")],
-    ])
 
-def kb_mc_q1() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="Да",     callback_data="mc:s1:yes"),
-         InlineKeyboardButton(text="Нет",    callback_data="mc:s1:no")],
-        [InlineKeyboardButton(text="Дальше", callback_data="mc:s1:next"),
-         InlineKeyboardButton(text="🏠 В меню", callback_data="go:menu")],
-    ])
+# === Состояния ==============================================================
 
-def kb_mc_q2() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="Да",     callback_data="mc:s2:yes"),
-         InlineKeyboardButton(text="Нет",    callback_data="mc:s2:no")],
-        [InlineKeyboardButton(text="Дальше", callback_data="mc:s2:next"),
-         InlineKeyboardButton(text="🏠 В меню", callback_data="go:menu")],
-    ])
+class MiniCasting(StatesGroup):
+    q = State()
+    feedback = State()
 
-def kb_mc_q3() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="Пауза",  callback_data="mc:s3:pause"),
-         InlineKeyboardButton(text="Тембр",  callback_data="mc:s3:timbre"),
-         InlineKeyboardButton(text="То же",  callback_data="mc:s3:same")],
-        [InlineKeyboardButton(text="🏠 В меню", callback_data="go:menu")],
-    ])
 
-def kb_mc_rate() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🔥", callback_data="mc:rate:fire"),
-         InlineKeyboardButton(text="👌", callback_data="mc:rate:ok"),
-         InlineKeyboardButton(text="😐", callback_data="mc:rate:meh")],
-        [InlineKeyboardButton(text="Пропустить", callback_data="mc:rate:skip")],
-        [InlineKeyboardButton(text="🏠 В меню", callback_data="go:menu")],
-    ])
+# === Вопросы и клавиатуры ===================================================
 
-# ── FSM: слово-ощущение ─────────────────────────────────────────────────────
-class McState(StatesGroup):
-    wait_text = State()
+QUESTIONS = [
+    "Удержал ли 2 сек тишины перед фразой? (Да/Нет)",
+    "Голос после паузы звучал ровнее? (Да/Нет)",
+    "Что было труднее? (Пауза/Тембр/То же)",
+    "Лёгкость дыхания по ощущениям? (Да/Нет)",
+    "Хочешь повторить круг сейчас? (Да/Нет)",
+]
 
-# ── PUBLIC ENTRY ─────────────────────────────────────────────────────────────
-async def start_minicasting(message_or_cq: Message | CallbackQuery, state: FSMContext):
-    """
-    Публичный вход: запускает мини-кастинг из message/callback.
-    Экспортируй и используй в help/entrypoints/deeplink.
-    """
-    if isinstance(message_or_cq, CallbackQuery):
-        await message_or_cq.answer()
-        m = message_or_cq.message
-    else:
-        m = message_or_cq
 
-    await state.clear()
-    await m.answer(
-        "🎭 Мини-кастинг: короткий чек — пауза, тембр, ощущение. "
-        "На выходе — 1 рекомендация и круг тренировки."
-    )
-    await m.answer(
-        "Это мини-кастинг: 2–3 мин. Отвечай коротко. Готов?",
-        reply_markup=kb_mc_start()
-    )
+def _yn_kb():
+    kb = InlineKeyboardBuilder()
+    kb.button(text="Да", callback_data="mini:yes")
+    kb.button(text="Нет", callback_data="mini:no")
+    kb.button(text="Дальше", callback_data="mini:next")
+    kb.button(text="🏠 В меню", callback_data="mc:skip")
+    kb.adjust(2, 2)
+    return kb.as_markup()
 
-# совместимость со старыми импортами
-minicasting_entry = start_minicasting
 
-# ── STEPS ────────────────────────────────────────────────────────────────────
-@mc_router.callback_query(StateFilter("*"), F.data.in_({"mc:s0:yes", "mc:s0:no", "mc:s0:next"}))
-async def mc_step1(cq: CallbackQuery, state: FSMContext):
-    await cq.answer()
-    await state.update_data(s0=cq.data.split(":")[-1])
-    await cq.message.answer("Q1. Удержал ли 2 сек тишины перед фразой?")
-    await cq.message.answer("Выбери вариант:", reply_markup=kb_mc_q1())
+def _feedback_kb():
+    kb = InlineKeyboardBuilder()
+    kb.button(text="🔥", callback_data="fb:fire")
+    kb.button(text="👌", callback_data="fb:ok")
+    kb.button(text="😐", callback_data="fb:meh")
+    kb.button(text="Пропустить", callback_data="mc:skip")
+    kb.adjust(3, 1)
+    return kb.as_markup()
 
-@mc_router.callback_query(StateFilter("*"), F.data.startswith("mc:s1:"))
-async def mc_step2(cq: CallbackQuery, state: FSMContext):
-    await cq.answer()
-    await state.update_data(s1=cq.data.split(":")[-1])
-    await cq.message.answer("Q2. Голос после паузы звучал ровнее?")
-    await cq.message.answer("Выбери вариант:", reply_markup=kb_mc_q2())
 
-@mc_router.callback_query(StateFilter("*"), F.data.startswith("mc:s2:"))
-async def mc_step3(cq: CallbackQuery, state: FSMContext):
-    await cq.answer()
-    await state.update_data(s2=cq.data.split(":")[-1])
-    await cq.message.answer("Q3. Что было труднее?", reply_markup=kb_mc_q3())
+# === Публичные входы ========================================================
 
-@mc_router.callback_query(StateFilter("*"), F.data.startswith("mc:s3:"))
-async def mc_summary(cq: CallbackQuery, state: FSMContext):
-    await cq.answer()
-    await state.update_data(s3=cq.data.split(":")[-1])
+async def minicasting_entry(message: Message, state: FSMContext):
+    """Единый старт мини-кастинга (кнопка/команда/диплинк)."""
+    await state.set_state(MiniCasting.q)
+    await state.update_data(q=0, answers=[], emoji=None)
+    await message.answer("Это мини-кастинг: 2–3 мин. Отвечай коротко. Готов?", reply_markup=_yn_kb())
+
+
+# алиас для совместимости
+start_minicasting = minicasting_entry
+
+
+@router.message(StateFilter("*"), F.text == BTN_CASTING)
+async def start_minicasting_by_button(msg: Message, state: FSMContext):
+    await minicasting_entry(msg, state)
+
+
+@router.message(StateFilter("*"), Command("casting", "minicasting"))
+async def start_minicasting_cmd(msg: Message, state: FSMContext):
+    await minicasting_entry(msg, state)
+
+
+# === Основной опрос =========================================================
+
+@router.callback_query(StateFilter(MiniCasting.q), F.data.startswith("mini:"))
+async def on_answer(cb: CallbackQuery, state: FSMContext):
+    await cb.answer()
 
     data = await state.get_data()
-    tip = "Точка роста: не давай паузе проваливаться." if data.get("s1") == "no" \
-          else "Точка роста: удерживай тембр после паузы."
+    q = int(data.get("q", 0))
+    answers: list = data.get("answers", [])
 
-    await cq.message.answer(f"Итог: {tip}\nСделай 1 круг тренировки и вернись.")
-    await cq.message.answer(
-        "Оцени опыт 🔥/👌/😐 и добавь 1 слово-ощущение (необязательно).",
-        reply_markup=kb_mc_rate()
-    )
+    if cb.data in {"mini:yes", "mini:no"}:
+        answers.append(cb.data.split(":")[1])
 
-    # фиксация сессии (не критично, оборачиваем в try)
-    try:
-        answers = [data.get("s0"), data.get("s1"), data.get("s2"), data.get("s3")]
-        result = "pause" if data.get("s1") == "no" else "ok"
-        await save_casting_session(cq.from_user.id, answers=answers, result=result)
-    except Exception:
+    if cb.data == "mini:next":
+        # просто перейти дальше, не добавляя ответа
         pass
 
-@mc_router.callback_query(StateFilter("*"), F.data.startswith("mc:rate:"))
-async def mc_rate(cq: CallbackQuery, state: FSMContext):
-    await cq.answer()
-    rate = cq.data.split(":")[-1]  # fire | ok | meh | skip
+    # «В меню» во время опроса — через mc:skip
+    # шаг вперёд
+    q += 1
 
-    if rate == "skip":
-        await state.clear()
-        await cq.message.answer("Спасибо! Возвращаю в меню.", reply_markup=main_menu_kb())
-        return
+    if q <= len(QUESTIONS):
+        await state.update_data(q=q, answers=answers)
+        await cb.message.edit_text(QUESTIONS[q - 1], reply_markup=_yn_kb())
+    else:
+        # мини-резюме
+        tip = "Точка роста: не давай паузе проваливаться." if answers[:2].count("no") >= 1 else "Отлично! Держи курс и темп."
+        await cb.message.edit_text(f"Итог: {tip}")
+        await cb.message.answer(
+            "Оцени опыт 🔥/👌/😐 и добавь 1 слово-ощущение (необязательно).",
+            reply_markup=_feedback_kb()
+        )
+        await state.set_state(MiniCasting.feedback)
+        # сохранить сессию
+        try:
+            await save_casting_session(cb.from_user.id, answers=answers, result=("pause" if "no" in answers[:2] else "ok"))
+        except Exception:
+            pass  # не ломаем UX
 
-    await state.update_data(rate=rate)
-    await state.set_state(McState.wait_text)
-    await cq.message.answer(
-        "Принял эмодзи. Можешь одним словом дописать ощущение (до 140 симв) "
-        "или напиши «/menu»."
-    )
 
-@mc_router.message(McState.wait_text)
-async def mc_text_feedback(msg: Message, state: FSMContext):
-    data = await state.get_data()
-    phrase = (msg.text or "").strip()[:140]
-    emoji = data.get("rate")  # fire|ok|meh
+# === Отзыв/финал ============================================================
 
+@router.callback_query(StateFilter(MiniCasting.feedback), F.data == "mc:skip")
+async def mc_skip(cb: CallbackQuery, state: FSMContext):
+    await cb.answer()
+    # зачтём событие «minicasting»
     try:
-        await save_feedback(msg.from_user.id, emoji=emoji, phrase=phrase or None)
+        await log_progress_event(cb.from_user.id, kind="minicasting", level=None)
+    except Exception:
+        pass
+    await state.clear()
+    await cb.message.answer("Ок, вернёмся завтра. Возвращаю в меню.", reply_markup=main_menu_kb())
+
+
+@router.callback_query(StateFilter(MiniCasting.feedback), F.data.startswith("fb:"))
+async def on_fb_emoji(cb: CallbackQuery, state: FSMContext):
+    await cb.answer()
+    emoji = cb.data.split(":", 1)[1]
+    await state.update_data(emoji=emoji)
+    await cb.message.answer("Принял эмодзи. Можешь одним словом дописать ощущение (до 140 симв) или напиши «/menu».")
+
+
+@router.message(StateFilter(MiniCasting.feedback))
+async def on_fb_phrase(msg: Message, state: FSMContext):
+    data = await state.get_data()
+    emoji = data.get("emoji")
+    phrase = (msg.text or "")[:140] if msg.text else None
+    try:
+        await save_feedback(msg.from_user.id, emoji=emoji, phrase=phrase)
+    except Exception:
+        pass
+    # зачтём событие «minicasting»
+    try:
+        await log_progress_event(msg.from_user.id, kind="minicasting", level=None)
     except Exception:
         pass
 
     await state.clear()
     await msg.answer("Спасибо! Записал. Возвращаю в меню.", reply_markup=main_menu_kb())
 
-__all__ = ["mc_router", "router", "start_minicasting", "minicasting_entry"]
+
+# === Экспорт ================================================================
+
+__all__ = ["router", "minicasting_entry", "start_minicasting"]
