@@ -1,4 +1,3 @@
-# app/main.py
 from __future__ import annotations
 
 import asyncio
@@ -12,22 +11,24 @@ from aiogram.types import BotCommand
 from app.config import settings
 from app.storage.repo import ensure_schema
 
-# ⬇️ ЯВНЫЕ ИМПОРТЫ РОУТЕРОВ
+# ⬇️ РОУТЕРЫ
 from app.routers import (
     start as r_start,
-    common as r_common_guard,   # глобальный выход в меню (/menu, /start)
+    common as r_common_guard,
     help as r_help,
     privacy as r_privacy,
     progress as r_progress,
     settings as r_settings,
     extended as r_extended,
     training as r_training,
-    entrypoints as r_entrypoints,   # 🔘 Кнопки нижнего меню (текстовые)
-    casting as r_casting,       # анкета (P0 фикс портфолио включён)
-    apply as r_apply,           # если используешь отдельный алиас
-    minicasting as r_minicasting,  # 🎭 мини-кастинг (P1)
-    leader as r_leader,            # 🧭 путь лидера (P1)
+    entrypoints as r_entrypoints,
+    casting as r_casting,
+    apply as r_apply,
+    leader as r_leader,
 )
+
+# ✅ новый импорт мини-кастинга — именно mc_router
+from app.routers.minicasting import mc_router
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("main")
@@ -51,48 +52,41 @@ async def _set_commands(bot: Bot) -> None:
 
 
 async def main() -> None:
-    # 1) гарантируем схему БД
     await ensure_schema()
 
-    # 2) инициализация бота
     bot = Bot(
         token=settings.bot_token,
         default=DefaultBotProperties(parse_mode=ParseMode.HTML),
     )
     dp = Dispatcher()
 
-    # ⬅️ ВАЖНО: срезать «висячие» апдейты и убрать webHook
+    # срезаем webhook/очередь висячих апдейтов
     await bot.delete_webhook(drop_pending_updates=True)
 
-    # 3) ПОДКЛЮЧЕНИЕ РОУТЕРОВ (порядок ВАЖЕН!)
-    # старт/диплинки
+    # ПОДКЛЮЧЕНИЕ (порядок важен)
     dp.include_router(r_start.router)
-    dp.include_router(r_entrypoints.router)  # текстовые кнопки меню, из любого состояния
+    dp.include_router(r_entrypoints.router)  # текстовые кнопки reply-клавиатуры
 
-    # СЦЕНАРИИ (FSM) — ставим ПЕРЕД common
-    dp.include_router(r_minicasting.router)  # 🎭 Мини-кастинг
-    dp.include_router(r_leader.router)       # 🧭 Путь лидера
+    # FSM-сценарии ПЕРЕД common
+    dp.include_router(mc_router)            # 🎭 Мини-кастинг (новый роутер)
+    dp.include_router(r_leader.router)      # 🧭 Путь лидера
 
-    # guard — глобальный выход в меню/старт/отмена
+    # глобальные команды и гвард
     dp.include_router(r_common_guard.router)
-
-    # ГЛОБАЛЬНЫЕ КОМАНДЫ
     dp.include_router(r_help.router)
     dp.include_router(r_privacy.router)
     dp.include_router(r_progress.router)
     dp.include_router(r_settings.router)
     dp.include_router(r_extended.router)
 
-    # прочие сценарные роутеры
+    # остальные сценарии
     dp.include_router(r_training.router)
     dp.include_router(r_casting.router)
-    dp.include_router(r_apply.router)        # если используешь отдельный алиас
+    dp.include_router(r_apply.router)
 
-    # 4) команды
     await _set_commands(bot)
     log.info("✅ Команды установлены")
 
-    # 5) старт long polling
     log.info("🚀 Start polling…")
     await dp.start_polling(bot)
 
