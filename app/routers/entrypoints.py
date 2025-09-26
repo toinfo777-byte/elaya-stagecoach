@@ -2,116 +2,134 @@
 from __future__ import annotations
 
 from aiogram import Router, F
-from aiogram.filters import Command, CommandStart, StateFilter
-from aiogram.filters.command import CommandObject
+from aiogram.filters import Command, StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.types import Message, CallbackQuery
 
-from app.keyboards.reply import (
-    main_menu_kb,
-    BTN_TRAINING, BTN_CASTING, BTN_APPLY, BTN_PROGRESS,
-)
-
-# профильные точки входа
-from app.routers.training import show_training_levels  # публичный entry
-from app.routers.minicasting import start_minicasting  # публичный entry
-from app.routers.progress import show_progress         # публичный entry
-
-router = Router(name="entrypoints")
+go_router = Router(name="go")
 
 
-async def _show_main_menu(target: Message | CallbackQuery, greet: bool = False) -> None:
-    if isinstance(target, CallbackQuery):
-        await target.answer()
-        m = target.message
-    else:
-        m = target
-    if greet:
-        await m.answer("Привет! Я Элайя — тренер сцены. Помогу прокачать голос и уверенность.")
-    await m.answer("Готово! Открываю меню.", reply_markup=main_menu_kb())
+# ---------- helpers
+async def _safe_import_call(mod_path: str, func_name: str, *args, **kwargs):
+    """
+    Ленивая загрузка функции-энтипоинта, чтобы избежать циклических импортов.
+    Если функция недоступна — отправляем пользователю короткий фолбэк.
+    """
+    try:
+        module = __import__(mod_path, fromlist=[func_name])
+        func = getattr(module, func_name)
+        return await func(*args, **kwargs)
+    except Exception as e:
+        # Фолбэк: тихо сообщаем и возвращаемся в меню
+        target = args[0]  # Message или CallbackQuery.message
+        msg = target if isinstance(target, Message) else target.message
+        await msg.answer("Раздел временно недоступен. Возвращаю в меню.")
+        # попытка открыть меню
+        try:
+            module = __import__("app.routers.help", fromlist=["show_main_menu"])
+            show_main_menu = getattr(module, "show_main_menu")
+            return await show_main_menu(msg)
+        except Exception:
+            return
 
 
-# ===== Команды «всегда работают» =====
-@router.message(StateFilter("*"), Command("menu", "start", "cancel"))
+# =============== Команды (сообщения) ===============
+
+@go_router.message(StateFilter("*"), Command("menu"))
 async def ep_menu_cmd(m: Message, state: FSMContext):
     await state.clear()
-    await _show_main_menu(m, greet=("start" in (m.text or "").lower()))
+    await _safe_import_call("app.routers.help", "show_main_menu", m)
 
 
-# ===== Текстовые кнопки Reply-клавиатуры =====
-@router.message(StateFilter("*"), F.text.in_({"🏠 В меню", "Меню", "В меню"}))
-async def ep_menu_btn(m: Message, state: FSMContext):
+@go_router.message(StateFilter("*"), Command("training"))
+async def ep_training_cmd(m: Message, state: FSMContext):
     await state.clear()
-    await _show_main_menu(m)
+    await _safe_import_call("app.routers.training", "show_training_levels", m, state)
 
-@router.message(StateFilter("*"), F.text == BTN_TRAINING)
-async def ep_training_btn(m: Message, state: FSMContext):
+
+@go_router.message(StateFilter("*"), Command("leader"))
+@go_router.message(StateFilter("*"), Command("apply"))
+async def ep_leader_cmd(m: Message, state: FSMContext):
     await state.clear()
-    await show_training_levels(m, state)
+    await _safe_import_call("app.routers.leader", "leader_entry", m, state)
 
-@router.message(StateFilter("*"), F.text == BTN_CASTING)
-async def ep_casting_btn(m: Message, state: FSMContext):
+
+@go_router.message(StateFilter("*"), Command("casting"))
+async def ep_casting_cmd(m: Message, state: FSMContext):
     await state.clear()
-    await start_minicasting(m, state)
+    await _safe_import_call("app.routers.minicasting", "start_minicasting", m, state)
 
-@router.message(StateFilter("*"), F.text == BTN_APPLY)
-async def ep_apply_btn(m: Message, state: FSMContext):
+
+@go_router.message(StateFilter("*"), Command("progress"))
+async def ep_progress_cmd(m: Message, state: FSMContext):
     await state.clear()
-    # единая точка входа «Путь лидера»
-    from app.routers.leader import start_leader_cmd
-    await start_leader_cmd(m, state)
+    await _safe_import_call("app.routers.progress", "show_progress", m)
 
-@router.message(StateFilter("*"), F.text == BTN_PROGRESS)
-async def ep_progress_btn(m: Message, state: FSMContext):
+
+@go_router.message(StateFilter("*"), Command("privacy"))
+async def ep_privacy_cmd(m: Message, state: FSMContext):
     await state.clear()
-    await show_progress(m)
+    await _safe_import_call("app.routers.help", "show_privacy", m)
 
 
-# ===== go:* колбэки из инлайн-меню/хелпа =====
-@router.callback_query(StateFilter("*"), F.data == "go:menu")
-async def ep_go_menu(cq: CallbackQuery, state: FSMContext):
+@go_router.message(StateFilter("*"), Command("settings"))
+async def ep_settings_cmd(m: Message, state: FSMContext):
     await state.clear()
-    await _show_main_menu(cq)
+    await _safe_import_call("app.routers.help", "show_settings", m, state)
 
-@router.callback_query(StateFilter("*"), F.data == "go:training")
-async def ep_go_training(cq: CallbackQuery, state: FSMContext):
-    await state.clear()
+
+# =============== Коллбэки (кнопки go:*) ===============
+
+@go_router.callback_query(StateFilter("*"), F.data == "go:menu")
+async def ep_menu_cb(cq: CallbackQuery, state: FSMContext):
     await cq.answer()
-    await show_training_levels(cq.message, state)
-
-@router.callback_query(StateFilter("*"), F.data == "go:casting")
-async def ep_go_casting(cq: CallbackQuery, state: FSMContext):
     await state.clear()
+    await _safe_import_call("app.routers.help", "show_main_menu", cq.message)
+
+
+@go_router.callback_query(StateFilter("*"), F.data == "go:training")
+async def ep_training_cb(cq: CallbackQuery, state: FSMContext):
     await cq.answer()
-    await start_minicasting(cq, state)
-
-@router.callback_query(StateFilter("*"), F.data == "go:progress")
-async def ep_go_progress(cq: CallbackQuery, state: FSMContext):
     await state.clear()
+    await _safe_import_call("app.routers.training", "show_training_levels", cq.message, state)
+
+
+@go_router.callback_query(StateFilter("*"), F.data == "go:leader")
+@go_router.callback_query(StateFilter("*"), F.data == "go:apply")
+async def ep_leader_cb(cq: CallbackQuery, state: FSMContext):
     await cq.answer()
-    await show_progress(cq.message)
-
-@router.callback_query(StateFilter("*"), F.data == "go:apply")
-async def ep_go_apply(cq: CallbackQuery, state: FSMContext):
     await state.clear()
+    await _safe_import_call("app.routers.leader", "leader_entry", cq, state)
+
+
+@go_router.callback_query(StateFilter("*"), F.data == "go:casting")
+async def ep_casting_cb(cq: CallbackQuery, state: FSMContext):
     await cq.answer()
-    from app.routers.leader import start_leader_cmd
-    await start_leader_cmd(cq.message, state)
-
-
-# ===== /start с диплинком =====
-@router.message(StateFilter("*"), CommandStart(deep_link=True))
-async def ep_start_deeplink(m: Message, command: CommandObject, state: FSMContext):
-    payload = (command.args or "").strip().lower()
     await state.clear()
-    if payload.startswith("go_training"):
-        return await show_training_levels(m, state)
-    if payload.startswith("go_casting"):
-        return await start_minicasting(m, state)
-    if payload.startswith("go_apply"):
-        from app.routers.leader import start_leader_cmd
-        return await start_leader_cmd(m, state)
-    return await _show_main_menu(m, greet=True)
+    await _safe_import_call("app.routers.minicasting", "start_minicasting", cq, state)
 
 
-__all__ = ["router"]
+@go_router.callback_query(StateFilter("*"), F.data == "go:progress")
+async def ep_progress_cb(cq: CallbackQuery, state: FSMContext):
+    await cq.answer()
+    await state.clear()
+    await _safe_import_call("app.routers.progress", "show_progress", cq.message)
+
+
+@go_router.callback_query(StateFilter("*"), F.data == "go:privacy")
+async def ep_privacy_cb(cq: CallbackQuery, state: FSMContext):
+    await cq.answer()
+    await state.clear()
+    await _safe_import_call("app.routers.help", "show_privacy", cq.message)
+
+
+@go_router.callback_query(StateFilter("*"), F.data == "go:settings")
+async def ep_settings_cb(cq: CallbackQuery, state: FSMContext):
+    await cq.answer()
+    await state.clear()
+    await _safe_import_call("app.routers.help", "show_settings", cq.message, state)
+
+
+# Совместимость: можно импортировать как go_router, так и router
+router = go_router
+__all__ = ["go_router", "router"]
