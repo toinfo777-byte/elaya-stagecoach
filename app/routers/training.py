@@ -90,3 +90,4 @@ async def training_done(cb: CallbackQuery, state: FSMContext):
     await cb.message.answer("🔥 Отлично! День засчитан. Увидимся завтра!")
     await state.clear()
     await cb.message.answer("Готово! Открываю меню.", reply_markup=main_menu_kb())
+
