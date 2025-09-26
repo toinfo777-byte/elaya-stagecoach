@@ -56,27 +56,22 @@ async def training_start(msg: Message, state: FSMContext | None = None) -> None:
     )
 
 
-# 🔹 ПУБЛИЧНАЯ ТОЧКА ВХОДА, которую ждут диплинки/entrypoints
+# 🔹 ПУБЛИЧНАЯ ТОЧКА ВХОДА (ожидается entrypoints/стартом)
 async def show_training_levels(message: Message, state: FSMContext) -> None:
-    """Показать список уровней тренировки (публичный entry)."""
     await training_start(message, state)
 
-
-# ✅ алиас для совместимости со старыми импортами
+# ✅ алиасы для совместимости
 training_entry = show_training_levels
 
 
-# ── Хэндлеры команд/кнопок ─────────────────────────────────────────────────────
-
+# ── Команды/кнопки входа ──────────────────────────────────────────────────────
 @router.message(StateFilter("*"), Command("training"))
 async def cmd_training(msg: Message, state: FSMContext):
     await training_start(msg, state)
 
-
 @router.message(StateFilter("*"), F.text == BTN_TRAINING)
 async def btn_training(msg: Message, state: FSMContext):
     await training_start(msg, state)
-
 
 @router.callback_query(StateFilter("*"), F.data == "go:training")
 async def go_training(cb: CallbackQuery, state: FSMContext):
@@ -84,19 +79,17 @@ async def go_training(cb: CallbackQuery, state: FSMContext):
     await training_start(cb.message, state)
 
 
-# ── Контент уровней и завершение ───────────────────────────────────────────────
-
+# ── План по уровням и завершение ──────────────────────────────────────────────
 @router.callback_query(F.data.in_({"tr:l1", "tr:l2", "tr:l3"}))
 async def show_plan(cb: CallbackQuery):
     await cb.answer()
     key = cb.data.split(":")[1]
     await cb.message.answer(PLANS[key])
 
-
 @router.callback_query(F.data == "tr:done")
 async def training_done(cb: CallbackQuery, state: FSMContext):
     await cb.answer()
-    # TODO: здесь можно инкрементировать прогресс/стрик
+    # TODO: инкрементировать прогресс/стрик в БД
     await cb.message.answer("🔥 Отлично! День засчитан. Увидимся завтра!")
     await state.clear()
     await cb.message.answer("Готово! Открываю меню.", reply_markup=main_menu_kb())
