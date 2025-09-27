@@ -1,117 +1,97 @@
 from __future__ import annotations
 
 from aiogram import Router, F
-from aiogram.filters import Command, StateFilter
-from aiogram.fsm.context import FSMContext
+from aiogram.filters import Command
 from aiogram.types import (
-    Message,
-    CallbackQuery,
-    InlineKeyboardMarkup,
-    InlineKeyboardButton,
+    Message, CallbackQuery,
+    InlineKeyboardMarkup, InlineKeyboardButton,
 )
+from aiogram.fsm.context import FSMContext
 
-from app.keyboards.reply import main_menu_kb, BTN_HELP
-from app.routers.settings import open_settings  # открыть настройки из help
+help_router = Router(name="help")
 
-router = Router(name="help")
 
-HELP_HEADER = (
-    "Команды и разделы: выбери нужное ⤵️\n\n"
-    "🏋️ Тренировка дня — ежедневная рутина 5–15 мин.\n"
-    "🎭 Мини-кастинг — быстрый чек 2–3 мин.\n"
-    "🧭 Путь лидера — цель + микро-задание + заявка.\n"
-    "📈 Мой прогресс — стрик и эпизоды за 7 дней.\n"
-    "⚙️ Настройки — профиль.\n"
-    "⭐ Расширенная версия — запрос доступа.\n"
-)  # ← скобка закрыта
+# ---------- UI ----------
+def _menu_kb() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🏋️ Тренировка дня",   callback_data="go:training")],
+        [InlineKeyboardButton(text="🎭 Мини-кастинг",     callback_data="go:casting")],
+        [InlineKeyboardButton(text="🧭 Путь лидера",      callback_data="go:leader")],
+        [InlineKeyboardButton(text="📈 Мой прогресс",     callback_data="go:progress")],
+        [InlineKeyboardButton(text="🔐 Политика",         callback_data="go:privacy")],
+        [InlineKeyboardButton(text="⚙️ Настройки",        callback_data="go:settings")],
+    ])
 
-def help_kb() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
-            [InlineKeyboardButton(text="🏠 Меню",              callback_data="go:menu")],
-            [InlineKeyboardButton(text="🏋️ Тренировка дня",    callback_data="go:training")],
-            [InlineKeyboardButton(text="🎭 Мини-кастинг",      callback_data="go:casting")],
-            [InlineKeyboardButton(text="🧭 Путь лидера",       callback_data="go:apply")],
-            [InlineKeyboardButton(text="📈 Мой прогресс",      callback_data="go:progress")],
-            [InlineKeyboardButton(text="🔐 Политика",          callback_data="go:privacy")],
-            [InlineKeyboardButton(text="⚙️ Настройки",         callback_data="go:settings")],
-            [InlineKeyboardButton(text="⭐ Расширенная версия", callback_data="go:extended")],
-        ]
+def _back_kb() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🏠 В меню", callback_data="go:menu")],
+    ])
+
+def _settings_kb() -> InlineKeyboardMarkup:
+    # ВАЖНО: callback_data на удаление профиля совпадает с твоим settings-роутером: "settings:delete"
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🏠 В меню",         callback_data="go:menu")],
+        [InlineKeyboardButton(text="🗑 Удалить профиль", callback_data="settings:delete")],
+    ])
+
+
+# ---------- универсальная отправка для Message | CallbackQuery ----------
+async def _reply(obj: Message | CallbackQuery, text: str,
+                 kb: InlineKeyboardMarkup | None = None):
+    if isinstance(obj, CallbackQuery):
+        await obj.answer()
+        await obj.message.answer(text, reply_markup=kb)
+    else:
+        await obj.answer(text, reply_markup=kb)
+
+
+# ---------- ПУБЛИЧНЫЕ ФУНКЦИИ (их импортирует entrypoints.py) ----------
+async def show_main_menu(obj: Message | CallbackQuery):
+    text = (
+        "Команды и разделы: выбери нужное ⤵️\n\n"
+        "🏋️ Тренировка дня — ежедневная рутина 5–15 мин.\n"
+        "🎭 Мини-кастинг — быстрый чек 2–3 мин.\n"
+        "🧭 Путь лидера — цель + микро-задание + заявка.\n"
+        "📈 Мой прогресс — стрик и эпизоды за 7 дней.\n"
+        "⚙️ Настройки — профиль.\n"
+        "🔐 Политика — как храним и используем ваши данные."
     )
+    await _reply(obj, text, _menu_kb())
 
-# ── /help и кнопка «Помощь» — из любого состояния
-@router.message(StateFilter("*"), Command("help"))
-@router.message(StateFilter("*"), F.text == BTN_HELP)
-async def help_cmd(m: Message, state: FSMContext):
-    await m.answer(HELP_HEADER, reply_markup=help_kb())
 
-# ── переходы по кнопкам
-@router.callback_query(StateFilter("*"), F.data == "go:menu")
-async def help_go_menu(cq: CallbackQuery, state: FSMContext):
-    await state.clear()
-    await cq.message.answer("Готово! Открываю меню.", reply_markup=main_menu_kb())
-    await cq.answer()
+async def show_privacy(obj: Message | CallbackQuery):
+    # Можешь заменить текст на свой PRIVACY_TEXT из privacy.py по желанию
+    text = (
+        "🔐 Политика конфиденциальности\n\n"
+        "Мы бережно храним ваши данные и используем их только для работы бота "
+        "и улучшения качества тренировок."
+    )
+    await _reply(obj, text, _back_kb())
 
-@router.callback_query(StateFilter("*"), F.data == "go:casting")
-async def help_go_casting(cq: CallbackQuery, state: FSMContext):
-    from app.routers.minicasting import start_minicasting  # локальный импорт, чтобы избежать циклов
-    await start_minicasting(cq.message, state)
-    await cq.answer()
 
-@router.callback_query(StateFilter("*"), F.data == "go:apply")
-async def help_go_leader(cq: CallbackQuery, state: FSMContext):
-    try:
-        from app.routers.leader import start_leader_cmd  # есть почти во всех вариантах
-        await start_leader_cmd(cq.message, state)
-    except Exception:
-        await cq.message.answer("Открой меню и нажми «🧭 Путь лидера».", reply_markup=main_menu_kb())
-    await cq.answer()
+async def show_settings(obj: Message | CallbackQuery, state: FSMContext | None = None):
+    # state тут опционален: entrypoints может передавать его, но мы не обязаны очищать
+    text = "⚙️ Настройки. Можешь удалить профиль или вернуться в меню."
+    await _reply(obj, text, _settings_kb())
 
-@router.callback_query(StateFilter("*"), F.data == "go:training")
-async def help_go_training(cq: CallbackQuery, state: FSMContext):
-    from app.routers.training import show_training_levels  # публичный entry
-    await show_training_levels(cq.message, state)
-    await cq.answer()
 
-@router.callback_query(StateFilter("*"), F.data == "go:progress")
-async def help_go_progress(cq: CallbackQuery, state: FSMContext):
-    try:
-        from app.storage.repo_extras import get_progress
-        streak, last7 = await get_progress(cq.from_user.id)
-        text = (
-            "📈 Мой прогресс\n\n"
-            f"• Стрик: {streak}\n"
-            f"• Эпизодов за 7 дней: {last7}\n\n"
-            "Продолжай каждый день — «Тренировка дня» в один клик 👇"
-        )
-    except Exception:
-        text = (
-            "📈 Мой прогресс\n\n"
-            "Статистика появится после первых тренировок.\n"
-            "Начни с «🏋️ Тренировка дня» 👇"
-        )
-    await cq.message.answer(text, reply_markup=main_menu_kb())
-    await cq.answer()
+# ---------- собственные хэндлеры раздела «Помощь» ----------
+@help_router.message(Command("help"))
+@help_router.message(F.text == "💬 Помощь")
+async def help_cmd(m: Message):
+    await show_main_menu(m)
 
-@router.callback_query(StateFilter("*"), F.data == "go:privacy")
-async def help_go_privacy(cq: CallbackQuery, state: FSMContext):
-    try:
-        from app.routers.privacy import PRIVACY_TEXT
-        await cq.message.answer(PRIVACY_TEXT, reply_markup=main_menu_kb())
-    except Exception:
-        await cq.message.answer("Политика скоро будет доступна. Возвращаю в меню.", reply_markup=main_menu_kb())
-    await cq.answer()
+@help_router.callback_query(F.data == "go:menu")
+async def cb_menu(cb: CallbackQuery):
+    await show_main_menu(cb)
 
-@router.callback_query(StateFilter("*"), F.data == "go:settings")
-async def help_go_settings(cq: CallbackQuery, state: FSMContext):
-    await open_settings(cq.message, state)
-    await cq.answer()
+@help_router.callback_query(F.data == "go:privacy")
+async def cb_privacy(cb: CallbackQuery):
+    await show_privacy(cb)
 
-@router.callback_query(StateFilter("*"), F.data == "go:extended")
-async def help_go_extended(cq: CallbackQuery, state: FSMContext):
-    try:
-        from app.routers.extended import extended_pitch
-        await extended_pitch(cq.message)
-    except Exception:
-        await cq.message.answer("⭐ Расширенная версия скоро. Возвращаю в меню.", reply_markup=main_menu_kb())
-    await cq.answer()
+@help_router.callback_query(F.data == "go:settings")
+async def cb_settings(cb: CallbackQuery):
+    await show_settings(cb)
+
+
+__all__ = ["help_router", "show_main_menu", "show_privacy", "show_settings"]
