@@ -1,3 +1,4 @@
+# app/routers/help.py
 from __future__ import annotations
 
 from aiogram import Router, F
@@ -6,12 +7,14 @@ from aiogram.types import (
     Message, CallbackQuery,
     InlineKeyboardMarkup, InlineKeyboardButton,
 )
-from aiogram.fsm.context import FSMContext
 
+# основной роутер раздела «Помощь»
 help_router = Router(name="help")
+# алиас для обратной совместимости (main.py делает r_help.router)
+router = help_router
 
 
-# ---------- UI ----------
+# ========= UI =========
 def _menu_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🏋️ Тренировка дня",   callback_data="go:training")],
@@ -24,28 +27,20 @@ def _menu_kb() -> InlineKeyboardMarkup:
 
 def _back_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🏠 В меню", callback_data="go:menu")],
-    ])
-
-def _settings_kb() -> InlineKeyboardMarkup:
-    # ВАЖНО: callback_data на удаление профиля совпадает с твоим settings-роутером: "settings:delete"
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🏠 В меню",         callback_data="go:menu")],
-        [InlineKeyboardButton(text="🗑 Удалить профиль", callback_data="settings:delete")],
+        [InlineKeyboardButton(text="🏠 В меню", callback_data="go:menu")]
     ])
 
 
-# ---------- универсальная отправка для Message | CallbackQuery ----------
+# единая функция ответа (Message | CallbackQuery)
 async def _reply(obj: Message | CallbackQuery, text: str,
                  kb: InlineKeyboardMarkup | None = None):
     if isinstance(obj, CallbackQuery):
         await obj.answer()
-        await obj.message.answer(text, reply_markup=kb)
-    else:
-        await obj.answer(text, reply_markup=kb)
+        return await obj.message.answer(text, reply_markup=kb)
+    return await obj.answer(text, reply_markup=kb)
 
 
-# ---------- ПУБЛИЧНЫЕ ФУНКЦИИ (их импортирует entrypoints.py) ----------
+# ========= ПУБЛИЧНЫЕ ФУНКЦИИ (их импортирует entrypoints.py) =========
 async def show_main_menu(obj: Message | CallbackQuery):
     text = (
         "Команды и разделы: выбери нужное ⤵️\n\n"
@@ -53,45 +48,47 @@ async def show_main_menu(obj: Message | CallbackQuery):
         "🎭 Мини-кастинг — быстрый чек 2–3 мин.\n"
         "🧭 Путь лидера — цель + микро-задание + заявка.\n"
         "📈 Мой прогресс — стрик и эпизоды за 7 дней.\n"
-        "⚙️ Настройки — профиль.\n"
-        "🔐 Политика — как храним и используем ваши данные."
+        "🔐 Политика — как храним и используем ваши данные.\n"
+        "⚙️ Настройки — профиль/удаление.\n"
     )
     await _reply(obj, text, _menu_kb())
 
-
 async def show_privacy(obj: Message | CallbackQuery):
-    # Можешь заменить текст на свой PRIVACY_TEXT из privacy.py по желанию
     text = (
         "🔐 Политика конфиденциальности\n\n"
-        "Мы бережно храним ваши данные и используем их только для работы бота "
-        "и улучшения качества тренировок."
+        "Мы бережно храним ваши данные и используем их только для работы бота.\n"
+        "Удаление профиля доступно в ⚙️ Настройках."
+    )
+    await _reply(obj, text, _back_kb())
+
+async def show_settings(obj: Message | CallbackQuery):
+    text = (
+        "⚙️ Настройки\n\n"
+        "Здесь можно вернуться в меню или удалить профиль (кнопка появится в разделе настроек).\n"
+        "Пока что — только возврат в меню."
     )
     await _reply(obj, text, _back_kb())
 
 
-async def show_settings(obj: Message | CallbackQuery, state: FSMContext | None = None):
-    # state тут опционален: entrypoints может передавать его, но мы не обязаны очищать
-    text = "⚙️ Настройки. Можешь удалить профиль или вернуться в меню."
-    await _reply(obj, text, _settings_kb())
-
-
-# ---------- собственные хэндлеры раздела «Помощь» ----------
+# ========= ХЭНДЛЕРЫ РАЗДЕЛА «ПОМОЩЬ» =========
 @help_router.message(Command("help"))
-@help_router.message(F.text == "💬 Помощь")
-async def help_cmd(m: Message):
+async def _cmd_help(m: Message):
     await show_main_menu(m)
 
 @help_router.callback_query(F.data == "go:menu")
-async def cb_menu(cb: CallbackQuery):
+async def _cb_menu(cb: CallbackQuery):
     await show_main_menu(cb)
 
 @help_router.callback_query(F.data == "go:privacy")
-async def cb_privacy(cb: CallbackQuery):
+async def _cb_privacy(cb: CallbackQuery):
     await show_privacy(cb)
 
 @help_router.callback_query(F.data == "go:settings")
-async def cb_settings(cb: CallbackQuery):
+async def _cb_settings(cb: CallbackQuery):
     await show_settings(cb)
 
 
-__all__ = ["help_router", "show_main_menu", "show_privacy", "show_settings"]
+__all__ = [
+    "help_router", "router",
+    "show_main_menu", "show_privacy", "show_settings",
+]
