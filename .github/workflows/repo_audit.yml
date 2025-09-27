@@ -1,0 +1,35 @@
+name: Repo Audit
+
+on:
+  push:                # запуск при каждом пуше в main
+    branches: [ "main" ]
+    paths:
+      - "**/*.py"
+      - ".github/workflows/repo_audit.yml"
+      - "requirements.txt"
+      - "alembic.ini"
+      - "migrations/**"
+      - "app/**"
+  pull_request:        # запуск на PR в main
+    branches: [ "main" ]
+  workflow_dispatch:   # + возможность запускать руками
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies (best effort)
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt || true
+
+      - name: Run repo_audit.py
+        run: python repo_audit.py

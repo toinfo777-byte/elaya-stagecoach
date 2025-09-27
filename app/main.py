@@ -1,102 +1,106 @@
+# app/main.py
 from __future__ import annotations
 
 import asyncio
-import importlib
 import logging
-import os
 
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
-from aiogram.types import BotCommandScopeAllPrivateChats
+from aiogram.enums import ParseMode
+from aiogram.types import BotCommand
 
 from app.config import settings
-from app.keyboards.menu import get_bot_commands
-from app.storage.repo import ensure_schema  # NEW
+from app.storage.repo import ensure_schema
 
-logging.basicConfig(
-    level=os.getenv("LOG_LEVEL", "DEBUG"),
-    format="%(asctime)s | %(levelname)-8s | %(name)s | %(message)s",
+# --- РОУТЕРЫ (точечные импорты нужных объектов) ---
+from app.routers.entrypoints import go_router              # единый вход: /menu, /training, go:* и т.п.
+from app.routers.help import help_router                   # /help + меню/настройки/политика
+from app.routers.minicasting import mc_router              # 🎭 мини-кастинг (колбэки mc:*)
+
+# если в ваших модулях экспортируется просто `router`, забираем его под явным именем:
+from app.routers.training import router as tr_router       # 🏋️ тренировка дня
+from app.routers.leader import router as leader_router     # 🧭 путь лидера
+
+# остальные разделы можно оставить как были (через модуль и .router)
+from app.routers import (
+    privacy as r_privacy,
+    progress as r_progress,
+    settings as r_settings,
+    extended as r_extended,
+    casting as r_casting,
+    apply as r_apply,
+    common as r_common_guard,   # глобальный выход в меню (/menu, /start, «В меню» текст и т.п.)
 )
+
+logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("main")
 
-BOT_TOKEN = settings.bot_token or os.getenv("BOT_TOKEN")
-if not BOT_TOKEN:
-    raise RuntimeError("Не найден BOT_TOKEN (settings.bot_token или ENV BOT_TOKEN).")
 
-DATABASE_URL = settings.db_url or os.getenv("DATABASE_URL", "sqlite:///elaya.db")
-
-
-def _import_router(module_base: str, name: str):
-    candidates = [f"{module_base}.{name}", f"{module_base}.{name}.router"]
-    for cand in candidates:
-        try:
-            mod = importlib.import_module(cand)
-            if getattr(mod, "__class__", None).__name__ == "Router":
-                return mod
-            r = getattr(mod, "router", None)
-            if r is not None:
-                return r
-        except Exception as e:
-            logging.getLogger("import").debug("Import miss %s: %s", cand, e)
-    return None
+async def _set_commands(bot: Bot) -> None:
+    cmds = [
+        BotCommand(command="start", description="Запуск / онбординг"),
+        BotCommand(command="menu", description="Главное меню"),
+        BotCommand(command="training", description="Тренировка дня"),
+        BotCommand(command="casting", description="Мини-кастинг"),
+        BotCommand(command="progress", description="Мой прогресс"),
+        BotCommand(command="apply", description="Путь лидера"),
+        BotCommand(command="privacy", description="Политика"),
+        BotCommand(command="extended", description="Расширенная версия"),
+        BotCommand(command="help", description="Помощь"),
+        BotCommand(command="settings", description="Настройки"),
+        BotCommand(command="cancel", description="Сбросить форму"),
+    ]
+    await bot.set_my_commands(cmds)
 
 
-def _include(dp: Dispatcher, name: str):
-    r = _import_router("app.routers", name)
-    if not r:
-        log.warning("Router '%s' NOT found — пропускаю", name)
-        return False
-    dp.include_router(r)
-    log.info("✅ Router '%s' подключён", name)
-    return True
+async def main() -> None:
+    # 1) схема БД
+    await ensure_schema()
 
+    # 2) бот/DP
+    bot = Bot(
+        token=settings.bot_token,
+        default=DefaultBotProperties(parse_mode=ParseMode.HTML),
+    )
+    dp = Dispatcher()
 
-async def _set_commands(bot: Bot):
-    await bot.set_my_commands(get_bot_commands(), scope=BotCommandScopeAllPrivateChats())
+    # 3) срезаем webhook и висячие апдейты (анти-конфликт polling)
+    await bot.delete_webhook(drop_pending_updates=True)
+    log.info("Webhook deleted, pending updates dropped")
+
+    # 4) подключение роутеров (порядок ВАЖЕН)
+    dp.include_routers(
+        # входные точки и алиасы колбэков — ДОЛЖЕН идти первым
+        go_router,
+
+        # сценарии (FSM) — до «common guard»
+        mc_router,        # 🎭 Мини-кастинг
+        leader_router,    # 🧭 Путь лидера
+        tr_router,        # 🏋️ Тренировка дня
+
+        # разделы
+        r_progress.router,
+        r_privacy.router,
+        r_settings.router,
+        r_extended.router,
+        r_casting.router,
+        r_apply.router,
+
+        # /help и экран меню/политика/настройки
+        help_router,
+
+        # глобальный «гвард» — САМЫЙ ПОСЛЕДНИЙ
+        r_common_guard.router,
+    )
+
+    # 5) команды
+    await _set_commands(bot)
     log.info("✅ Команды установлены")
 
-
-def build_dispatcher() -> Dispatcher:
-    dp = Dispatcher()
-    routers = [
-        "reply_shortcuts",
-        "cancel",
-        "onboarding",   # весь /start + диплинки
-        "menu",
-        "training",
-        "casting",
-        "apply",
-        "progress",
-        "settings",
-        "feedback",
-        "analytics",
-    ]
-    for name in routers:
-        _include(dp, name)
-    return dp
-
-
-async def main():
-    # 1) Создаём/мигрируем схему (dev-инициализация для SQLite и не только)
-    ensure_schema()
-
-    bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode="HTML"))
-
-    # 2) На всякий случай уберём вебхук перед long polling
-    try:
-        await bot.delete_webhook(drop_pending_updates=False)
-    except Exception as e:
-        log.debug("delete_webhook skipped: %s", e)
-
-    dp = build_dispatcher()
-    await _set_commands(bot)
-
+    # 6) polling
     log.info("🚀 Start polling…")
-    await dp.start_polling(bot, allowed_updates=None)
+    await dp.start_polling(bot)
 
 
 if __name__ == "__main__":
-    try:
-        asyncio.run(main())
-    except (KeyboardInterrupt, SystemExit):
-        log.info("Bot stopped.")
+    asyncio.run(main())

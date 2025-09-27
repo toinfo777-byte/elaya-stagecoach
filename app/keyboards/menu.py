@@ -1,58 +1,47 @@
-from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, BotCommand
+# app/keyboards/menu.py
+from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
 
-# === ЕДИНЫЕ константы текстов кнопок =========================================
-BTN_TRAINING = "🎯 Тренировка дня"
+# --- КОНСТАНТЫ КНОПОК ---
+BTN_TRAINING = "🏋️ Тренировка дня"
 BTN_APPLY = "🧭 Путь лидера"
-BTN_PRIVACY = "🔐 Политика"
-BTN_PREMIUM = "⭐ Расширенная версия"
+BTN_POLICY = "🔐 Политика"
+BTN_SETTINGS = "⚙️ Настройки"
 BTN_PROGRESS = "📈 Мой прогресс"
 BTN_CASTING = "🎭 Мини-кастинг"
 BTN_HELP = "💬 Помощь"
-BTN_SETTINGS = "⚙️ Настройки"
+BTN_EXTENDED = "⭐ Расширенная версия"
 
-# Маленькое меню (reply-кнопки)
-BTN_TO_MENU = "🏠 В меню"
-BTN_TO_SETTINGS = "⚙️ Настройки"
-BTN_WIPE = "🗑 Удалить профиль"
+BTN_MENU = "🏠 В меню"
+BTN_DELETE = "🗑 Удалить профиль"
+
+BTN_LEVEL_BEGINNER = "🟢 Новичок"
+BTN_LEVEL_MEDIUM = "🟡 Средний"
+BTN_LEVEL_PRO = "🔴 Про"
+
+BTN_DONE = "✅ Выполнил(а)"
+BTN_SKIP = "🎛 Пропустить"
+BTN_SKIP_YES = "Да, пропустить"
+BTN_SKIP_NO = "Отмена"
 
 
+# --- МЕНЮ ---
 def main_menu() -> ReplyKeyboardMarkup:
-    # 2x2 + 2x2 сетка
     return ReplyKeyboardMarkup(
         keyboard=[
             [KeyboardButton(text=BTN_TRAINING), KeyboardButton(text=BTN_PROGRESS)],
             [KeyboardButton(text=BTN_APPLY), KeyboardButton(text=BTN_CASTING)],
-            [KeyboardButton(text=BTN_PRIVACY), KeyboardButton(text=BTN_HELP)],
-            [KeyboardButton(text=BTN_SETTINGS), KeyboardButton(text=BTN_PREMIUM)],
+            [KeyboardButton(text=BTN_POLICY), KeyboardButton(text=BTN_HELP)],
+            [KeyboardButton(text=BTN_SETTINGS), KeyboardButton(text=BTN_EXTENDED)],
         ],
-        resize_keyboard=True,
-        input_field_placeholder="Меню",
+        resize_keyboard=True
     )
 
 
-def small_menu() -> ReplyKeyboardMarkup:
+def settings_menu() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
         keyboard=[
-            [KeyboardButton(text=BTN_TO_MENU), KeyboardButton(text=BTN_TO_SETTINGS)],
-            [KeyboardButton(text=BTN_WIPE)],
+            [KeyboardButton(text=BTN_MENU)],
+            [KeyboardButton(text=BTN_SETTINGS), KeyboardButton(text=BTN_DELETE)],
         ],
-        resize_keyboard=True,
+        resize_keyboard=True
     )
-
-
-def get_bot_commands() -> list[BotCommand]:
-    """
-    Единый источник для /команд:
-    aiogram v3 требует keyword-аргументы у BotCommand.
-    """
-    return [
-        BotCommand(command="start", description="Запуск / онбординг"),
-        BotCommand(command="menu", description="Открыть меню"),
-        BotCommand(command="training", description="Тренировка"),
-        BotCommand(command="progress", description="Мой прогресс"),
-        BotCommand(command="apply", description="Путь лидера"),
-        BotCommand(command="privacy", description="Политика"),
-        BotCommand(command="help", description="Помощь"),
-        BotCommand(command="settings", description="Настройки"),
-        BotCommand(command="cancel", description="Отменить текущее действие"),
-    ]
