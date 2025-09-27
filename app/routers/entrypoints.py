@@ -1,4 +1,3 @@
-# app/routers/entrypoints.py
 from __future__ import annotations
 
 from aiogram import Router, F
@@ -6,207 +5,149 @@ from aiogram.filters import Command, StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.types import Message, CallbackQuery
 
-go = Router(name="entrypoints")
+# твои реальные экран-функции:
+from app.routers.help import show_main_menu, show_privacy, show_settings
+from app.routers.training import show_training_levels
+from app.routers.leader import leader_entry
+from app.routers.minicasting import start_minicasting
+from app.routers.progress import show_progress
+# если заявка отдельно — раскомментируй:
+# from app.routers.apply import start_apply
+
+router = Router(name="entrypoints")
 
 
-# -------- внутренняя утилита: безопасно импортируем и вызываем целевую функцию --------
-async def _call_entry(mod_path: str, func_name: str, event: Message | CallbackQuery, state: FSMContext | None = None):
-    """
-    Ленивая загрузка и вызов entry-функции.
-    Пытается вызвать с (event, state) -> (event) -> (event.message, state) -> (event.message).
-    При ошибке — показывает главное меню.
-    """
-    try:
-        module = __import__(mod_path, fromlist=[func_name])
-        func = getattr(module, func_name)
-    except Exception:
-        # fallback в меню
-        await _show_menu_fallback(event)
-        return
-
-    # пробуем разные сигнатуры, чтобы не падать из-за несовпадений
-    try:
-        return await func(event, state) if state is not None else await func(event)
-    except TypeError:
-        # возможно функция ждёт только Message/CallbackQuery без state
-        try:
-            return await func(event)
-        except TypeError:
-            # возможно функция ожидала Message вместо CallbackQuery
-            msg = event.message if isinstance(event, CallbackQuery) else event
-            try:
-                return await func(msg, state) if state is not None else await func(msg)
-            except Exception:
-                await _show_menu_fallback(event)
-                return
-    except Exception:
-        await _show_menu_fallback(event)
-        return
-
-
-async def _show_menu_fallback(event: Message | CallbackQuery):
-    """Показываем главное меню как запасной вариант."""
-    try:
-        module = __import__("app.routers.help", fromlist=["show_main_menu"])
-        show_main_menu = getattr(module, "show_main_menu")
-    except Exception:
-        return
-    msg = event.message if isinstance(event, CallbackQuery) else event
-    await show_main_menu(msg)
-
-
-# ===================== Команды (сообщения) — работают из любого состояния =====================
-
-@go.message(StateFilter("*"), Command("menu"))
+# ---------- команды (работают из ЛЮБОГО состояния) ----------
+@router.message(StateFilter("*"), Command("menu"))
 async def ep_cmd_menu(m: Message, state: FSMContext):
     await state.clear()
-    await _call_entry("app.routers.help", "show_main_menu", m)
+    await show_main_menu(m)
 
-@go.message(StateFilter("*"), Command("training"))
+@router.message(StateFilter("*"), Command("training"))
 async def ep_cmd_training(m: Message, state: FSMContext):
     await state.clear()
-    await _call_entry("app.routers.training", "show_training_levels", m, state)
+    await show_training_levels(m, state)
 
-@go.message(StateFilter("*"), Command("leader"))
-@go.message(StateFilter("*"), Command("apply"))
+@router.message(StateFilter("*"), Command("apply"))
+@router.message(StateFilter("*"), Command("leader"))
 async def ep_cmd_leader(m: Message, state: FSMContext):
     await state.clear()
-    # если нет leader_entry, можно держать отдельный start_apply — _call_entry сам подстрахует
-    await _call_entry("app.routers.leader", "leader_entry", m, state)
+    await leader_entry(m, state)
 
-@go.message(StateFilter("*"), Command("casting"))
+@router.message(StateFilter("*"), Command("casting"))
 async def ep_cmd_casting(m: Message, state: FSMContext):
     await state.clear()
-    await _call_entry("app.routers.minicasting", "start_minicasting", m, state)
+    await start_minicasting(m, state)
 
-@go.message(StateFilter("*"), Command("progress"))
+@router.message(StateFilter("*"), Command("progress"))
 async def ep_cmd_progress(m: Message, state: FSMContext):
     await state.clear()
-    await _call_entry("app.routers.progress", "show_progress", m)
+    await show_progress(m)
 
-@go.message(StateFilter("*"), Command("settings"))
+@router.message(StateFilter("*"), Command("settings"))
 async def ep_cmd_settings(m: Message, state: FSMContext):
     await state.clear()
-    await _call_entry("app.routers.help", "show_settings", m, state)
+    await show_settings(m, state)
 
-@go.message(StateFilter("*"), Command("privacy"))
+@router.message(StateFilter("*"), Command("privacy"))
 async def ep_cmd_privacy(m: Message, state: FSMContext):
     await state.clear()
-    await _call_entry("app.routers.help", "show_privacy", m)
+    await show_privacy(m)
 
-@go.message(StateFilter("*"), Command("help"))
-async def ep_cmd_help(m: Message, state: FSMContext):
-    # передадим в существующий /help из вашего help.py
-    await _call_entry("app.routers.help", "help_cmd", m, state)
+# если нужен /apply из отдельного модуля:
+# @router.message(StateFilter("*"), Command("apply"))
+# async def ep_cmd_apply(m: Message, state: FSMContext):
+#     await state.clear()
+#     await start_apply(m, state)
 
 
-# ===================== Коллбэки (инлайн-кнопки) — алиасы под разные payload’ы =====================
+# ---------- алиасы callback_data для разных кнопок ----------
+MENU = {"go:menu", "menu", "to_menu", "core:menu", "home", "main_menu", "В_меню"}
+TRAIN = {"go:training", "training", "training:start"}
+LEAD  = {"go:leader", "go:apply", "leader", "apply"}
+CAST  = {"go:casting", "casting"}
+PROGR = {"go:progress", "progress"}
+SETTS = {"go:settings", "settings"}
+PRIV  = {"go:privacy", "privacy", "policy"}
 
-MENU    = {"go:menu", "menu", "to_menu", "core:menu", "home", "main_menu", "В_меню"}
-TRAIN   = {"go:training", "training", "training:start"}
-LEADER  = {"go:leader", "go:apply", "leader"}
-CAST    = {"go:casting", "casting"}
-PROGR   = {"go:progress", "progress"}
-SETTS   = {"go:settings", "settings"}
-PRIV    = {"go:privacy", "privacy", "policy"}
-
-@go.callback_query(StateFilter("*"), F.data.in_(MENU))
-async def ep_cb_menu(cq: CallbackQuery, state: FSMContext):
-    await cq.answer()
+@router.callback_query(StateFilter("*"), F.data.in_(MENU))
+async def ep_cb_menu(cb: CallbackQuery, state: FSMContext):
+    await cb.answer()
     await state.clear()
-    await _call_entry("app.routers.help", "show_main_menu", cq)
+    await show_main_menu(cb.message)
 
-@go.callback_query(StateFilter("*"), F.data.in_(TRAIN))
-async def ep_cb_training(cq: CallbackQuery, state: FSMContext):
-    await cq.answer()
+@router.callback_query(StateFilter("*"), F.data.in_(TRAIN))
+async def ep_cb_training(cb: CallbackQuery, state: FSMContext):
+    await cb.answer()
     await state.clear()
-    await _call_entry("app.routers.training", "show_training_levels", cq, state)
+    await show_training_levels(cb.message, state)
 
-@go.callback_query(StateFilter("*"), F.data.in_(LEADER))
-async def ep_cb_leader(cq: CallbackQuery, state: FSMContext):
-    await cq.answer()
+@router.callback_query(StateFilter("*"), F.data.in_(LEAD))
+async def ep_cb_leader(cb: CallbackQuery, state: FSMContext):
+    await cb.answer()
     await state.clear()
-    await _call_entry("app.routers.leader", "leader_entry", cq, state)
+    await leader_entry(cb.message, state)
 
-@go.callback_query(StateFilter("*"), F.data.in_(CAST))
-async def ep_cb_casting(cq: CallbackQuery, state: FSMContext):
-    await cq.answer()
+@router.callback_query(StateFilter("*"), F.data.in_(CAST))
+async def ep_cb_casting(cb: CallbackQuery, state: FSMContext):
+    await cb.answer()
     await state.clear()
-    await _call_entry("app.routers.minicasting", "start_minicasting", cq, state)
+    await start_minicasting(cb.message, state)
 
-@go.callback_query(StateFilter("*"), F.data.in_(PROGR))
-async def ep_cb_progress(cq: CallbackQuery, state: FSMContext):
-    await cq.answer()
+@router.callback_query(StateFilter("*"), F.data.in_(PROGR))
+async def ep_cb_progress(cb: CallbackQuery, state: FSMContext):
+    await cb.answer()
     await state.clear()
-    await _call_entry("app.routers.progress", "show_progress", cq)
+    await show_progress(cb.message)
 
-@go.callback_query(StateFilter("*"), F.data.in_(SETTS))
-async def ep_cb_settings(cq: CallbackQuery, state: FSMContext):
-    await cq.answer()
+@router.callback_query(StateFilter("*"), F.data.in_(SETTS))
+async def ep_cb_settings(cb: CallbackQuery, state: FSMContext):
+    await cb.answer()
     await state.clear()
-    await _call_entry("app.routers.help", "show_settings", cq, state)
+    await show_settings(cb.message, state)
 
-@go.callback_query(StateFilter("*"), F.data.in_(PRIV))
-async def ep_cb_privacy(cq: CallbackQuery, state: FSMContext):
-    await cq.answer()
+@router.callback_query(StateFilter("*"), F.data.in_(PRIV))
+async def ep_cb_privacy(cb: CallbackQuery, state: FSMContext):
+    await cb.answer()
     await state.clear()
-    await _call_entry("app.routers.help", "show_privacy", cq)
+    await show_privacy(cb.message)
 
 
-# ============== Текстовые кнопки с ReplyKeyboard (если используете «большое меню») ==============
-
-TEXT_MENU     = {"🏠 В меню", "Меню", "В меню"}
-TEXT_TRAIN    = {"🏋️ Тренировка дня"}
-TEXT_CAST     = {"🎭 Мини-кастинг"}
-TEXT_LEADER   = {"🧭 Путь лидера"}
-TEXT_PROGRESS = {"📈 Мой прогресс"}
-TEXT_SETTINGS = {"⚙️ Настройки"}
-TEXT_PRIVACY  = {"🔐 Политика"}
-
-@go.message(StateFilter("*"), F.text.in_(TEXT_MENU))
+# ---------- текстовые кнопки ReplyKeyboard (если используешь «большое меню») ----------
+@router.message(StateFilter("*"), F.text.in_({"🏠 В меню", "Меню", "В меню"}))
 async def ep_txt_menu(m: Message, state: FSMContext):
     await state.clear()
-    await _call_entry("app.routers.help", "show_main_menu", m)
+    await show_main_menu(m)
 
-@go.message(StateFilter("*"), F.text.in_(TEXT_TRAIN))
+@router.message(StateFilter("*"), F.text == "🏋️ Тренировка дня")
 async def ep_txt_training(m: Message, state: FSMContext):
     await state.clear()
-    await _call_entry("app.routers.training", "show_training_levels", m, state)
+    await show_training_levels(m, state)
 
-@go.message(StateFilter("*"), F.text.in_(TEXT_CAST))
+@router.message(StateFilter("*"), F.text == "🎭 Мини-кастинг")
 async def ep_txt_casting(m: Message, state: FSMContext):
     await state.clear()
-    await _call_entry("app.routers.minicasting", "start_minicasting", m, state)
+    await start_minicasting(m, state)
 
-@go.message(StateFilter("*"), F.text.in_(TEXT_LEADER))
+@router.message(StateFilter("*"), F.text == "🧭 Путь лидера")
 async def ep_txt_leader(m: Message, state: FSMContext):
     await state.clear()
-    await _call_entry("app.routers.leader", "leader_entry", m, state)
+    await leader_entry(m, state)
 
-@go.message(StateFilter("*"), F.text.in_(TEXT_PROGRESS))
+@router.message(StateFilter("*"), F.text == "📈 Мой прогресс")
 async def ep_txt_progress(m: Message, state: FSMContext):
     await state.clear()
-    await _call_entry("app.routers.progress", "show_progress", m)
+    await show_progress(m)
 
-@go.message(StateFilter("*"), F.text.in_(TEXT_SETTINGS))
+@router.message(StateFilter("*"), F.text == "⚙️ Настройки")
 async def ep_txt_settings(m: Message, state: FSMContext):
     await state.clear()
-    await _call_entry("app.routers.help", "show_settings", m, state)
+    await show_settings(m, state)
 
-@go.message(StateFilter("*"), F.text.in_(TEXT_PRIVACY))
+@router.message(StateFilter("*"), F.text == "🔐 Политика")
 async def ep_txt_privacy(m: Message, state: FSMContext):
     await state.clear()
-    await _call_entry("app.routers.help", "show_privacy", m)
+    await show_privacy(m)
 
 
-# ============== Последний «страховочный» колбэк: любые неизвестные кнопки — в меню ==============
-
-@go.callback_query()
-async def ep_fallback_cb(cq: CallbackQuery):
-    await cq.answer()
-    await _show_menu_fallback(cq)
-
-
-# совместимость с импортом r_entrypoints.router
-router = go
-__all__ = ["go", "router"]
+__all__ = ["router"]
