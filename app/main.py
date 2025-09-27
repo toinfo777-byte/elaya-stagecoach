@@ -11,17 +11,13 @@ from aiogram.types import BotCommand
 from app.config import settings
 from app.storage.repo import ensure_schema
 
-# ——— РОУТЕРЫ ———
-from app.routers.entrypoints import go_router            # единый вход: /menu, /training, go:* и т.п.
-from app.routers.help import help_router                 # /help + меню/политика/настройки
-from app.routers.training import router as tr_router     # тренировка дня (если у вас другой экспорт — поправьте)
-from app.routers.minicasting import mc_router            # мини-кастинг (mc_router должен существовать)
-from app.routers.leader import router as leader_router   # путь лидера
-from app.routers.progress import router as progress_router
-from app.routers.privacy import router as privacy_router
-from app.routers.settings import router as settings_router
-from app.routers.extended import router as extended_router
-# при необходимости: from app.routers.start import router as start_router
+# === Подключаем ТОЛЬКО новые роутеры из этого патча ===
+from app.routers.entrypoints import go_router          # единый вход / меню / алиасы
+from app.routers.help import help_router               # /help + меню/политика/настройки
+from app.routers.training import tr_router             # тренировки
+from app.routers.minicasting import mc_router          # мини-кастинг
+from app.routers.leader import leader_router           # путь лидера
+from app.routers.progress import progress_router       # прогресс
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("main")
@@ -55,21 +51,18 @@ async def main() -> None:
     )
     dp = Dispatcher()
 
-    # 3) срезать webhook и висячие апдейты (анти-конфликт polling)
+    # 3) снять webhook и дропнуть «висячие» апдейты (анти-конфликт polling)
     await bot.delete_webhook(drop_pending_updates=True)
+    log.info("Webhook deleted, pending updates dropped")
 
-    # 4) порядок подключения (важен!)
+    # 4) порядок важен: сначала вход/алиасы, затем разделы
     dp.include_routers(
-        go_router,         # ← ПЕРВЫМ: ловит /menu, /training, go:* из любого состояния
-        help_router,       # /help и базовые экраны
-        tr_router,         # тренировки
-        mc_router,         # мини-кастинг
-        leader_router,     # путь лидера
-        progress_router,   # прогресс
-        privacy_router,    # политика
-        settings_router,   # настройки
-        extended_router,   # расширенная версия
-        # start_router,    # если используете отдельный /start с диплинками
+        go_router,
+        help_router,
+        tr_router,
+        mc_router,
+        leader_router,
+        progress_router,
     )
 
     # 5) команды
