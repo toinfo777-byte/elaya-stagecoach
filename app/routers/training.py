@@ -1,99 +1,79 @@
 from __future__ import annotations
-
 from aiogram import Router, F
-from aiogram.fsm.context import FSMContext
 from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 
-# если router уже определён — не дублируем
+from app.routers.help import show_main_menu
 try:
-    router  # noqa: F821
-except NameError:
-    router = Router(name="training")
+    from app.storage.repo_extras import log_progress_event  # опционально
+except Exception:
+    async def log_progress_event(*args, **kwargs):  # заглушка
+        return None
 
-# ── тексты уровней ───────────────────────────────────────────────────────────
-LEVEL1_TEXT = (
-    "Уровень 1 · 5 мин\n\n"
-    "Дыхание — 1 мин\n"
-    "• Вдох на 4 — пауза 2 — выдох на 6 через «с». Плечи расслаблены.\n\n"
-    "Рот-язык-щелчки — 2 мин\n"
-    "• «Трель» губами/языком по 20–30 сек; 10 чётких щелчков языком.\n\n"
-    "Артикуляция — 2 мин\n"
-    "• Медленно → быстро: «Шла Саша по шоссе…». Добавь паузы (|) между смысловыми кусками."
-)
+tr_router = Router(name="training")
 
-LEVEL2_TEXT = (
-    "Уровень 2 · 10 мин\n\n"
-    "Дыхание с опорой — 3 мин\n"
-    "• Вдох вниз в бока, выдох на «ф/с», держи стабильное давление звука.\n\n"
-    "Резонаторы (м-н-з) — 3 мин\n"
-    "• Гудим «м» на 3–5 нот по гамме, ощущаем вибрацию в губах/носе/скуле.\n\n"
-    "Текст-ритм — 4 мин\n"
-    "• Прочитай абзац: 1) ровно, 2) с паузами «3-2-1», 3) с акцентами на ключевые слова."
-)
-
-LEVEL3_TEXT = (
-    "Уровень 3 · 15 мин (Про)\n\n"
-    "Резонаторы — 5 мин\n"
-    "• «м-н-нг» по нисходящей, ищем полёт без форсажа.\n"
-    "• 3 серии «би-бе-ба-бо-бу» на лёгкой опоре, не залипаем в горле.\n\n"
-    "Текст с паузами — 5 мин\n"
-    "• Выбери 6–8 фраз. Схема пауз: 2|1|3|1|2|3 (в секундах). На паузе — взгляд/жест.\n\n"
-    "Микро-этюд — 5 мин\n"
-    "• Тезис (1 фраза) → мини-история (20–30 сек) → вывод (1 фраза). "
-    "Сними 30–45 сек, оцени: темп, паузы, акценты."
-)
 
 def _levels_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="Уровень 1", callback_data="tr:level:1")],
-        [InlineKeyboardButton(text="Уровень 2", callback_data="tr:level:2")],
-        [InlineKeyboardButton(text="Уровень 3", callback_data="tr:level:3")],
+        [InlineKeyboardButton(text="Уровень 1", callback_data="tr:l1")],
+        [InlineKeyboardButton(text="Уровень 2", callback_data="tr:l2")],
+        [InlineKeyboardButton(text="Уровень 3", callback_data="tr:l3")],
         [InlineKeyboardButton(text="🏠 В меню", callback_data="go:menu")],
     ])
 
-def _done_kb(level: str) -> InlineKeyboardMarkup:
+def _done_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="✅ Выполнил(а)", callback_data=f"tr:done:{level}")],
+        [InlineKeyboardButton(text="✅ Выполнил(а)", callback_data="tr:done")],
         [InlineKeyboardButton(text="🏠 В меню", callback_data="go:menu")],
     ])
 
-# ── публичный вход ───────────────────────────────────────────────────────────
-async def show_training_levels(message: Message, state: FSMContext):
-    """Показать уровни тренировки (используется и в диплинке)."""
-    await state.clear()
+
+async def show_training_levels(obj: Message | CallbackQuery):
     text = (
         "🏋️ Тренировка дня\n\n"
-        "Выбери уровень — внутри подробные шаги. "
-        "Когда закончишь — жми «✅ Выполнил(а)». "
-        "Хочешь вернуться — «🏠 В меню»."
+        "Выбери уровень. После выполнения нажми «✅ Выполнил(а)»."
     )
-    await message.answer(text, reply_markup=_levels_kb())
+    if isinstance(obj, CallbackQuery):
+        await obj.answer()
+        await obj.message.answer(text, reply_markup=_levels_kb())
+    else:
+        await obj.answer(text, reply_markup=_levels_kb())
 
-# совместимый алиас под старые импорты
-training_entry = show_training_levels
 
-__all__ = ["router", "show_training_levels", "training_entry"]
+LEVELS = {
+    "tr:l1": (
+        "Уровень 1 · 5 мин\n\n"
+        "Дыхание — 1 мин\n• Вдох 4 — пауза 2 — выдох 6 на «с».\n\n"
+        "Рот-язык-щелчки — 2 мин\n• Трель губами/языком 20–30 сек; 10 щелчков.\n\n"
+        "Артикуляция — 2 мин\n• «Шла Саша по шоссе…» от медленно к быстро.\n\n"
+        "Когда закончишь — жми «✅ Выполнил(а)»."
+    ),
+    "tr:l2": (
+        "Уровень 2 · 10 мин\n\n"
+        "Дыхание с опорой — 3 мин\n• Вдох вниз в бока, выдох на «ф/с».\n\n"
+        "Резонаторы (м-н-з) — 3 мин\n• «м» на 3–5 нот, ищем вибрацию.\n\n"
+        "Текст–ритм — 4 мин\n• Абзац ровно → с паузами 3–2–1 → с акцентами.\n\n"
+        "Когда закончишь — жми «✅ Выполнил(а)»."
+    ),
+    "tr:l3": (
+        "Уровень 3 · 15 мин (Про)\n\n"
+        "Резонаторы — 5 мин\n• «м-н-нг» по нисходящей, полёт без форсажа.\n\n"
+        "Текст с паузами — 5 мин\n• 6–8 фраз, схема пауз 2|1|3|1|2|3.\n\n"
+        "Микро-этюд — 5 мин\n• Тезис → мини-история (20–30 сек) → вывод.\n\n"
+        "Когда закончишь — жми «✅ Выполнил(а)»."
+    ),
+}
 
-# ── хендлеры уровней/выполнения ──────────────────────────────────────────────
-@router.callback_query(F.data.startswith("tr:level:"))
-async def training_show_level(cq: CallbackQuery):
-    await cq.answer()
-    level = cq.data.split(":")[-1]
-    mapping = {"1": LEVEL1_TEXT, "2": LEVEL2_TEXT, "3": LEVEL3_TEXT}
-    text = mapping.get(level, "План скоро обновим 🙂")
+@tr_router.callback_query(F.data.in_(LEVELS.keys()))
+async def tr_level(cb: CallbackQuery):
+    await cb.answer()
+    await cb.message.answer(LEVELS[cb.data], reply_markup=_done_kb())
 
-    await cq.message.answer(text, reply_markup=_done_kb(level))
-
-@router.callback_query(F.data.startswith("tr:done:"))
-async def training_done(cq: CallbackQuery):
-    await cq.answer("Засчитано!")
-    level = cq.data.split(":")[-1]
-
-    # опционально: сохранить эпизод (если модель есть — сохранит, если нет — тихо пропустит)
+@tr_router.callback_query(F.data == "tr:done")
+async def tr_done(cb: CallbackQuery):
+    await cb.answer("Засчитано!")
     try:
-        from app.storage.repo_extras import save_training_episode
-        await save_training_episode(user_id=cq.from_user.id, level=level)
+        await log_progress_event(cb.from_user.id, kind="training", meta={})
     except Exception:
         pass
-
-    await cq.message.answer("🔥 Отлично! День засчитан. Увидимся завтра!")
+    await cb.message.answer("🔥 Отлично! День засчитан. Увидимся завтра!")
+    await show_main_menu(cb)
