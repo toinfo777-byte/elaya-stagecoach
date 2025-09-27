@@ -1,4 +1,3 @@
-# app/main.py
 from __future__ import annotations
 
 import asyncio
@@ -12,25 +11,17 @@ from aiogram.types import BotCommand
 from app.config import settings
 from app.storage.repo import ensure_schema
 
-# --- РОУТЕРЫ (точечные импорты нужных объектов) ---
-from app.routers.entrypoints import go_router              # единый вход: /menu, /training, go:* и т.п.
-from app.routers.help import help_router                   # /help + меню/настройки/политика
-from app.routers.minicasting import mc_router              # 🎭 мини-кастинг (колбэки mc:*)
-
-# если в ваших модулях экспортируется просто `router`, забираем его под явным именем:
-from app.routers.training import router as tr_router       # 🏋️ тренировка дня
-from app.routers.leader import router as leader_router     # 🧭 путь лидера
-
-# остальные разделы можно оставить как были (через модуль и .router)
-from app.routers import (
-    privacy as r_privacy,
-    progress as r_progress,
-    settings as r_settings,
-    extended as r_extended,
-    casting as r_casting,
-    apply as r_apply,
-    common as r_common_guard,   # глобальный выход в меню (/menu, /start, «В меню» текст и т.п.)
-)
+# ——— РОУТЕРЫ ———
+from app.routers.entrypoints import go_router            # единый вход: /menu, /training, go:* и т.п.
+from app.routers.help import help_router                 # /help + меню/политика/настройки
+from app.routers.training import router as tr_router     # тренировка дня (если у вас другой экспорт — поправьте)
+from app.routers.minicasting import mc_router            # мини-кастинг (mc_router должен существовать)
+from app.routers.leader import router as leader_router   # путь лидера
+from app.routers.progress import router as progress_router
+from app.routers.privacy import router as privacy_router
+from app.routers.settings import router as settings_router
+from app.routers.extended import router as extended_router
+# при необходимости: from app.routers.start import router as start_router
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("main")
@@ -64,33 +55,21 @@ async def main() -> None:
     )
     dp = Dispatcher()
 
-    # 3) срезаем webhook и висячие апдейты (анти-конфликт polling)
+    # 3) срезать webhook и висячие апдейты (анти-конфликт polling)
     await bot.delete_webhook(drop_pending_updates=True)
-    log.info("Webhook deleted, pending updates dropped")
 
-    # 4) подключение роутеров (порядок ВАЖЕН)
+    # 4) порядок подключения (важен!)
     dp.include_routers(
-        # входные точки и алиасы колбэков — ДОЛЖЕН идти первым
-        go_router,
-
-        # сценарии (FSM) — до «common guard»
-        mc_router,        # 🎭 Мини-кастинг
-        leader_router,    # 🧭 Путь лидера
-        tr_router,        # 🏋️ Тренировка дня
-
-        # разделы
-        r_progress.router,
-        r_privacy.router,
-        r_settings.router,
-        r_extended.router,
-        r_casting.router,
-        r_apply.router,
-
-        # /help и экран меню/политика/настройки
-        help_router,
-
-        # глобальный «гвард» — САМЫЙ ПОСЛЕДНИЙ
-        r_common_guard.router,
+        go_router,         # ← ПЕРВЫМ: ловит /menu, /training, go:* из любого состояния
+        help_router,       # /help и базовые экраны
+        tr_router,         # тренировки
+        mc_router,         # мини-кастинг
+        leader_router,     # путь лидера
+        progress_router,   # прогресс
+        privacy_router,    # политика
+        settings_router,   # настройки
+        extended_router,   # расширенная версия
+        # start_router,    # если используете отдельный /start с диплинками
     )
 
     # 5) команды
