@@ -1,37 +1,27 @@
-# app/routers/progress.py
 from __future__ import annotations
+from aiogram import Router
+from aiogram.types import Message, CallbackQuery
 
-from aiogram import Router, F
-from aiogram.filters import Command, StateFilter
-from aiogram.types import Message
+progress_router = Router(name="progress")
 
-from app.keyboards.reply import main_menu_kb, BTN_PROGRESS
-from app.storage.repo_extras import get_progress
+try:
+    from app.storage.repo_extras import get_progress
+except Exception:
+    async def get_progress(user_id: int):
+        return {"streak": 0, "episodes_7d": 0}
 
-router = Router(name="progress")
 
-
-async def show_progress(target: Message) -> None:
-    data = await get_progress(target.from_user.id)
-    streak = int(data.get("streak", 0))
-    last7 = int(data.get("episodes_7d", 0))
+async def show_progress(obj: Message | CallbackQuery):
+    user_id = obj.from_user.id if hasattr(obj, "from_user") else 0
+    data = await get_progress(user_id)
     text = (
         "📈 Мой прогресс\n\n"
-        f"• Стрик: {streak}\n"
-        f"• Эпизодов за 7 дней: {last7}\n\n"
-        "Продолжай каждый день — тренировка дня в один клик 👇"
+        f"• Стрик: {data.get('streak', 0)}\n"
+        f"• Эпизодов за 7 дней: {data.get('episodes_7d', 0)}\n\n"
+        "Продолжай каждый день — «Тренировка дня» в один клик 👇"
     )
-    await target.answer(text, reply_markup=main_menu_kb())
-
-
-@router.message(StateFilter("*"), Command("progress"))
-async def progress_cmd(m: Message):
-    await show_progress(m)
-
-
-@router.message(StateFilter("*"), F.text == BTN_PROGRESS)
-async def progress_btn(m: Message):
-    await show_progress(m)
-
-
-__all__ = ["router", "show_progress"]
+    if isinstance(obj, CallbackQuery):
+        await obj.answer()
+        await obj.message.answer(text)
+    else:
+        await obj.answer(text)
