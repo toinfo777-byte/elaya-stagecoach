@@ -12,24 +12,25 @@ from aiogram.types import BotCommand
 from app.config import settings
 from app.storage.repo import ensure_schema
 
-# ── РОУТЕРЫ, где имя экспорта = router ────────────────────────────────────────
-from app.routers import (
-    start as r_start,            # r_start.router
-    common as r_common_guard,    # r_common_guard.router
-    privacy as r_privacy,        # r_privacy.router
-    progress as r_progress,      # r_progress.router
-    settings as r_settings,      # r_settings.router
-    extended as r_extended,      # r_extended.router
-    training as r_training,      # r_training.router
-    casting as r_casting,        # r_casting.router (если нужен)
-    # apply as r_apply,          # ⚠️ legacy-анкету временно НЕ подключаем (см. ниже)
-)
+# --- РОУТЕРЫ (точечные импорты нужных объектов) ---
+from app.routers.entrypoints import go_router              # единый вход: /menu, /training, go:* и т.п.
+from app.routers.help import help_router                   # /help + меню/настройки/политика
+from app.routers.minicasting import mc_router              # 🎭 мини-кастинг (колбэки mc:*)
 
-# ── РОУТЕРЫ с особыми именами экспорта ────────────────────────────────────────
-from app.routers.entrypoints import go as entrypoints_router   # единый вход (команды/кнопки)
-from app.routers.help import help_router                       # /help + меню/политика/настройки
-from app.routers.leader import leader_router                   # 🧭 Путь лидера (новый)
-from app.routers.minicasting import mc_router                  # 🎭 Мини-кастинг
+# если в ваших модулях экспортируется просто `router`, забираем его под явным именем:
+from app.routers.training import router as tr_router       # 🏋️ тренировка дня
+from app.routers.leader import router as leader_router     # 🧭 путь лидера
+
+# остальные разделы можно оставить как были (через модуль и .router)
+from app.routers import (
+    privacy as r_privacy,
+    progress as r_progress,
+    settings as r_settings,
+    extended as r_extended,
+    casting as r_casting,
+    apply as r_apply,
+    common as r_common_guard,   # глобальный выход в меню (/menu, /start, «В меню» текст и т.п.)
+)
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("main")
@@ -41,8 +42,8 @@ async def _set_commands(bot: Bot) -> None:
         BotCommand(command="menu", description="Главное меню"),
         BotCommand(command="training", description="Тренировка дня"),
         BotCommand(command="casting", description="Мини-кастинг"),
-        BotCommand(command="apply", description="Путь лидера"),
         BotCommand(command="progress", description="Мой прогресс"),
+        BotCommand(command="apply", description="Путь лидера"),
         BotCommand(command="privacy", description="Политика"),
         BotCommand(command="extended", description="Расширенная версия"),
         BotCommand(command="help", description="Помощь"),
@@ -63,34 +64,34 @@ async def main() -> None:
     )
     dp = Dispatcher()
 
-    # 3) анти-конфликт long polling: убираем webhook и срезаем висячие апдейты
+    # 3) срезаем webhook и висячие апдейты (анти-конфликт polling)
     await bot.delete_webhook(drop_pending_updates=True)
     log.info("Webhook deleted, pending updates dropped")
 
-    # 4) порядок подключения ВАЖЕН
-    #    Сначала единая точка входа (команды/кнопки), затем профильные роутеры.
-    dp.include_router(entrypoints_router)   # ← перехватывает /menu, /training, тексты из Reply и go:*
-    dp.include_router(r_start.router)       # /start и диплинки
+    # 4) подключение роутеров (порядок ВАЖЕН)
+    dp.include_routers(
+        # входные точки и алиасы колбэков — ДОЛЖЕН идти первым
+        go_router,
 
-    # FSM-сценарии
-    dp.include_router(mc_router)            # 🎭 Мини-кастинг
-    dp.include_router(leader_router)        # 🧭 Путь лидера (новый сценарий)
+        # сценарии (FSM) — до «common guard»
+        mc_router,        # 🎭 Мини-кастинг
+        leader_router,    # 🧭 Путь лидера
+        tr_router,        # 🏋️ Тренировка дня
 
-    # глобальные/общие
-    dp.include_router(r_common_guard.router)
-    dp.include_router(help_router)          # /help, go:menu, go:privacy, go:settings
-    dp.include_router(r_privacy.router)
-    dp.include_router(r_progress.router)
-    dp.include_router(r_settings.router)
-    dp.include_router(r_extended.router)
+        # разделы
+        r_progress.router,
+        r_privacy.router,
+        r_settings.router,
+        r_extended.router,
+        r_casting.router,
+        r_apply.router,
 
-    # прочие сценарии
-    dp.include_router(r_training.router)
-    dp.include_router(r_casting.router)
+        # /help и экран меню/политика/настройки
+        help_router,
 
-    # ⚠️ legacy «apply»-анкета может перехватывать «🧭 Путь лидера» как текст.
-    #    Если нужна — верните строку ниже, но измените триггеры внутри роута на уникальные (например, /apply_legacy, callback_data="legacy:*").
-    # dp.include_router(r_apply.router)
+        # глобальный «гвард» — САМЫЙ ПОСЛЕДНИЙ
+        r_common_guard.router,
+    )
 
     # 5) команды
     await _set_commands(bot)
