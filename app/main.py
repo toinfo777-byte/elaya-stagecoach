@@ -12,7 +12,12 @@ from app.config import settings
 from app.storage.repo import ensure_schema
 
 # --- РОУТЕРЫ (точечные импорты нужных объектов) ---
-from app.routers.entrypoints import go_router              # единый вход: /menu, /training, go:* и т.п.
+# Надёжный импорт входного роутера: если нет go_router, берём router
+try:
+    from app.routers.entrypoints import go_router          # единый вход: /menu, /training, go:*
+except ImportError:
+    from app.routers.entrypoints import router as go_router
+
 from app.routers.help import help_router                   # /help + меню/настройки/политика
 from app.routers.minicasting import mc_router              # 🎭 мини-кастинг (колбэки mc:*)
 
@@ -20,7 +25,7 @@ from app.routers.minicasting import mc_router              # 🎭 мини-ка�
 from app.routers.training import router as tr_router       # 🏋️ тренировка дня
 from app.routers.leader import router as leader_router     # 🧭 путь лидера
 
-# остальные разделы можно оставить как были (через модуль и .router)
+# остальные разделы — через модуль и .router
 from app.routers import (
     privacy as r_privacy,
     progress as r_progress,
@@ -102,4 +107,7 @@ async def main() -> None:
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        log.info("⏹ Stopped by user")
