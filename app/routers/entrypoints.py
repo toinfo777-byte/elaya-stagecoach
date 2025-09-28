@@ -8,25 +8,28 @@ from aiogram.filters import Command, StateFilter
 from aiogram.types import Message, CallbackQuery
 from aiogram.fsm.context import FSMContext
 
-# Публичные входы разделов (экраны/действия) — используем функции, не роутер
+# Публичные входы разделов (функции экранов/действий)
 from app.routers.help import show_main_menu, show_privacy, show_settings
 from app.routers.training import show_training_levels
 from app.routers.minicasting import start_minicasting
 from app.routers.progress import show_progress
-from app.routers.leader import leader_entry        # «Путь лидера»
-from app.routers.faq import show_faq_root          # ❓ FAQ / помощь
+from app.routers.leader import leader_entry
+from app.routers.faq import show_faq_root  # ❓ FAQ / помощь
 
-# Базовый роутер этого модуля + алиасы
+# Базовый роутер + алиасы
 router = Router(name="entrypoints")
 go_router = router
 go = router
 __all__ = ["router", "go_router", "go"]
 
 # ──────────────────────────────────────────────────────────────────────────────
-# Утилита: безопасный вызов хэндлеров с/без state
+# Безопасный вызов: сначала fn(obj, state), если TypeError — fn(obj)
 # ──────────────────────────────────────────────────────────────────────────────
-async def _safe_call(fn: Callable[..., Awaitable[Any]], obj: Message | CallbackQuery, state: FSMContext) -> Any:
-    """Сначала пробуем fn(obj, state); если сигнатура без state — fn(obj)."""
+async def _safe_call(
+    fn: Callable[..., Awaitable[Any]],
+    obj: Message | CallbackQuery,
+    state: FSMContext,
+) -> Any:
     try:
         return await fn(obj, state)   # type: ignore[misc]
     except TypeError:
@@ -74,12 +77,12 @@ async def cmd_progress(m: Message, state: FSMContext):
     await _safe_call(show_progress, m, state)
 
 @go.message(StateFilter("*"), Command("settings"))
-async def cmd_settings(m: Message, state: FSMContext):
+async def cmd_settings_cmd(m: Message, state: FSMContext):
     await state.clear()
     await _safe_call(show_settings, m, state)
 
 @go.message(StateFilter("*"), Command("privacy"))
-async def cmd_privacy(m: Message, state: FSMContext):
+async def cmd_privacy_cmd(m: Message, state: FSMContext):
     await state.clear()
     await _safe_call(show_privacy, m, state)
 
@@ -172,7 +175,7 @@ async def cb_settings(cb: CallbackQuery, state: FSMContext):
     await _safe_call(show_settings, cb, state)
 
 # ──────────────────────────────────────────────────────────────────────────────
-# Фоллбек ТОЛЬКО для неизвестных go:*  (не трогаем leader:*, mc:* и т.п.)
+# Фоллбек: ТОЛЬКО для неизвестных go:* (не трогаем leader:*, mc:* и т.п.)
 # ──────────────────────────────────────────────────────────────────────────────
 _GO_PREFIX = re.compile(r"^go:")
 
