@@ -12,37 +12,29 @@ from aiogram.types import BotCommand
 from app.config import settings
 from app.storage.repo import ensure_schema
 
-# ===== Маркер билда для логов (проверь в Render Logs) =====
-BUILD_MARK = "hotfix-entrypoints-fallback-2025-09-28-1022"
+# Маркер билда — поможет убедиться в логах Render, что запущена свежая версия
+BUILD_MARK = "faq-mvp-2025-09-28-1340"
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("main")
 
-
-# --- Надёжные импорты роутеров (не падаем, если алиасов нет) ---
-
-# entrypoints: сначала пытаемся старым способом (если он ещё есть), иначе поздно загрузим через importlib
-try:
-    # Если в образ попадёт старая версия - этот импорт может бросить ImportError
-    from app.routers.entrypoints import go_router as _go_router_try  # type: ignore
-    _ENTRYPOINTS_IMPORT_STYLE = "direct:go_router"
-except Exception:
-    _go_router_try = None
-    _ENTRYPOINTS_IMPORT_STYLE = "lazy:importlib"
-
-# help: либо help_router, либо router
+# --- безопасные импорты остальных роутеров ---
+# help (исторический модуль с меню/настройками/политикой)
 try:
     from app.routers.help import help_router
 except Exception:
     from app.routers.help import router as help_router
 
-# minicasting: либо mc_router, либо router
+# FAQ — новый модуль
+from app.routers.faq import router as faq_router
+
+# minicasting: алиас или router
 try:
     from app.routers.minicasting import mc_router
 except Exception:
     from app.routers.minicasting import router as mc_router
 
-# training / leader — забираем router под явным именем
+# training / leader — под явными именами
 from app.routers.training import router as tr_router
 from app.routers.leader import router as leader_router
 
@@ -68,7 +60,7 @@ async def _set_commands(bot: Bot) -> None:
         BotCommand(command="apply", description="Путь лидера"),
         BotCommand(command="privacy", description="Политика"),
         BotCommand(command="extended", description="Расширенная версия"),
-        BotCommand(command="help", description="Помощь"),
+        BotCommand(command="help", description="FAQ / помощь"),
         BotCommand(command="settings", description="Настройки"),
         BotCommand(command="cancel", description="Сбросить форму"),
     ]
@@ -92,17 +84,14 @@ async def main() -> None:
     await bot.delete_webhook(drop_pending_updates=True)
     log.info("Webhook deleted, pending updates dropped")
 
-    # 4) входной роутер — если прямой импорт упал, грузим модуль динамически
-    if _go_router_try is not None:
-        go_router = _go_router_try
-    else:
-        ep = importlib.import_module("app.routers.entrypoints")
-        go_router = getattr(ep, "go_router", getattr(ep, "router"))
-    log.info("entrypoints loaded via %s", _ENTRYPOINTS_IMPORT_STYLE)
+    # 4) входной роутер entrypoints — динамически (надёжно против алиасов)
+    ep = importlib.import_module("app.routers.entrypoints")
+    go_router = getattr(ep, "go_router", getattr(ep, "router"))
+    log.info("entrypoints loaded: using %s", "go_router" if hasattr(ep, "go_router") else "router")
 
     # 5) подключение роутеров (порядок важен)
     dp.include_routers(
-        # входной роутер — первым
+        # входные точки — ПЕРВЫМ
         go_router,
 
         # FSM-сценарии — до «common guard»
@@ -118,7 +107,8 @@ async def main() -> None:
         r_casting.router,
         r_apply.router,
 
-        # /help и экран меню/политика/настройки
+        # FAQ и «исторический» help-модуль (экран меню/политика/настройки)
+        faq_router,
         help_router,
 
         # глобальный «гвард» — САМЫЙ ПОСЛЕДНИЙ
