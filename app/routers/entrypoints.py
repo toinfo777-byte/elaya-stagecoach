@@ -8,7 +8,7 @@ from aiogram.filters import Command, StateFilter
 from aiogram.types import Message, CallbackQuery
 from aiogram.fsm.context import FSMContext
 
-# Публичные входы разделов (экраны/действия)
+# Публичные входы разделов (экраны/действия) — используем функции, не роутер
 from app.routers.help import show_main_menu, show_privacy, show_settings
 from app.routers.training import show_training_levels
 from app.routers.minicasting import start_minicasting
@@ -16,7 +16,7 @@ from app.routers.progress import show_progress
 from app.routers.leader import leader_entry        # «Путь лидера»
 from app.routers.faq import show_faq_root          # ❓ FAQ / помощь
 
-# Базовый роутер этого модуля + алиасы (чтобы можно было импортировать и как go_router)
+# Базовый роутер этого модуля + алиасы
 router = Router(name="entrypoints")
 go_router = router
 go = router
@@ -26,10 +26,7 @@ __all__ = ["router", "go_router", "go"]
 # Утилита: безопасный вызов хэндлеров с/без state
 # ──────────────────────────────────────────────────────────────────────────────
 async def _safe_call(fn: Callable[..., Awaitable[Any]], obj: Message | CallbackQuery, state: FSMContext) -> Any:
-    """
-    Пытаемся вызвать fn(obj, state). Если сигнатура без state — вызываем fn(obj).
-    Это защищает от ошибок типа: missing 1 required positional argument: 'state'
-    """
+    """Сначала пробуем fn(obj, state); если сигнатура без state — fn(obj)."""
     try:
         return await fn(obj, state)   # type: ignore[misc]
     except TypeError:
@@ -42,6 +39,10 @@ async def _to_menu(obj: Message | CallbackQuery, state: FSMContext):
 # ──────────────────────────────────────────────────────────────────────────────
 # СЛЭШ-КОМАНДЫ (из любого стейта)
 # ──────────────────────────────────────────────────────────────────────────────
+@go.message(StateFilter("*"), Command("start"))
+async def cmd_start(m: Message, state: FSMContext):
+    await _to_menu(m, state)
+
 @go.message(StateFilter("*"), Command("menu"))
 async def cmd_menu(m: Message, state: FSMContext):
     await _to_menu(m, state)
@@ -85,7 +86,7 @@ async def cmd_privacy(m: Message, state: FSMContext):
 # ──────────────────────────────────────────────────────────────────────────────
 # ТЕКСТЫ из большой Reply-клавиатуры
 # ──────────────────────────────────────────────────────────────────────────────
-@go.message(StateFilter("*"), F.text.in_({"🏠 Меню", "Меню"}))
+@go.message(StateFilter("*"), F.text.in_({"🏠 Меню", "Меню", "В меню"}))
 async def txt_menu(m: Message, state: FSMContext):
     await _to_menu(m, state)
 
