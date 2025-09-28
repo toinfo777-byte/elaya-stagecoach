@@ -12,7 +12,7 @@ from app.config import settings
 from app.storage.repo import ensure_schema
 
 # --- РОУТЕРЫ (точечные импорты нужных объектов) ---
-# Гарантированный импорт входного роутера: берём router как go_router
+# ГАРАНТИРОВАНО: импортируем router как go_router (никаких go_router в import)
 from app.routers.entrypoints import router as go_router
 
 from app.routers.help import help_router                   # /help + меню/настройки/политика
