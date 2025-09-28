@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import importlib
 
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
@@ -11,16 +12,25 @@ from aiogram.types import BotCommand
 from app.config import settings
 from app.storage.repo import ensure_schema
 
-# --- РОУТЕРЫ (точечные импорты нужных объектов) ---
-# ГАРАНТИРОВАНО: импортируем router как go_router (никаких go_router в import)
-from app.routers.entrypoints import router as go_router
+logging.basicConfig(level=logging.INFO)
+log = logging.getLogger("main")
 
-from app.routers.help import help_router                   # /help + меню/настройки/политика
-from app.routers.minicasting import mc_router              # 🎭 мини-кастинг (колбэки mc:*)
+# --- «мягкие» импорты роутеров, чтобы не падать из-за имён ---
+# help: либо help_router, либо router
+try:
+    from app.routers.help import help_router
+except Exception:
+    from app.routers.help import router as help_router
 
-# если в ваших модулях экспортируется просто `router`, забираем его под явным именем:
-from app.routers.training import router as tr_router       # 🏋️ тренировка дня
-from app.routers.leader import router as leader_router     # 🧭 путь лидера
+# minicasting: либо mc_router, либо router
+try:
+    from app.routers.minicasting import mc_router
+except Exception:
+    from app.routers.minicasting import router as mc_router
+
+# training / leader — забираем router под явным именем
+from app.routers.training import router as tr_router
+from app.routers.leader import router as leader_router
 
 # остальные разделы — через модуль и .router
 from app.routers import (
@@ -30,11 +40,8 @@ from app.routers import (
     extended as r_extended,
     casting as r_casting,
     apply as r_apply,
-    common as r_common_guard,   # глобальный выход в меню (/menu, /start, «В меню» текст и т.п.)
+    common as r_common_guard,  # глобальный guard в самом конце
 )
-
-logging.basicConfig(level=logging.INFO)
-log = logging.getLogger("main")
 
 
 async def _set_commands(bot: Bot) -> None:
@@ -65,16 +72,21 @@ async def main() -> None:
     )
     dp = Dispatcher()
 
-    # 3) срезаем webhook и висячие апдейты (анти-конфликт polling)
+    # 3) обнуляем webhook и висячие апдейты
     await bot.delete_webhook(drop_pending_updates=True)
     log.info("Webhook deleted, pending updates dropped")
 
-    # 4) подключение роутеров (порядок ВАЖЕН)
+    # 4) входной роутер — БЕЗ топ-импорта: динамически через importlib
+    ep = importlib.import_module("app.routers.entrypoints")
+    go_router = getattr(ep, "go_router", getattr(ep, "router"))
+    log.info("entrypoints loaded: using %s", "go_router" if hasattr(ep, "go_router") else "router")
+
+    # 5) подключение роутеров (порядок важен)
     dp.include_routers(
-        # входные точки и алиасы колбэков — ДОЛЖЕН идти первым
+        # входной роутер — первым
         go_router,
 
-        # сценарии (FSM) — до «common guard»
+        # FSM-сценарии — до «common guard»
         mc_router,        # 🎭 Мини-кастинг
         leader_router,    # 🧭 Путь лидера
         tr_router,        # 🏋️ Тренировка дня
@@ -94,11 +106,11 @@ async def main() -> None:
         r_common_guard.router,
     )
 
-    # 5) команды
+    # 6) команды
     await _set_commands(bot)
     log.info("✅ Команды установлены")
 
-    # 6) polling
+    # 7) polling
     log.info("🚀 Start polling…")
     await dp.start_polling(bot)
 
