@@ -16,7 +16,6 @@ from app.routers.leader import leader_entry  # «Путь лидера»
 router = Router(name="entrypoints")
 go_router = router
 go = router
-
 __all__ = ["router", "go_router", "go"]
 
 # ---------------------------------------------------------------------------
@@ -41,7 +40,7 @@ async def cmd_casting(m: Message, state: FSMContext):
     await start_minicasting(m)
 
 @go.message(StateFilter("*"), Command("leader"))
-@go.message(StateFilter("*"), Command("apply"))   # алиас на «Путь лидера»
+@go.message(StateFilter("*"), Command("apply"))
 async def cmd_leader(m: Message, state: FSMContext):
     await state.clear()
     await leader_entry(m)
