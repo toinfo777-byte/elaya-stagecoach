@@ -16,6 +16,7 @@ from app.routers.leader import leader_entry  # «Путь лидера»
 router = Router(name="entrypoints")
 go_router = router
 go = router
+
 __all__ = ["router", "go_router", "go"]
 
 # ---------------------------------------------------------------------------
