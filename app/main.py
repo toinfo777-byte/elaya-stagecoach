@@ -12,20 +12,20 @@ from aiogram.types import BotCommand
 from app.config import settings
 from app.storage.repo import ensure_schema
 
-# Маркер билда — поможет убедиться в логах Render, что запущена свежая версия
-BUILD_MARK = "faq-mvp-2025-09-28-1340"
+# Маркер билда — для проверки в логах Render
+BUILD_MARK = "faq-mvp-2025-09-28-1410"
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("main")
 
-# --- безопасные импорты остальных роутеров ---
-# help (исторический модуль с меню/настройками/политикой)
+# ——— безопасные импорты разделов ———
+# старый help (экран меню/политика/настройки)
 try:
     from app.routers.help import help_router
 except Exception:
     from app.routers.help import router as help_router
 
-# FAQ — новый модуль
+# новый FAQ
 from app.routers.faq import router as faq_router
 
 # minicasting: алиас или router
@@ -46,9 +46,8 @@ from app.routers import (
     extended as r_extended,
     casting as r_casting,
     apply as r_apply,
-    common as r_common_guard,  # глобальный guard в самом конце
+    common as r_common_guard,  # глобальный guard (последний)
 )
-
 
 async def _set_commands(bot: Bot) -> None:
     cmds = [
@@ -66,21 +65,20 @@ async def _set_commands(bot: Bot) -> None:
     ]
     await bot.set_my_commands(cmds)
 
-
 async def main() -> None:
     log.info("=== BUILD %s ===", BUILD_MARK)
 
     # 1) схема БД
     await ensure_schema()
 
-    # 2) бот/DP
+    # 2) bot/DP
     bot = Bot(
         token=settings.bot_token,
         default=DefaultBotProperties(parse_mode=ParseMode.HTML),
     )
     dp = Dispatcher()
 
-    # 3) обнуляем webhook и висячие апдейты
+    # 3) срезаем webhook и висячие апдейты
     await bot.delete_webhook(drop_pending_updates=True)
     log.info("Webhook deleted, pending updates dropped")
 
@@ -91,7 +89,7 @@ async def main() -> None:
 
     # 5) подключение роутеров (порядок важен)
     dp.include_routers(
-        # входные точки — ПЕРВЫМ
+        # входные точки — ПЕРВЫМИ
         go_router,
 
         # FSM-сценарии — до «common guard»
@@ -107,9 +105,9 @@ async def main() -> None:
         r_casting.router,
         r_apply.router,
 
-        # FAQ и «исторический» help-модуль (экран меню/политика/настройки)
-        faq_router,
+        # СНАЧАЛА help (про меню/политику), СЛЕДОМ — новый FAQ (перекрывает /help и «💬 Помощь»)
         help_router,
+        faq_router,
 
         # глобальный «гвард» — САМЫЙ ПОСЛЕДНИЙ
         r_common_guard.router,
@@ -122,7 +120,6 @@ async def main() -> None:
     # 7) polling
     log.info("🚀 Start polling…")
     await dp.start_polling(bot)
-
 
 if __name__ == "__main__":
     try:
