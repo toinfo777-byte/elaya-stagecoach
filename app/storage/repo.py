@@ -1,105 +1,144 @@
+# app/storage/repo.py
 from __future__ import annotations
 
-import os
-import logging
-from contextlib import contextmanager
-from typing import Iterator
+from datetime import date, timedelta
+from typing import Iterable
 
-from sqlalchemy import create_engine, inspect
-from sqlalchemy.engine.url import make_url, URL
-from sqlalchemy.orm import sessionmaker, Session
+from sqlalchemy import select, func, desc, delete
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.config import settings
-from app.storage.models import Base, Event, User
-
-log = logging.getLogger("db")
-
-
-def _resolve_db_url(raw: str) -> str:
-    """
-    Для SQLite:
-    - относительные/неписуемые пути переносим в /tmp
-    - создаём директорию при необходимости
-    Остальные диалекты возвращаем как есть.
-    """
-    url: URL = make_url(raw)
-    if url.get_backend_name() != "sqlite":
-        return raw
-
-    db_path = url.database or ""
-    if db_path in ("", ":memory:"):
-        return raw
-
-    abs_path = db_path if os.path.isabs(db_path) else os.path.abspath(db_path)
-    target_dir = os.path.dirname(abs_path) or "."
-
-    def _writable_dir(path: str) -> bool:
-        try:
-            os.makedirs(path, exist_ok=True)
-            testfile = os.path.join(path, ".write_test")
-            with open(testfile, "w") as f:
-                f.write("ok")
-            os.remove(testfile)
-            return True
-        except Exception:
-            return False
-
-    if not _writable_dir(target_dir):
-        log.warning("DB dir '%s' недоступна для записи. Переношу БД в /tmp", target_dir)
-        base = os.path.basename(abs_path) or "elaya.db"
-        abs_path = os.path.join("/tmp", base)
-        os.makedirs("/tmp", exist_ok=True)
-
-    fixed = url.set(database=abs_path)
-    return str(fixed)
-
-
-DB_URL = _resolve_db_url(settings.db_url)
-
-engine = create_engine(DB_URL, future=True)
-SessionLocal = sessionmaker(
-    bind=engine,
-    autoflush=False,
-    autocommit=False,
-    expire_on_commit=False,
-    future=True,
+from app.storage.models import (
+    Base,
+    engine,
+    async_session_maker,
+    Profile,
+    TrainingLog,
+    CastingForm,
 )
 
-
-@contextmanager
-def session_scope() -> Iterator[Session]:
-    session: Session = SessionLocal()
-    try:
-        yield session
-        session.commit()
-    except Exception:
-        session.rollback()
-        raise
-    finally:
-        session.close()
+# ---------- INIT ----------
+async def ensure_schema() -> None:
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
 
 
-def ensure_schema() -> None:
+# ---------- Универсальное удаление пользователя ----------
+async def delete_user(tg_id: int) -> int:
     """
-    Создаём отсутствующие таблицы (безопасно для имеющейся схемы).
+    Удаляет все записи, связанные с пользователем tg_id,
+    во всех моделях, где есть колонка 'tg_id'.
+    Возвращает количество затронутых строк (сумма по всем таблицам).
     """
-    insp = inspect(engine)
-    if not insp.has_table("users"):
-        Base.metadata.create_all(bind=engine)
-        log.info("✅ БД инициализирована (%s)", DB_URL)
+    total = 0
+    async with async_session_maker() as session:
+        async with session.begin():
+            for mapper in Base.registry.mappers:  # type: ignore[attr-defined]
+                model = mapper.class_
+                if hasattr(model, "tg_id"):
+                    stmt = delete(model).where(getattr(model, "tg_id") == tg_id)
+                    result = await session.execute(stmt)
+                    try:
+                        total += int(getattr(result, "rowcount", 0) or 0)
+                    except Exception:
+                        pass
+    return total
 
 
-# --- Утилиты для роутеров ---
+# ---------- Repo-класс ----------
+class Repo:
+    def __init__(self, session: AsyncSession):
+        self.session = session
 
-def log_event(s: Session, user_id: int, kind: str, payload: dict | None = None) -> Event:
-    e = Event(user_id=user_id, kind=kind, payload_json=(payload or {}))
-    s.add(e)
-    s.flush()
-    return e
+    async def delete_user(self, tg_id: int) -> None:
+        """Удалить пользователя и все его записи (точечный вариант по известным таблицам)."""
+        await self.session.execute(delete(Profile).where(Profile.tg_id == tg_id))
+        await self.session.execute(delete(TrainingLog).where(TrainingLog.tg_id == tg_id))
+        await self.session.execute(delete(CastingForm).where(CastingForm.tg_id == tg_id))
+        await self.session.commit()
 
 
-def delete_user_cascade(s: Session, tg_id: int) -> None:
-    u = s.query(User).filter(User.tg_id == tg_id).one_or_none()
-    if u:
-        s.delete(u)
-        s.flush()
+# ---------- Profile ----------
+async def upsert_profile(tg_id: int, username: str | None, name: str | None) -> None:
+    async with async_session_maker() as session:
+        q = await session.execute(select(Profile).where(Profile.tg_id == tg_id))
+        p = q.scalar_one_or_none()
+        if p is None:
+            p = Profile(tg_id=tg_id, username=username, name=name)
+            session.add(p)
+        else:
+            p.username = username or p.username
+            p.name = name or p.name
+        await session.commit()
+
+
+# ---------- Training ----------
+async def log_training(tg_id: int, level: str, done: bool) -> None:
+    async with async_session_maker() as session:
+        session.add(
+            TrainingLog(
+                tg_id=tg_id,
+                date=date.today(),
+                level=level,
+                done=done,
+            )
+        )
+        await session.commit()
+
+
+async def calc_progress(tg_id: int) -> tuple[int, int]:
+    async with async_session_maker() as session:
+        # last7
+        since = date.today() - timedelta(days=6)
+        r7 = await session.execute(
+            select(func.count())
+            .select_from(TrainingLog)
+            .where(
+                TrainingLog.tg_id == tg_id,
+                TrainingLog.done.is_(True),
+                TrainingLog.date >= since,
+            )
+        )
+        last7 = int(r7.scalar() or 0)
+
+        # streak
+        r = await session.execute(
+            select(TrainingLog.date)
+            .where(TrainingLog.tg_id == tg_id, TrainingLog.done.is_(True))
+            .order_by(desc(TrainingLog.date))
+        )
+        days = [row[0] for row in r.all()]
+        cur = date.today()
+        streak = 0
+        sset = set(days)
+        while cur in sset:
+            streak += 1
+            cur = cur - timedelta(days=1)
+
+        return streak, last7
+
+
+# ---------- Casting ----------
+async def save_casting(
+    tg_id: int,
+    name: str,
+    age: int,
+    city: str,
+    experience: str,
+    contact: str,
+    portfolio: str | None,
+    agree_contact: bool,
+) -> None:
+    async with async_session_maker() as session:
+        session.add(
+            CastingForm(
+                tg_id=tg_id,
+                name=name,
+                age=age,
+                city=city,
+                experience=experience,
+                contact=contact,
+                portfolio=portfolio,
+                agree_contact=agree_contact,
+            )
+        )
+        await session.commit()

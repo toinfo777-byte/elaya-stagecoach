@@ -1,21 +1,27 @@
+# app/routers/apply.py
 from __future__ import annotations
 
 from aiogram import Router, F
-from aiogram.filters import Command
+from aiogram.filters import Command, StateFilter
+from aiogram.fsm.context import FSMContext
 from aiogram.types import Message
 
 from app.keyboards.menu import BTN_APPLY
 
 router = Router(name="apply")
 
-async def open_apply(m: Message, source: str | None = None):
-    # TODO: твоя логика «Пути лидера»
-    await m.answer("Путь лидера")
+# Мягкий импорт общего сценария кастинга (без циклических импортов)
+try:
+    from app.flows.casting_flow import start_casting_flow
+except Exception:
+    start_casting_flow = None
 
-@router.message(Command("apply"))
-async def cmd_apply(m: Message):
-    await open_apply(m, source="/apply")
 
-@router.message(F.text == BTN_APPLY)
-async def btn_apply(m: Message):
-    await open_apply(m, source="menu_button")
+@router.message(Command("apply"), StateFilter(None))
+@router.message(F.text == BTN_APPLY, StateFilter(None))
+async def apply_entry(message: Message, state: FSMContext) -> None:
+    """Алиас: «Путь лидера» ведёт в мини-кастинг.
+    Если flow недоступен — мягкий фоллбек."""
+    if start_casting_flow:
+        return await start_casting_flow(message, state)
+    await message.answer("Заявка временно недоступна. Попробуй позже 🙏")

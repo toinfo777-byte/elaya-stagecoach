@@ -1,138 +1,116 @@
+# app/storage/models.py
 from __future__ import annotations
 
-from datetime import datetime
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
-from sqlalchemy import String, Integer, DateTime, ForeignKey, JSON, Boolean
+import os
+from datetime import datetime, date
+from typing import Optional
 
+from sqlalchemy import String, Integer, Boolean, Date, DateTime, BigInteger
+from sqlalchemy.engine import make_url  # нормализация URL
+from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine, AsyncSession
+from sqlalchemy.orm import declarative_base, Mapped, mapped_column, sessionmaker, synonym
 
-class Base(DeclarativeBase):
-    ...
+# ---- Render / файловое хранилище ----
+# Для Render каталог /data доступен для записи между рестартами контейнера.
+# Если DB_URL не задан, соберём его из DB_PATH (default: /data/bot.db).
+DEFAULT_DB_PATH = "/data/bot.db"
+DB_PATH = os.getenv("DB_PATH", DEFAULT_DB_PATH)
 
+# Гарантируем, что каталог существует (иначе SQLite упадёт "unable to open database file")
+try:
+    os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
+except Exception:
+    pass
 
-# --- Пользователь ---
-class User(Base):
-    __tablename__ = "users"
+# Если указан DB_URL — используем его. Иначе строим из DB_PATH.
+RAW_DB_URL = os.getenv("DB_URL") or f"sqlite+aiosqlite:///{DB_PATH}"
 
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    tg_id: Mapped[int] = mapped_column(Integer, unique=True, index=True)
-    username: Mapped[str | None] = mapped_column(String(255))
-    name: Mapped[str | None] = mapped_column(String(255))
-    tz: Mapped[str | None] = mapped_column(String(64))
-    goal: Mapped[str | None] = mapped_column(String(255))
-    exp_level: Mapped[int | None] = mapped_column(Integer)
-    streak: Mapped[int] = mapped_column(Integer, default=0)
-    last_seen: Mapped[datetime | None] = mapped_column(DateTime)
-    consent_at: Mapped[datetime | None] = mapped_column(DateTime)
+def _to_async_url(url: str) -> str:
+    """Нормализуем строку подключения: усиливаем sync-драйверы на async-аналоги."""
+    u = make_url(url)
+    backend = u.get_backend_name()  # 'sqlite' | 'postgresql' | 'mysql' | ...
+    driver = (u.drivername or "")
+    # Уже async?
+    if any(x in driver for x in ("+aiosqlite", "+asyncpg", "+aiomysql")):
+        return str(u)
+    if backend == "sqlite":
+        return str(u.set(drivername="sqlite+aiosqlite"))
+    if backend in ("postgresql", "postgres"):
+        return str(u.set(drivername="postgresql+asyncpg"))
+    if backend == "mysql":
+        return str(u.set(drivername="mysql+aiomysql"))
+    return str(u)
 
-    # ⬇️ источник deeplink
-    source: Mapped[str | None] = mapped_column(String(64), nullable=True)
+DB_URL = _to_async_url(RAW_DB_URL)
 
-    # связи
-    drill_runs: Mapped[list["DrillRun"]] = relationship(back_populates="user", cascade="all, delete-orphan")
-    leads: Mapped[list["Lead"]] = relationship(back_populates="user", cascade="all, delete-orphan")
-    events: Mapped[list["Event"]] = relationship(back_populates="user", cascade="all, delete-orphan")
-    test_results: Mapped[list["TestResult"]] = relationship(back_populates="user", cascade="all, delete-orphan")
-    feedbacks: Mapped[list["Feedback"]] = relationship(back_populates="user", cascade="all, delete-orphan")
+# На всякий случай — если это sqlite://, создадим директорию файла ещё раз,
+# разобрав URL через make_url (важно для случаев с абсолютными путями).
+try:
+    parsed = make_url(DB_URL)
+    if parsed.get_backend_name() == "sqlite" and parsed.database:
+        db_dir = os.path.dirname(parsed.database)
+        if db_dir:
+            os.makedirs(db_dir, exist_ok=True)
+except Exception:
+    pass
 
+# ---- SQLAlchemy Base / Engine / Session ----
+Base = declarative_base()
 
-# --- Этюд и прохождения ---
-class Drill(Base):
-    __tablename__ = "drills"
+engine: AsyncEngine = create_async_engine(DB_URL, echo=False, future=True)
+async_session_maker = sessionmaker(
+    engine, expire_on_commit=False, class_=AsyncSession
+)
 
-    id: Mapped[str] = mapped_column(String(64), primary_key=True)
-    payload_json: Mapped[dict] = mapped_column(JSON, default=dict)
+# ---- МОДЕЛИ ----
 
+class Profile(Base):
+    __tablename__ = "profiles"
 
-class DrillRun(Base):
-    __tablename__ = "drill_runs"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
-    drill_id: Mapped[str] = mapped_column(ForeignKey("drills.id", ondelete="CASCADE"))
-    ts: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    result_json: Mapped[dict] = mapped_column(JSON, default=dict)
-    success_bool: Mapped[bool] = mapped_column(Boolean, default=False)
-
-    user: Mapped["User"] = relationship(back_populates="drill_runs")
-    drill: Mapped["Drill"] = relationship()
-
-
-# --- Мини-кастинг ---
-class Test(Base):
-    __tablename__ = "tests"
-
-    id: Mapped[str] = mapped_column(String(64), primary_key=True)
-    payload_json: Mapped[dict] = mapped_column(JSON, default=dict)
-
-
-class TestResult(Base):
-    __tablename__ = "test_results"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
-    ts: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    axes_json: Mapped[dict] = mapped_column(JSON, default=dict)
-    score_total: Mapped[int] = mapped_column(Integer, default=0)
-
-    user: Mapped["User"] = relationship(back_populates="test_results")
-
-
-# --- События ---
-class Event(Base):
-    __tablename__ = "events"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
-    kind: Mapped[str] = mapped_column(String(64))
-    payload_json: Mapped[dict] = mapped_column(JSON, default=dict)
-    ts: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-
-    user: Mapped["User"] = relationship(back_populates="events")
-
-
-# --- Лиды ---
-class Lead(Base):
-    __tablename__ = "leads"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
-    channel: Mapped[str] = mapped_column(String(32))          # источник: tg/insta/site/...
-    contact: Mapped[str] = mapped_column(String(255))         # @username, телефон, e-mail
-    note: Mapped[str | None] = mapped_column(String(500), default=None)
-    track: Mapped[str | None] = mapped_column(String(32), default=None)
-    ts: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-
-    user: Mapped["User"] = relationship(back_populates="leads")
-
-
-# --- Обратная связь ---
-class Feedback(Base):
-    __tablename__ = "feedbacks"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
-
-    first_source: Mapped[str | None] = mapped_column(String(64), default=None)
-    context: Mapped[str] = mapped_column(String(32))                          # "training" | "casting" | "manual"
-    context_id: Mapped[str | None] = mapped_column(String(64), default=None)  # id этюда/теста
-    score: Mapped[int | None] = mapped_column(Integer, default=None)
-    text: Mapped[str | None] = mapped_column(String(2000), default=None)
-    voice_file_id: Mapped[str | None] = mapped_column(String(256), default=None)
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    tg_id: Mapped[int] = mapped_column(BigInteger, unique=True, index=True)
+    username: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    name: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
-    user: Mapped["User"] = relationship(back_populates="feedbacks")
 
+class TrainingLog(Base):
+    __tablename__ = "training_logs"
 
-# --- Заявки на Расширенную версию ---
-class PremiumRequest(Base):
-    __tablename__ = "premium_requests"
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
 
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
-    tg_username: Mapped[str | None] = mapped_column(String(255), default=None)
+    # базовый контракт
+    tg_id: Mapped[int] = mapped_column(BigInteger, index=True)
+    date: Mapped[date] = mapped_column(Date, index=True)
+    level: Mapped[str] = mapped_column(String(16))   # 'beginner' | 'medium' | 'pro'
+    done: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    status: Mapped[str] = mapped_column(String(32), default="new")  # new | in_review | done | rejected
-    meta: Mapped[dict] = mapped_column(JSON, default=dict)
 
-    # (по желанию) связь:
-    # user: Mapped["User"] = relationship()
+    # ✅ совместимость со старым кодом:
+    user_id = synonym("tg_id")
+    day = synonym("date")
+
+
+class CastingForm(Base):
+    __tablename__ = "casting_forms"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    tg_id: Mapped[int] = mapped_column(BigInteger, index=True)
+    name: Mapped[str] = mapped_column(String(128))
+    age: Mapped[int] = mapped_column(Integer)
+    city: Mapped[str] = mapped_column(String(64))
+    experience: Mapped[str] = mapped_column(String(32))
+    contact: Mapped[str] = mapped_column(String(128))
+    portfolio: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
+    agree_contact: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+__all__ = [
+    "Base",
+    "engine",
+    "async_session_maker",
+    "Profile",
+    "TrainingLog",
+    "CastingForm",
+]
