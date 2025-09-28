@@ -12,10 +12,24 @@ from aiogram.types import BotCommand
 from app.config import settings
 from app.storage.repo import ensure_schema
 
+# ===== Маркер билда для логов (проверь в Render Logs) =====
+BUILD_MARK = "hotfix-entrypoints-fallback-2025-09-28-1022"
+
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("main")
 
-# --- «мягкие» импорты роутеров, чтобы не падать из-за имён ---
+
+# --- Надёжные импорты роутеров (не падаем, если алиасов нет) ---
+
+# entrypoints: сначала пытаемся старым способом (если он ещё есть), иначе поздно загрузим через importlib
+try:
+    # Если в образ попадёт старая версия - этот импорт может бросить ImportError
+    from app.routers.entrypoints import go_router as _go_router_try  # type: ignore
+    _ENTRYPOINTS_IMPORT_STYLE = "direct:go_router"
+except Exception:
+    _go_router_try = None
+    _ENTRYPOINTS_IMPORT_STYLE = "lazy:importlib"
+
 # help: либо help_router, либо router
 try:
     from app.routers.help import help_router
@@ -62,6 +76,8 @@ async def _set_commands(bot: Bot) -> None:
 
 
 async def main() -> None:
+    log.info("=== BUILD %s ===", BUILD_MARK)
+
     # 1) схема БД
     await ensure_schema()
 
@@ -76,10 +92,13 @@ async def main() -> None:
     await bot.delete_webhook(drop_pending_updates=True)
     log.info("Webhook deleted, pending updates dropped")
 
-    # 4) входной роутер — БЕЗ топ-импорта: динамически через importlib
-    ep = importlib.import_module("app.routers.entrypoints")
-    go_router = getattr(ep, "go_router", getattr(ep, "router"))
-    log.info("entrypoints loaded: using %s", "go_router" if hasattr(ep, "go_router") else "router")
+    # 4) входной роутер — если прямой импорт упал, грузим модуль динамически
+    if _go_router_try is not None:
+        go_router = _go_router_try
+    else:
+        ep = importlib.import_module("app.routers.entrypoints")
+        go_router = getattr(ep, "go_router", getattr(ep, "router"))
+    log.info("entrypoints loaded via %s", _ENTRYPOINTS_IMPORT_STYLE)
 
     # 5) подключение роутеров (порядок важен)
     dp.include_routers(
