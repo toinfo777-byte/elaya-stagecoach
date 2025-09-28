@@ -5,20 +5,23 @@ from aiogram.filters import Command, StateFilter
 from aiogram.types import Message, CallbackQuery
 from aiogram.fsm.context import FSMContext
 
-# Импортируем ПУБЛИЧНЫЕ входы разделов
+# Публичные входы разделов
 from app.routers.help import show_main_menu, show_privacy, show_settings
 from app.routers.training import show_training_levels
 from app.routers.minicasting import start_minicasting
 from app.routers.progress import show_progress
-from app.routers.leader import leader_entry  # новый «Путь лидера»
+from app.routers.leader import leader_entry  # «Путь лидера»
 
-# Базовый роутер этого модуля
+# Базовый роутер этого модуля + алиасы
 router = Router(name="entrypoints")
-# 👉 алиасы сразу под созданием роутера
 go_router = router
 go = router
 
-async def _to_menu(obj: Message | CallbackQuery, state: FSMContext):
+__all__ = ["router", "go_router", "go"]
+
+# ---------------------------------------------------------------------------
+
+async def _to_menu(obj: Message | CallbackQuery, state: FSMContext) -> None:
     await state.clear()
     await show_main_menu(obj)
 
@@ -38,7 +41,7 @@ async def cmd_casting(m: Message, state: FSMContext):
     await start_minicasting(m)
 
 @go.message(StateFilter("*"), Command("leader"))
-@go.message(StateFilter("*"), Command("apply"))   # алиас на новый «Путь лидера»
+@go.message(StateFilter("*"), Command("apply"))   # алиас на «Путь лидера»
 async def cmd_leader(m: Message, state: FSMContext):
     await state.clear()
     await leader_entry(m)
