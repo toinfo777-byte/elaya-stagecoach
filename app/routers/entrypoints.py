@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import re
+from typing import Any, Awaitable, Callable
+
 from aiogram import Router, F
 from aiogram.filters import Command, StateFilter
 from aiogram.types import Message, CallbackQuery
@@ -19,6 +21,19 @@ router = Router(name="entrypoints")
 go_router = router
 go = router
 __all__ = ["router", "go_router", "go"]
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Утилита: безопасный вызов хэндлеров с/без state
+# ──────────────────────────────────────────────────────────────────────────────
+async def _safe_call(fn: Callable[..., Awaitable[Any]], obj: Message | CallbackQuery, state: FSMContext) -> Any:
+    """
+    Пытаемся вызвать fn(obj, state). Если сигнатура без state — вызываем fn(obj).
+    Это защищает от ошибок типа: missing 1 required positional argument: 'state'
+    """
+    try:
+        return await fn(obj, state)   # type: ignore[misc]
+    except TypeError:
+        return await fn(obj)          # type: ignore[misc]
 
 async def _to_menu(obj: Message | CallbackQuery, state: FSMContext):
     await state.clear()
@@ -39,33 +54,33 @@ async def cmd_help(m: Message, state: FSMContext):
 @go.message(StateFilter("*"), Command("training"))
 async def cmd_training(m: Message, state: FSMContext):
     await state.clear()
-    await show_training_levels(m)
+    await _safe_call(show_training_levels, m, state)
 
 @go.message(StateFilter("*"), Command("casting"))
 async def cmd_casting(m: Message, state: FSMContext):
     await state.clear()
-    await start_minicasting(m)
+    await _safe_call(start_minicasting, m, state)
 
 @go.message(StateFilter("*"), Command("leader"))
 @go.message(StateFilter("*"), Command("apply"))   # алиас на «Путь лидера»
 async def cmd_leader(m: Message, state: FSMContext):
     await state.clear()
-    await leader_entry(m)
+    await _safe_call(leader_entry, m, state)
 
 @go.message(StateFilter("*"), Command("progress"))
 async def cmd_progress(m: Message, state: FSMContext):
     await state.clear()
-    await show_progress(m)
+    await _safe_call(show_progress, m, state)
 
 @go.message(StateFilter("*"), Command("settings"))
 async def cmd_settings(m: Message, state: FSMContext):
     await state.clear()
-    await show_settings(m)
+    await _safe_call(show_settings, m, state)
 
 @go.message(StateFilter("*"), Command("privacy"))
 async def cmd_privacy(m: Message, state: FSMContext):
     await state.clear()
-    await show_privacy(m)
+    await _safe_call(show_privacy, m, state)
 
 # ──────────────────────────────────────────────────────────────────────────────
 # ТЕКСТЫ из большой Reply-клавиатуры
@@ -77,22 +92,22 @@ async def txt_menu(m: Message, state: FSMContext):
 @go.message(StateFilter("*"), F.text == "🏋️ Тренировка дня")
 async def txt_training(m: Message, state: FSMContext):
     await state.clear()
-    await show_training_levels(m)
+    await _safe_call(show_training_levels, m, state)
 
 @go.message(StateFilter("*"), F.text == "🎭 Мини-кастинг")
 async def txt_casting(m: Message, state: FSMContext):
     await state.clear()
-    await start_minicasting(m)
+    await _safe_call(start_minicasting, m, state)
 
 @go.message(StateFilter("*"), F.text == "🧭 Путь лидера")
 async def txt_leader(m: Message, state: FSMContext):
     await state.clear()
-    await leader_entry(m)
+    await _safe_call(leader_entry, m, state)
 
 @go.message(StateFilter("*"), F.text == "📈 Мой прогресс")
 async def txt_progress(m: Message, state: FSMContext):
     await state.clear()
-    await show_progress(m)
+    await _safe_call(show_progress, m, state)
 
 @go.message(StateFilter("*"), F.text == "💬 Помощь")
 async def txt_help(m: Message, state: FSMContext):
@@ -102,12 +117,12 @@ async def txt_help(m: Message, state: FSMContext):
 @go.message(StateFilter("*"), F.text == "🔐 Политика")
 async def txt_priv(m: Message, state: FSMContext):
     await state.clear()
-    await show_privacy(m)
+    await _safe_call(show_privacy, m, state)
 
 @go.message(StateFilter("*"), F.text == "⚙️ Настройки")
 async def txt_settings(m: Message, state: FSMContext):
     await state.clear()
-    await show_settings(m)
+    await _safe_call(show_settings, m, state)
 
 # ──────────────────────────────────────────────────────────────────────────────
 # КОЛЛБЭКИ из инлайн-меню (go:*)
@@ -123,37 +138,37 @@ async def cb_menu(cb: CallbackQuery, state: FSMContext):
 async def cb_training(cb: CallbackQuery, state: FSMContext):
     await cb.answer()
     await state.clear()
-    await show_training_levels(cb)
+    await _safe_call(show_training_levels, cb, state)
 
 @go.callback_query(StateFilter("*"), F.data == "go:casting")
 async def cb_casting(cb: CallbackQuery, state: FSMContext):
     await cb.answer()
     await state.clear()
-    await start_minicasting(cb)
+    await _safe_call(start_minicasting, cb, state)
 
 @go.callback_query(StateFilter("*"), F.data == "go:leader")
 async def cb_leader(cb: CallbackQuery, state: FSMContext):
     await cb.answer()
     await state.clear()
-    await leader_entry(cb)
+    await _safe_call(leader_entry, cb, state)
 
 @go.callback_query(StateFilter("*"), F.data == "go:progress")
 async def cb_progress(cb: CallbackQuery, state: FSMContext):
     await cb.answer()
     await state.clear()
-    await show_progress(cb)
+    await _safe_call(show_progress, cb, state)
 
 @go.callback_query(StateFilter("*"), F.data == "go:privacy")
 async def cb_privacy(cb: CallbackQuery, state: FSMContext):
     await cb.answer()
     await state.clear()
-    await show_privacy(cb)
+    await _safe_call(show_privacy, cb, state)
 
 @go.callback_query(StateFilter("*"), F.data == "go:settings")
 async def cb_settings(cb: CallbackQuery, state: FSMContext):
     await cb.answer()
     await state.clear()
-    await show_settings(cb)
+    await _safe_call(show_settings, cb, state)
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Фоллбек ТОЛЬКО для неизвестных go:*  (не трогаем leader:*, mc:* и т.п.)
