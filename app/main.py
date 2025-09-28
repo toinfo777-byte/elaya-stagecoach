@@ -12,11 +12,8 @@ from app.config import settings
 from app.storage.repo import ensure_schema
 
 # --- РОУТЕРЫ (точечные импорты нужных объектов) ---
-# Надёжный импорт входного роутера: если нет go_router, берём router
-try:
-    from app.routers.entrypoints import go_router          # единый вход: /menu, /training, go:*
-except ImportError:
-    from app.routers.entrypoints import router as go_router
+# Гарантированный импорт входного роутера: берём router как go_router
+from app.routers.entrypoints import router as go_router
 
 from app.routers.help import help_router                   # /help + меню/настройки/политика
 from app.routers.minicasting import mc_router              # 🎭 мини-кастинг (колбэки mc:*)
