@@ -13,7 +13,7 @@ from app.config import settings
 from app.storage.repo import ensure_schema
 
 # Маркер билда — для проверки в логах Render
-BUILD_MARK = "faq-mvp-2025-09-28-1410"
+BUILD_MARK = "faq-order-fix-2025-09-28-1510"
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("main")
@@ -46,7 +46,7 @@ from app.routers import (
     extended as r_extended,
     casting as r_casting,
     apply as r_apply,
-    common as r_common_guard,  # глобальный guard (последний)
+    common as r_common_guard,  # ВАЖНО: guard теперь ПЕРВЫЙ в include_routers
 )
 
 async def _set_commands(bot: Bot) -> None:
@@ -87,12 +87,15 @@ async def main() -> None:
     go_router = getattr(ep, "go_router", getattr(ep, "router"))
     log.info("entrypoints loaded: using %s", "go_router" if hasattr(ep, "go_router") else "router")
 
-    # 5) подключение роутеров (порядок важен)
+    # 5) ПОДКЛЮЧЕНИЕ РОУТЕРОВ — ПО НОВОМУ ПОРЯДКУ (последние — самые приоритетные)
     dp.include_routers(
-        # входные точки — ПЕРВЫМИ
+        # ↓ НИЗКИЙ ПРИОРИТЕТ: глобальный guard должен быть раньше всех
+        r_common_guard.router,
+
+        # входные точки
         go_router,
 
-        # FSM-сценарии — до «common guard»
+        # FSM-сценарии
         mc_router,        # 🎭 Мини-кастинг
         leader_router,    # 🧭 Путь лидера
         tr_router,        # 🏋️ Тренировка дня
@@ -105,12 +108,9 @@ async def main() -> None:
         r_casting.router,
         r_apply.router,
 
-        # СНАЧАЛА help (про меню/политику), СЛЕДОМ — новый FAQ (перекрывает /help и «💬 Помощь»)
+        # сначала help (про меню/политику), а САМЫЙ ПРИОРИТЕТНЫЙ — FAQ
         help_router,
-        faq_router,
-
-        # глобальный «гвард» — САМЫЙ ПОСЛЕДНИЙ
-        r_common_guard.router,
+        faq_router,       # ← последний: перехватит /help и «💬 Помощь»
     )
 
     # 6) команды
