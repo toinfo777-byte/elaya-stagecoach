@@ -8,7 +8,7 @@ from aiogram.filters import Command, StateFilter
 from aiogram.types import Message, CallbackQuery
 from aiogram.fsm.context import FSMContext
 
-# Публичные входы разделов (функции экранов/действий)
+# Публичные входы разделов (экраны/действия)
 from app.routers.help import show_main_menu, show_privacy, show_settings
 from app.routers.training import show_training_levels
 from app.routers.minicasting import start_minicasting
@@ -50,6 +50,11 @@ async def cmd_start(m: Message, state: FSMContext):
 async def cmd_menu(m: Message, state: FSMContext):
     await _to_menu(m, state)
 
+@go.message(StateFilter("*"), Command("cancel"))
+async def cmd_cancel(m: Message, state: FSMContext):
+    # универсальный «сброс всего» + меню
+    await _to_menu(m, state)
+
 @go.message(StateFilter("*"), Command("help"))
 async def cmd_help(m: Message, state: FSMContext):
     await state.clear()
@@ -89,7 +94,7 @@ async def cmd_privacy_cmd(m: Message, state: FSMContext):
 # ──────────────────────────────────────────────────────────────────────────────
 # ТЕКСТЫ из большой Reply-клавиатуры
 # ──────────────────────────────────────────────────────────────────────────────
-@go.message(StateFilter("*"), F.text.in_({"🏠 Меню", "Меню", "В меню"}))
+@go.message(StateFilter("*"), F.text.in_({"🏠 Меню", "Меню", "В меню", "🏠 В меню"}))
 async def txt_menu(m: Message, state: FSMContext):
     await _to_menu(m, state)
 
