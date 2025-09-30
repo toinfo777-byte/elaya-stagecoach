@@ -89,7 +89,7 @@ async def training_done(cq: CallbackQuery):
     await cq.answer("Засчитано!")
     level = cq.data.split(":")[-1]
 
-    # опционально: сохранить эпизод (если модель есть — сохранит, если нет — тихо пропустит)
+    # пробуем сохранить эпизод, если есть ваша обёртка
     try:
         from app.storage.repo_extras import save_training_episode
         await save_training_episode(user_id=cq.from_user.id, level=level)
@@ -97,3 +97,11 @@ async def training_done(cq: CallbackQuery):
         pass
 
     await cq.message.answer("🔥 Отлично! День засчитан. Увидимся завтра!")
+
+    # сразу возвращаем в меню тем же способом, как при /start
+    try:
+        from app.routers.help import show_main_menu
+        await show_main_menu(cq)
+    except Exception:
+        # если вдруг что-то не импортировалось — просто кнопка назад уже есть
+        pass
