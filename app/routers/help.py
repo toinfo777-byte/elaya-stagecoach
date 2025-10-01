@@ -1,4 +1,3 @@
-# app/routers/help.py
 from __future__ import annotations
 
 from aiogram import Router, F
@@ -80,26 +79,12 @@ async def show_settings(obj: Message | CallbackQuery):
     await _reply(obj, text, _settings_kb())
 
 
-# === Local handlers (/help и прямые go:menu/privacy/settings) ================
+# === Local handlers (только /help команда) ====================================
+# ВАЖНО: go:menu, go:privacy, go:settings обрабатываются в entrypoints.py
 
 @help_router.message(Command("help"))
 async def cmd_help(m: Message):
     await show_main_menu(m)
-
-
-@help_router.callback_query(F.data == "go:menu"))
-async def cb_menu(cb: CallbackQuery):
-    await show_main_menu(cb)
-
-
-@help_router.callback_query(F.data == "go:privacy"))
-async def cb_privacy(cb: CallbackQuery):
-    await show_privacy(cb)
-
-
-@help_router.callback_query(F.data == "go:settings"))
-async def cb_settings(cb: CallbackQuery):
-    await show_settings(cb)
 
 
 __all__ = ["help_router", "show_main_menu", "show_privacy", "show_settings"]
