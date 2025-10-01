@@ -1,16 +1,20 @@
+import logging
 from __future__ import annotations
 
 import asyncio
 import logging
 import importlib
+
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 from aiogram.types import BotCommand
-from aiogram.client.session.aiohttp import AiohttpSession
 
 from app.config import settings
 from app.storage.repo import ensure_schema
+
+# Настроим логирование для отладки
+logging.basicConfig(level=logging.DEBUG)
 
 # Маркер сборки — помогает понять, что крутится нужный образ
 BUILD_MARK = "deploy-with-cmd-aliases-2025-09-28-1815"
@@ -87,26 +91,14 @@ async def main() -> None:
     await ensure_schema()
 
     # 2) bot / dispatcher
-    session = AiohttpSession()
-    bot = Bot(token=settings.bot_token, session=session)
-    
-    try:
-        # Сбрасываем старые вебхуки
-        await bot.delete_webhook(drop_pending_updates=True)
-        print("✅ Webhook удалён")
-        
-        # Проверка, что токен валиден
-        me = await bot.get_me()
-        print(f"✅ Бот запущен: @{me.username}")
-        
-    except Exception as e:
-        print(f"❌ Ошибка инициализации: {e}")
-        await session.close()
-        return
-    
+    bot = Bot(
+        token=settings.bot_token,
+        default=DefaultBotProperties(parse_mode=ParseMode.HTML),
+    )
     dp = Dispatcher()
 
     # 3) сбрасываем webhook и висячие апдейты
+    await bot.delete_webhook(drop_pending_updates=True)
     log.info("Webhook deleted, pending updates dropped")
 
     # 4) входной роутер (entrypoints) тянем надёжно через importlib
