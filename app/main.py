@@ -3,52 +3,44 @@ from __future__ import annotations
 import asyncio
 import importlib
 import logging
-import sys
 import hashlib
+import os
 from collections import Counter
+from typing import Any
 
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
+from aiogram.client.session.aiohttp import AiohttpSession
 from aiogram.enums import ParseMode
 from aiogram.types import BotCommand
 
 from app.config import settings
 from app.storage.repo import ensure_schema
 
-# Настроим логирование
+# Логи
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s"
 )
 log = logging.getLogger("main")
 
-# Маркер сборки — помогает понять, что крутится нужный образ
-BUILD_MARK = "deploy-fixed-duplicates-2025-01-09"
+BUILD_MARK = "deploy-fixed-409-trace-2025-10-01"
 
 # ───────────────────────────────────────────────
-# Роутеры разделов
+# Роутеры
 # ───────────────────────────────────────────────
-
-# FAQ — отдельный роутер
 from app.routers.faq import router as faq_router
-
-# Help — главное меню и публичные функции
 from app.routers.help import help_router
 
-# Мини-кастинг: поддержим оба экспорта (mc_router или router)
 try:
     from app.routers.minicasting import mc_router
 except Exception:
     from app.routers.minicasting import router as mc_router
 
-# Тренировка дня и Путь лидера
 from app.routers.training import router as tr_router
 from app.routers.leader import router as leader_router
-
-# Прокси для слэш-команд (/training, /casting) с безопасным вызовом (obj, state)/(obj)
 from app.routers.cmd_aliases import router as cmd_aliases_router
 
-# Остальные модули (используем .router внутри)
 from app.routers import (
     privacy as r_privacy,
     progress as r_progress,
@@ -78,7 +70,7 @@ async def _set_commands(bot: Bot) -> None:
     await bot.set_my_commands(cmds)
 
 # ───────────────────────────────────────────────
-# Утилита для подключения роутеров
+# Подключение роутеров с логом
 # ───────────────────────────────────────────────
 def _include_router(dp: Dispatcher, router_obj, name: str):
     try:
@@ -91,32 +83,79 @@ def _include_router(dp: Dispatcher, router_obj, name: str):
 # Диагностика дублей хендлеров
 # ───────────────────────────────────────────────
 def _check_duplicate_handlers(dp: Dispatcher):
-    """Проверка на дублирующиеся хендлеры"""
-    all_handlers = []
-    
-    for router in dp.sub_routers:
-        router_name = getattr(router, 'name', 'unknown')
-        # Проверяем все типы обсерверов
+    """Проверка дублей по имени callback-функции (индикатор случайных двойных хендлеров)."""
+
+    def collect(router) -> list[tuple[str, str, Any]]:
+        items = []
+        router_name = getattr(router, 'name', 'dispatcher')
         for event_type, observers in router.observers.items():
             for handler in observers:
-                handler_name = handler.callback.__name__
-                all_handlers.append((router_name, handler_name, event_type))
-    
-    # Ищем дубли по имени функции
-    handler_names = [h[1] for h in all_handlers]
-    counts = Counter(handler_names)
-    duplicates = {name: count for name, count in counts.items() if count > 1}
-    
-    if duplicates:
+                cb = getattr(handler, "callback", None)
+                name = getattr(cb, "__name__", str(cb))
+                items.append((router_name, name, event_type))
+        for sub in router.sub_routers:
+            items.extend(collect(sub))
+        return items
+
+    all_handlers = collect(dp)
+    names = [h[1] for h in all_handlers]
+    counts = Counter(names)
+    dups = {n: c for n, c in counts.items() if c > 1}
+
+    if dups:
         log.warning("⚠️ DUPLICATE HANDLERS DETECTED:")
-        for name, count in duplicates.items():
-            locations = [(r, e) for r, h, e in all_handlers if h == name]
-            log.warning("  %s: %d times in %s", name, count, locations)
+        for name, cnt in dups.items():
+            locations = [(r, e) for r, n, e in all_handlers if n == name]
+            log.warning("  %s: %d times in %s", name, cnt, locations)
     else:
         log.info("✅ No duplicate handlers detected")
 
 # ───────────────────────────────────────────────
-# Точка входа
+# HTTP-трейс Telegram (диагностика)
+# ───────────────────────────────────────────────
+def _make_session() -> AiohttpSession:
+    """Создаёт AiohttpSession с опциональным трейсингом HTTP (включается TELEGRAM_HTTP_DEBUG=1)."""
+    debug = os.getenv("TELEGRAM_HTTP_DEBUG", "0") == "1"
+    if not debug:
+        return AiohttpSession()
+
+    import aiohttp
+
+    async def on_request_start(session, ctx, params):
+        try:
+            # Логируем только Telegram API вызовы
+            url = str(params.url)
+            if "api.telegram.org" in url:
+                log.info("↗️  HTTP START %s %s", params.method, url)
+        except Exception:
+            pass
+
+    async def on_request_end(session, ctx, params):
+        try:
+            url = str(params.url)
+            if "api.telegram.org" in url:
+                status = getattr(getattr(ctx, "response", None), "status", None)
+                log.info("↘️  HTTP END   %s %s  status=%s", params.method, url, status)
+        except Exception:
+            pass
+
+    async def on_request_exception(session, ctx, params):
+        try:
+            url = str(params.url)
+            if "api.telegram.org" in url:
+                log.warning("💥 HTTP EXC    %s %s  exc=%s", params.method, url, getattr(ctx, "exception", None))
+        except Exception:
+            pass
+
+    trace = aiohttp.TraceConfig()
+    trace.on_request_start.append(on_request_start)
+    trace.on_request_end.append(on_request_end)
+    trace.on_request_exception.append(on_request_exception)
+
+    return AiohttpSession(trace_configs=[trace])
+
+# ───────────────────────────────────────────────
+# main()
 # ───────────────────────────────────────────────
 async def main() -> None:
     log.info("=== BUILD %s ===", BUILD_MARK)
@@ -124,23 +163,25 @@ async def main() -> None:
     # 1) схема БД
     await ensure_schema()
 
-    # 2) bot / dispatcher
+    # 2) bot / dispatcher (+ сессия с трейсом, если включён)
+    session = _make_session()
     bot = Bot(
         token=settings.bot_token,
         default=DefaultBotProperties(parse_mode=ParseMode.HTML),
+        session=session,
     )
     dp = Dispatcher()
 
-    # 3) сбрасываем webhook и висячие апдейты
+    # 3) сброс webhook / висячих апдейтов
     await bot.delete_webhook(drop_pending_updates=True)
     log.info("Webhook deleted, pending updates dropped")
 
-    # 4) входной роутер (entrypoints) тянем надёжно через importlib
+    # 4) входной роутер (entrypoints)
     ep = importlib.import_module("app.routers.entrypoints")
     go_router = getattr(ep, "go_router", getattr(ep, "router"))
     log.info("entrypoints loaded: using %s", "go_router" if hasattr(ep, "go_router") else "router")
 
-    # 5) порядок роутеров ВАЖЕН (первый = высший приоритет)
+    # 5) порядок роутеров
     _include_router(dp, go_router, "entrypoints")
     _include_router(dp, help_router, "help")
     _include_router(dp, cmd_aliases_router, "cmd_aliases")
@@ -162,17 +203,23 @@ async def main() -> None:
     # 7) диагностика дублей
     _check_duplicate_handlers(dp)
 
-    # 8) диагностика токена
+    # 8) диагностика токена/бота
     token_hash = hashlib.md5(settings.bot_token.encode()).hexdigest()[:8]
     log.info("🔑 Token hash: %s", token_hash)
-
-    # 9) информация о боте
     me = await bot.get_me()
     log.info("🤖 Bot: @%s (ID: %s)", me.username, me.id)
 
-    # 10) polling
+    # 9) polling (доп. ремень безопасности)
     log.info("🚀 Start polling…")
-    await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types())
+    try:
+        await dp.start_polling(
+            bot,
+            allowed_updates=dp.resolve_used_update_types(),
+            drop_pending_updates=True,
+        )
+    finally:
+        # Чисто закрываем HTTP-сессию
+        await bot.session.close()
 
 if __name__ == "__main__":
     try:
