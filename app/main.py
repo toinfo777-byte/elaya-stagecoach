@@ -46,8 +46,6 @@ from app.routers import (
     extended as r_extended,
     casting as r_casting,
     apply as r_apply,
-    # ⛔ НЕ подключаем common/help роутеры, чтобы они не перехватывали события
-    # common as r_common_guard,
     # help as r_help_router,
 )
 
@@ -69,6 +67,16 @@ async def _set_commands(bot: Bot) -> None:
         BotCommand(command="cancel", description="Сбросить форму"),
     ]
     await bot.set_my_commands(cmds)
+
+# ───────────────────────────────────────────────
+# Утилита для подключения роутеров
+# ───────────────────────────────────────────────
+def _include_router(dp: Dispatcher, router_obj, name: str):
+    try:
+        dp.include_router(router_obj)
+        log.info("✅ router loaded: %s", name)
+    except Exception:
+        log.exception("❌ router failed: %s", name)
 
 # ───────────────────────────────────────────────
 # Точка входа
@@ -96,29 +104,18 @@ async def main() -> None:
     log.info("entrypoints loaded: using %s", "go_router" if hasattr(ep, "go_router") else "router")
 
     # 5) порядок роутеров ВАЖЕН
-    dp.include_routers(
-        # входные точки (/start, /menu, тексты «Меню», и т.п.)
-        go_router,
-
-        # слэш-команды-прокси (чинит сигнатуры с/без state): /training, /casting
-        cmd_aliases_router,
-
-        # сценарии (FSM) — до разделов
-        mc_router,            # 🎭 Мини-кастинг
-        leader_router,        # 🧭 Путь лидера
-        tr_router,            # 🏋️ Тренировка дня
-
-        # контентные разделы
-        r_progress.router,
-        r_privacy.router,
-        r_settings.router,
-        r_extended.router,
-        r_casting.router,
-        r_apply.router,
-
-        # FAQ — в самом конце
-        faq_router,
-    )
+    _include_router(dp, go_router, "entrypoints")
+    _include_router(dp, cmd_aliases_router, "cmd_aliases")
+    _include_router(dp, mc_router, "minicasting")
+    _include_router(dp, leader_router, "leader")
+    _include_router(dp, tr_router, "training")
+    _include_router(dp, r_progress.router, "progress")
+    _include_router(dp, r_privacy.router, "privacy")
+    _include_router(dp, r_settings.router, "settings")
+    _include_router(dp, r_extended.router, "extended")
+    _include_router(dp, r_casting.router, "casting")
+    _include_router(dp, r_apply.router, "apply")
+    _include_router(dp, faq_router, "faq")
 
     # 6) команды
     await _set_commands(bot)
