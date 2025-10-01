@@ -35,7 +35,7 @@ def _settings_kb() -> InlineKeyboardMarkup:
     # Кнопки согласованы с вашим routers/settings.py:
     # там есть хэндлеры на F.data == "settings:menu" и F.data == "settings:delete"
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🏠 В меню",         callback_data="settings:menu")],
+        [InlineKeyboardButton(text="🏠 В меню",          callback_data="settings:menu")],
         [InlineKeyboardButton(text="🗑 Удалить профиль", callback_data="settings:delete")],
     ])
 
@@ -87,20 +87,19 @@ async def cmd_help(m: Message):
     await show_main_menu(m)
 
 
-@help_router.callback_query(F.data == "go:menu")
+@help_router.callback_query(F.data == "go:menu"))
 async def cb_menu(cb: CallbackQuery):
     await show_main_menu(cb)
 
 
-@help_router.callback_query(F.data == "go:privacy")
+@help_router.callback_query(F.data == "go:privacy"))
 async def cb_privacy(cb: CallbackQuery):
     await show_privacy(cb)
 
 
-@help_router.callback_query(F.data == "go:settings")
+@help_router.callback_query(F.data == "go:settings"))
 async def cb_settings(cb: CallbackQuery):
     await show_settings(cb)
 
 
-# Экспортируемые символы (не обязательно, но удобно)
 __all__ = ["help_router", "show_main_menu", "show_privacy", "show_settings"]
