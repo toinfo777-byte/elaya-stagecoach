@@ -1,14 +1,13 @@
-# app/main.py
 from __future__ import annotations
 
 import asyncio
 import logging
 import importlib
-
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 from aiogram.types import BotCommand
+from aiogram.client.session.aiohttp import AiohttpSession
 
 from app.config import settings
 from app.storage.repo import ensure_schema
@@ -88,14 +87,26 @@ async def main() -> None:
     await ensure_schema()
 
     # 2) bot / dispatcher
-    bot = Bot(
-        token=settings.bot_token,
-        default=DefaultBotProperties(parse_mode=ParseMode.HTML),
-    )
+    session = AiohttpSession()
+    bot = Bot(token=settings.bot_token, session=session)
+    
+    try:
+        # Сбрасываем старые вебхуки
+        await bot.delete_webhook(drop_pending_updates=True)
+        print("✅ Webhook удалён")
+        
+        # Проверка, что токен валиден
+        me = await bot.get_me()
+        print(f"✅ Бот запущен: @{me.username}")
+        
+    except Exception as e:
+        print(f"❌ Ошибка инициализации: {e}")
+        await session.close()
+        return
+    
     dp = Dispatcher()
 
     # 3) сбрасываем webhook и висячие апдейты
-    await bot.delete_webhook(drop_pending_updates=True)
     log.info("Webhook deleted, pending updates dropped")
 
     # 4) входной роутер (entrypoints) тянем надёжно через importlib
