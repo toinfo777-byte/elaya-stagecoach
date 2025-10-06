@@ -8,23 +8,24 @@ from aiogram.filters import Command, StateFilter
 from aiogram.types import Message, CallbackQuery
 from aiogram.fsm.context import FSMContext
 
-# Публичные входы разделов (экраны/действия)
+# Экран «меню» и простые страницы
 from app.routers.help import show_main_menu, show_privacy, show_settings
+
+# Разделы (функции уже есть в проекте)
 from app.routers.training import show_training_levels
 from app.routers.minicasting import start_minicasting
 from app.routers.progress import show_progress
 from app.routers.leader import leader_entry
-from app.routers.faq import show_faq_root  # ❓ FAQ / помощь
+from app.routers.faq import show_faq_root  # помощь/FAQ
 
-# Базовый роутер + алиасы
+# Базовый роутер, который принимает ВСЕ входы
 router = Router(name="entrypoints")
 go_router = router
 go = router
 __all__ = ["router", "go_router", "go"]
 
-# ──────────────────────────────────────────────────────────────────────────────
-# Безопасный вызов: сначала fn(obj, state), если TypeError — fn(obj)
-# ──────────────────────────────────────────────────────────────────────────────
+# ── Безопасный вызов: сначала fn(obj, state), если TypeError — fn(obj) ───────
+
 async def _safe_call(
     fn: Callable[..., Awaitable[Any]],
     obj: Message | CallbackQuery,
@@ -39,9 +40,8 @@ async def _to_menu(obj: Message | CallbackQuery, state: FSMContext):
     await state.clear()
     await show_main_menu(obj)
 
-# ──────────────────────────────────────────────────────────────────────────────
-# СЛЭШ-КОМАНДЫ (из любого стейта)
-# ──────────────────────────────────────────────────────────────────────────────
+# ── Слэш-команды (из любого состояния) ───────────────────────────────────────
+
 @go.message(StateFilter("*"), Command("start"))
 async def cmd_start(m: Message, state: FSMContext):
     await _to_menu(m, state)
@@ -52,7 +52,6 @@ async def cmd_menu(m: Message, state: FSMContext):
 
 @go.message(StateFilter("*"), Command("cancel"))
 async def cmd_cancel(m: Message, state: FSMContext):
-    # универсальный «сброс всего» + меню
     await _to_menu(m, state)
 
 @go.message(StateFilter("*"), Command("help"))
@@ -71,7 +70,7 @@ async def cmd_casting(m: Message, state: FSMContext):
     await _safe_call(start_minicasting, m, state)
 
 @go.message(StateFilter("*"), Command("leader"))
-@go.message(StateFilter("*"), Command("apply"))   # алиас на «Путь лидера»
+@go.message(StateFilter("*"), Command("apply"))  # алиас
 async def cmd_leader(m: Message, state: FSMContext):
     await state.clear()
     await _safe_call(leader_entry, m, state)
@@ -91,12 +90,16 @@ async def cmd_privacy_cmd(m: Message, state: FSMContext):
     await state.clear()
     await _safe_call(show_privacy, m, state)
 
-# ──────────────────────────────────────────────────────────────────────────────
-# ТЕКСТЫ из большой Reply-клавиатуры
-# ──────────────────────────────────────────────────────────────────────────────
+# ── Тексты из «большой» reply-клавиатуры (если где-то используется) ─────────
+
 @go.message(StateFilter("*"), F.text.in_({"🏠 Меню", "Меню", "В меню", "🏠 В меню"}))
 async def txt_menu(m: Message, state: FSMContext):
     await _to_menu(m, state)
+
+@go.message(StateFilter("*"), F.text == "📈 Мой прогресс")
+async def txt_progress(m: Message, state: FSMContext):
+    await state.clear()
+    await _safe_call(show_progress, m, state)
 
 @go.message(StateFilter("*"), F.text == "🏋️ Тренировка дня")
 async def txt_training(m: Message, state: FSMContext):
@@ -113,29 +116,23 @@ async def txt_leader(m: Message, state: FSMContext):
     await state.clear()
     await _safe_call(leader_entry, m, state)
 
-@go.message(StateFilter("*"), F.text == "📈 Мой прогресс")
-async def txt_progress(m: Message, state: FSMContext):
+@go.message(StateFilter("*"), F.text == "⚙️ Настройки")
+async def txt_settings(m: Message, state: FSMContext):
     await state.clear()
-    await _safe_call(show_progress, m, state)
-
-@go.message(StateFilter("*"), F.text == "💬 Помощь")
-async def txt_help(m: Message, state: FSMContext):
-    await state.clear()
-    await show_faq_root(m)
+    await _safe_call(show_settings, m, state)
 
 @go.message(StateFilter("*"), F.text == "🔐 Политика")
 async def txt_priv(m: Message, state: FSMContext):
     await state.clear()
     await _safe_call(show_privacy, m, state)
 
-@go.message(StateFilter("*"), F.text == "⚙️ Настройки")
-async def txt_settings(m: Message, state: FSMContext):
+@go.message(StateFilter("*"), F.text == "💬 Помощь" )
+async def txt_help(m: Message, state: FSMContext):
     await state.clear()
-    await _safe_call(show_settings, m, state)
+    await show_faq_root(m)
 
-# ──────────────────────────────────────────────────────────────────────────────
-# КОЛЛБЭКИ из инлайн-меню (go:*)
-# ──────────────────────────────────────────────────────────────────────────────
+# ── Инлайн-кнопки go:* из меню ───────────────────────────────────────────────
+
 MENU = {"go:menu", "menu", "to_menu", "home", "main_menu"}
 
 @go.callback_query(StateFilter("*"), F.data.in_(MENU))
@@ -167,21 +164,26 @@ async def cb_progress(cb: CallbackQuery, state: FSMContext):
     await state.clear()
     await _safe_call(show_progress, cb, state)
 
-@go.callback_query(StateFilter("*"), F.data == "go:privacy")
-async def cb_privacy(cb: CallbackQuery, state: FSMContext):
-    await cb.answer()
-    await state.clear()
-    await _safe_call(show_privacy, cb, state)
-
 @go.callback_query(StateFilter("*"), F.data == "go:settings")
 async def cb_settings(cb: CallbackQuery, state: FSMContext):
     await cb.answer()
     await state.clear()
     await _safe_call(show_settings, cb, state)
 
-# ──────────────────────────────────────────────────────────────────────────────
-# Фоллбек: ТОЛЬКО для неизвестных go:* (не трогаем leader:*, mc:* и т.п.)
-# ──────────────────────────────────────────────────────────────────────────────
+@go.callback_query(StateFilter("*"), F.data == "go:privacy")
+async def cb_privacy(cb: CallbackQuery, state: FSMContext):
+    await cb.answer()
+    await state.clear()
+    await _safe_call(show_privacy, cb, state)
+
+@go.callback_query(StateFilter("*"), F.data == "go:help")
+async def cb_help(cb: CallbackQuery, state: FSMContext):
+    await cb.answer()
+    await state.clear()
+    await show_faq_root(cb)
+
+# ── Фоллбек: неизвестные go:* → в меню (не трогаем чужие префиксы) ──────────
+
 _GO_PREFIX = re.compile(r"^go:")
 
 @go.callback_query(StateFilter("*"), F.data.regexp(_GO_PREFIX))
