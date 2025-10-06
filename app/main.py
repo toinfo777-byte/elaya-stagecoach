@@ -15,28 +15,23 @@ from aiogram.types import BotCommand
 from app.config import settings
 from app.storage.repo import ensure_schema
 
-# Логи
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s"
 )
 log = logging.getLogger("main")
 
-BUILD_MARK = "deploy-fixed-409-no-trace-2025-10-06"
+BUILD_MARK = "deploy-fixed-no-trace-2025-10-06"
 
-# ── Роутеры ───────────────────────────────────────────────────────────────────
+# ── роутеры ───────────────────────────────────────────────────────────────────
 from app.routers.faq import router as faq_router
-from app.routers.help import help_router
-
+from app.routers.training import router as tr_router
+from app.routers.leader import router as leader_router
+from app.routers.cmd_aliases import router as cmd_aliases_router
 try:
     from app.routers.minicasting import mc_router
 except Exception:
     from app.routers.minicasting import router as mc_router
-
-from app.routers.training import router as tr_router
-from app.routers.leader import router as leader_router
-from app.routers.cmd_aliases import router as cmd_aliases_router
-
 from app.routers import (
     privacy as r_privacy,
     progress as r_progress,
@@ -45,10 +40,10 @@ from app.routers import (
     casting as r_casting,
     apply as r_apply,
 )
+# ──────────────────────────────────────────────────────────────────────────────
 
-# ── Команды ──────────────────────────────────────────────────────────────────
 async def _set_commands(bot: Bot) -> None:
-    await bot.set_my_commands([
+    cmds = [
         BotCommand(command="start", description="Запуск / онбординг"),
         BotCommand(command="menu", description="Главное меню"),
         BotCommand(command="training", description="Тренировка дня"),
@@ -60,7 +55,8 @@ async def _set_commands(bot: Bot) -> None:
         BotCommand(command="help", description="FAQ / помощь"),
         BotCommand(command="settings", description="Настройки"),
         BotCommand(command="cancel", description="Сбросить форму"),
-    ])
+    ]
+    await bot.set_my_commands(cmds)
 
 def _include_router(dp: Dispatcher, router_obj, name: str):
     try:
@@ -70,51 +66,49 @@ def _include_router(dp: Dispatcher, router_obj, name: str):
         log.exception("❌ router failed: %s", name)
 
 def _check_duplicate_handlers(dp: Dispatcher):
-    """Диагностика дублей — не влияет на работу, только логирует."""
-    try:
-        all_handlers = []
-        for router in dp.sub_routers:
-            rname = getattr(router, "name", "unknown")
-            for event_type, observers in router.observers.items():
-                for h in observers:
-                    all_handlers.append((rname, h.callback.__name__, event_type))
-        names = [x[1] for x in all_handlers]
-        dup = {n: names.count(n) for n in set(names) if names.count(n) > 1}
-        if dup:
-            log.warning("⚠️ DUPLICATE HANDLERS: %s", dup)
-        else:
-            log.info("✅ No duplicate handlers detected")
-    except Exception:
-        log.exception("duplicate handlers check failed")
+    all_handlers = []
+    for router in dp.sub_routers:
+        rname = getattr(router, "name", "unknown")
+        for event_type, observers in router.observers.items():
+            for handler in observers:
+                all_handlers.append((rname, handler.callback.__name__, event_type))
+    names = [h[1] for h in all_handlers]
+    dup = {n: names.count(n) for n in set(names) if names.count(n) > 1}
+    if dup:
+        log.warning("⚠️ Duplicate handlers: %s", dup)
+    else:
+        log.info("✅ No duplicate handlers detected")
 
-# ── Точка входа ───────────────────────────────────────────────────────────────
+def _make_session() -> AiohttpSession:
+    # ВАЖНО: без trace_configs — иначе падает на вашей версии aiogram
+    return AiohttpSession()
+
 async def main() -> None:
     log.info("=== BUILD %s ===", BUILD_MARK)
 
     # 1) схема БД
     await ensure_schema()
 
-    # 2) dispatcher + session + bot
-    dp = Dispatcher()
-    session = AiohttpSession()  # ← БЕЗ trace_configs
+    # 2) bot / dispatcher + session
+    session = _make_session()
     bot = Bot(
         token=settings.bot_token,
-        session=session,
         default=DefaultBotProperties(parse_mode=ParseMode.HTML),
+        session=session,
     )
+    dp = Dispatcher()
 
-    # 3) сброс вебхука и висячих апдейтов
+    # 3) сброс вебхука/апдейтов
     await bot.delete_webhook(drop_pending_updates=True)
     log.info("Webhook deleted, pending updates dropped")
 
-    # 4) entrypoints
+    # 4) входные точки
     ep = importlib.import_module("app.routers.entrypoints")
     go_router = getattr(ep, "go_router", getattr(ep, "router"))
     log.info("entrypoints loaded: using %s", "go_router" if hasattr(ep, "go_router") else "router")
 
-    # 5) порядок роутеров (сверху — выше приоритет)
+    # 5) порядок роутеров
     _include_router(dp, go_router, "entrypoints")
-    _include_router(dp, help_router, "help")
     _include_router(dp, cmd_aliases_router, "cmd_aliases")
     _include_router(dp, mc_router, "minicasting")
     _include_router(dp, leader_router, "leader")
@@ -143,7 +137,6 @@ async def main() -> None:
     try:
         await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types())
     finally:
-        # корректно закрываем HTTP-сессию
         await bot.session.close()
 
 if __name__ == "__main__":
