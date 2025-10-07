@@ -1,37 +1,44 @@
-# app/routers/progress.py
 from __future__ import annotations
 
-from aiogram import Router, F
-from aiogram.filters import Command, StateFilter
+from aiogram import Router
+from aiogram.filters import Command
 from aiogram.types import Message
 
-from app.keyboards.reply import main_menu_kb, BTN_PROGRESS
-from app.storage.repo_extras import get_progress
+from app.storage.repo import progress  # синглтон ProgressRepo
 
 router = Router(name="progress")
 
 
-async def show_progress(target: Message) -> None:
-    data = await get_progress(target.from_user.id)
-    streak = int(data.get("streak", 0))
-    last7 = int(data.get("episodes_7d", 0))
+def _days_bar(last_days: list[tuple[str, int]]) -> str:
+    """
+    Рисуем простую полоску за 7 дней: ◻︎/■
+    """
+    cells = []
+    for _, cnt in last_days:
+        cells.append("■" if cnt > 0 else "◻︎")
+    return "".join(cells)
+
+
+async def show_progress(m: Message):
+    s = await progress.get_summary(user_id=m.from_user.id)
+    bar = _days_bar(s.last_days)
     text = (
-        "📈 Мой прогресс\n\n"
-        f"• Стрик: {streak}\n"
-        f"• Эпизодов за 7 дней: {last7}\n\n"
-        "Продолжай каждый день — тренировка дня в один клик 👇"
+        "<b>Мой прогресс</b>\n\n"
+        f"• Стрик: <b>{s.streak}</b>\n"
+        f"• Эпизодов за 7 дней: <b>{s.episodes_7d}</b>\n"
+        f"• Очков за 7 дней: <b>{s.points_7d}</b>\n\n"
+        f"{bar}\n"
+        "Продолжай каждый день — «Тренировка дня» в один клик 🟡"
     )
-    await target.answer(text, reply_markup=main_menu_kb())
+    await m.answer(text)
 
 
-@router.message(StateFilter("*"), Command("progress"))
-async def progress_cmd(m: Message):
+# Команда на всякий случай
+@router.message(Command("progress"))
+async def cmd_progress(m: Message):
     await show_progress(m)
 
 
-@router.message(StateFilter("*"), F.text == BTN_PROGRESS)
-async def progress_btn(m: Message):
-    await show_progress(m)
-
-
-__all__ = ["router", "show_progress"]
+# Утилита: можно вызывать из тренировки
+async def record_training_episode(m: Message, points: int = 1):
+    await progress.add_episode(user_id=m.from_user.id, kind="training", points=points)
