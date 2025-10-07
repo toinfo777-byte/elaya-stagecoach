@@ -1,14 +1,15 @@
+# app/routers/training.py
 from __future__ import annotations
 
 from aiogram import Router, F
 from aiogram.fsm.context import FSMContext
 from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 
-# если router уже определён — не дублируем
-try:
-    router  # noqa: F821
-except NameError:
-    router = Router(name="training")
+# прогресс: сохраняем эпизод явно (если что-то не так — увидишь ошибку в логах)
+from app.storage.repo_extras import save_training_episode
+from app.routers.help import show_main_menu
+
+router = Router(name="training")
 
 # ── тексты уровней ───────────────────────────────────────────────────────────
 LEVEL1_TEXT = (
@@ -48,13 +49,13 @@ def _levels_kb() -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="Уровень 1", callback_data="tr:level:1")],
         [InlineKeyboardButton(text="Уровень 2", callback_data="tr:level:2")],
         [InlineKeyboardButton(text="Уровень 3", callback_data="tr:level:3")],
-        [InlineKeyboardButton(text="🏠 В меню", callback_data="go:menu")],
+        [InlineKeyboardButton(text="🏠 В меню",  callback_data="go:menu")],
     ])
 
 def _done_kb(level: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="✅ Выполнил(а)", callback_data=f"tr:done:{level}")],
-        [InlineKeyboardButton(text="🏠 В меню", callback_data="go:menu")],
+        [InlineKeyboardButton(text="🏠 В меню",    callback_data="go:menu")],
     ])
 
 # ── публичный вход ───────────────────────────────────────────────────────────
@@ -81,7 +82,6 @@ async def training_show_level(cq: CallbackQuery):
     level = cq.data.split(":")[-1]
     mapping = {"1": LEVEL1_TEXT, "2": LEVEL2_TEXT, "3": LEVEL3_TEXT}
     text = mapping.get(level, "План скоро обновим 🙂")
-
     await cq.message.answer(text, reply_markup=_done_kb(level))
 
 @router.callback_query(F.data.startswith("tr:done:"))
@@ -89,19 +89,8 @@ async def training_done(cq: CallbackQuery):
     await cq.answer("Засчитано!")
     level = cq.data.split(":")[-1]
 
-    # пробуем сохранить эпизод, если есть ваша обёртка
-    try:
-        from app.storage.repo_extras import save_training_episode
-        await save_training_episode(user_id=cq.from_user.id, level=level)
-    except Exception:
-        pass
+    # сохраняем эпизод (если БД недоступна — увидишь ошибку в логах Render)
+    await save_training_episode(user_id=cq.from_user.id, level=level)
 
     await cq.message.answer("🔥 Отлично! День засчитан. Увидимся завтра!")
-
-    # сразу возвращаем в меню тем же способом, как при /start
-    try:
-        from app.routers.help import show_main_menu
-        await show_main_menu(cq)
-    except Exception:
-        # если вдруг что-то не импортировалось — просто кнопка назад уже есть
-        pass
+    await show_main_menu(cq)
