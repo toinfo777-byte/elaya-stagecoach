@@ -10,7 +10,6 @@ help_router = Router(name="help")
 
 # ── клавиатуры ─────────────────────────────────────────────────────
 def _menu_kb() -> InlineKeyboardMarkup:
-    # go:* ловит entrypoints/go-роутер
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🏋️ Тренировка дня", callback_data="go:training")],
         [InlineKeyboardButton(text="🎭 Мини-кастинг",   callback_data="go:casting")],
@@ -50,6 +49,10 @@ async def start_no_payload(m: Message):
 
 @help_router.message(Command("menu"))
 async def cmd_menu(m: Message):
+    await show_main_menu(m)
+
+@help_router.message(F.text.in_({"В меню", "Меню", "🏠 В меню"}))
+async def txt_to_menu(m: Message):
     await show_main_menu(m)
 
 @help_router.callback_query(F.data == "go:menu")
