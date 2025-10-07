@@ -1,13 +1,8 @@
 from __future__ import annotations
-
 from aiogram import Router, F
 from aiogram.filters import Command
 from aiogram.types import Message
-
-from app.keyboards.menu import (
-    main_menu, get_bot_commands,
-    BTN_HELP, BTN_PRIVACY,
-)
+from app.keyboards.menu import main_menu, get_bot_commands, BTN_HELP, BTN_PRIVACY
 
 router = Router(name="system")
 
@@ -39,6 +34,4 @@ async def privacy_handler(m: Message):
 async def version_handler(m: Message):
     await m.answer("version=dev tmp", reply_markup=main_menu())
 
-@router.message(Command("menu"))
-async def menu_handler(m: Message):
-    await m.answer("Меню", reply_markup=main_menu())
+# ВАЖНО: тут БОЛЬШЕ НЕТ обработчика @router.message(Command("menu"))
