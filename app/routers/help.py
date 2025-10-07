@@ -1,11 +1,16 @@
 from __future__ import annotations
 from aiogram import Router, F
 from aiogram.filters import Command, CommandStart
-from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.types import (
+    Message, CallbackQuery,
+    InlineKeyboardMarkup, InlineKeyboardButton,
+)
 
 help_router = Router(name="help")
 
+# ── клавиатуры ─────────────────────────────────────────────────────
 def _menu_kb() -> InlineKeyboardMarkup:
+    # go:* ловит entrypoints/go-роутер
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🏋️ Тренировка дня", callback_data="go:training")],
         [InlineKeyboardButton(text="🎭 Мини-кастинг",   callback_data="go:casting")],
@@ -24,6 +29,7 @@ async def _reply(obj: Message | CallbackQuery, text: str,
         return await obj.message.answer(text, reply_markup=kb)
     return await obj.answer(text, reply_markup=kb)
 
+# ── экран(ы) ───────────────────────────────────────────────────────
 async def show_main_menu(obj: Message | CallbackQuery):
     text = (
         "Команды и разделы: выбери нужное ⤵️\n\n"
@@ -37,8 +43,7 @@ async def show_main_menu(obj: Message | CallbackQuery):
     )
     await _reply(obj, text, _menu_kb())
 
-# ── единые входы в меню ───────────────────────────────────────────
-
+# ── единые входы в меню ────────────────────────────────────────────
 @help_router.message(CommandStart(deep_link=False))
 async def start_no_payload(m: Message):
     await show_main_menu(m)
@@ -47,11 +52,10 @@ async def start_no_payload(m: Message):
 async def cmd_menu(m: Message):
     await show_main_menu(m)
 
-@help_router.callback_query(F.data == "go:menu"))
+@help_router.callback_query(F.data == "go:menu")
 async def cb_go_menu(cb: CallbackQuery):
     await show_main_menu(cb)
 
-# /help можно тоже сводить к главному меню
 @help_router.message(Command("help"))
 async def cmd_help(m: Message):
     await show_main_menu(m)
