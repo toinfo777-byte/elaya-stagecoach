@@ -5,8 +5,8 @@ from aiogram import Router, F
 from aiogram.fsm.context import FSMContext
 from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 
-# прогресс: сохраняем эпизод явно (если что-то не так — увидишь ошибку в логах)
-from app.storage.repo_extras import save_training_episode
+# прогресс: фиксируем эпизод через единый репозиторий
+from app.storage.repo import progress
 from app.routers.help import show_main_menu
 
 router = Router(name="training")
@@ -55,7 +55,10 @@ def _levels_kb() -> InlineKeyboardMarkup:
 def _done_kb(level: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="✅ Выполнил(а)", callback_data=f"tr:done:{level}")],
-        [InlineKeyboardButton(text="🏠 В меню",    callback_data="go:menu")],
+        [
+            InlineKeyboardButton(text="📈 Мой прогресс", callback_data="go:progress"),
+            InlineKeyboardButton(text="🏠 В меню",       callback_data="go:menu"),
+        ],
     ])
 
 # ── публичный вход ───────────────────────────────────────────────────────────
@@ -89,8 +92,13 @@ async def training_done(cq: CallbackQuery):
     await cq.answer("Засчитано!")
     level = cq.data.split(":")[-1]
 
-    # сохраняем эпизод (если БД недоступна — увидишь ошибку в логах Render)
-    await save_training_episode(user_id=cq.from_user.id, level=level)
+    # начисляем очки и фиксируем эпизод в прогрессе
+    points_by_level = {"1": 1, "2": 2, "3": 3}
+    points = points_by_level.get(level, 1)
+    await progress.add_episode(user_id=cq.from_user.id, kind=f"training:{level}", points=points)
 
-    await cq.message.answer("🔥 Отлично! День засчитан. Увидимся завтра!")
-    await show_main_menu(cq)
+    await cq.message.answer(
+        f"🔥 Отлично! День засчитан. Начислено <b>{points}</b> очк.\n"
+        "Посмотри «📈 Мой прогресс» или вернись в меню.",
+        reply_markup=_done_kb(level)
+    )
