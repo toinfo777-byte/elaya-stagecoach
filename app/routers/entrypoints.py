@@ -2,56 +2,45 @@
 from __future__ import annotations
 
 from aiogram import Router, F
-from aiogram.filters import StateFilter
-from aiogram.types import Message, CallbackQuery
 from aiogram.fsm.context import FSMContext
+from aiogram.types import CallbackQuery, Message
 
-# экраны/функции
+# экраны из help
 from app.routers.help import show_main_menu, show_privacy, show_settings
-from app.routers.training import show_training_levels
+# вход в тренировку и прогресс
+from app.routers.training import show_training_levels as training_entry
 from app.routers.progress import show_progress
-# если позже добавишь кастинги/лидера — импортируй их view и добавь ниже
 
-go_router = Router(name="entrypoints")
+go_router = Router(name="go_router")
 
-# ── единый вход в главное меню ────────────────────────────────────────────────
-@go_router.message(StateFilter("*"), F.text.in_({"💬 Помощь", "Помощь", "❓ Помощь"}))
-async def ep_help(msg: Message, state: FSMContext):
-    await state.clear()
+# ── универсальные входы из инлайн-меню "go:*" ────────────────────────────────
+@g o_router.callback_query(F.data == "go:menu")
+async def go_menu(cq: CallbackQuery):
+    await show_main_menu(cq)
+
+@g o_router.callback_query(F.data == "go:training")
+async def go_training(cq: CallbackQuery, state: FSMContext):
+    await cq.answer()
+    # show_training_levels ждёт Message + state
+    await training_entry(cq.message, state)
+
+@g o_router.callback_query(F.data == "go:progress")
+async def go_progress(cq: CallbackQuery):
+    await cq.answer()
+    # show_progress ждёт Message
+    await show_progress(cq.message)
+
+@g o_router.callback_query(F.data == "go:privacy")
+async def go_privacy(cq: CallbackQuery):
+    await cq.answer()
+    await show_privacy(cq)
+
+@g o_router.callback_query(F.data == "go:settings")
+async def go_settings(cq: CallbackQuery):
+    await cq.answer()
+    await show_settings(cq)
+
+# (опционально) fallback на текстовые кнопки «В меню»
+@g o_router.message(F.text.in_({"Меню", "В меню", "🏠 В меню"}))
+async def txt_menu(msg: Message):
     await show_main_menu(msg)
-
-# ── универсальные callback-и «go:*» из инлайн-меню ────────────────────────────
-@go_router.callback_query(F.data == "go:menu")
-async def ep_go_menu(cb: CallbackQuery, state: FSMContext):
-    await state.clear()
-    await cb.answer()
-    await show_main_menu(cb)
-
-@go_router.callback_query(F.data == "go:training")
-async def ep_go_training(cb: CallbackQuery, state: FSMContext):
-    await state.clear()
-    await cb.answer()
-    await show_training_levels(cb.message, state)
-
-@go_router.callback_query(F.data == "go:progress")
-async def ep_go_progress(cb: CallbackQuery, state: FSMContext):
-    await state.clear()
-    await cb.answer()
-    await show_progress(cb.message)
-
-@go_router.callback_query(F.data == "go:privacy")
-async def ep_go_privacy(cb: CallbackQuery, state: FSMContext):
-    await state.clear()
-    await cb.answer()
-    await show_privacy(cb)
-
-@go_router.callback_query(F.data == "go:settings")
-async def ep_go_settings(cb: CallbackQuery, state: FSMContext):
-    await state.clear()
-    await cb.answer()
-    await show_settings(cb)
-
-# задел на будущее:
-# @go_router.callback_query(F.data == "go:casting")  -> await show_casting(...)
-# @go_router.callback_query(F.data == "go:leader")   -> await show_leader(...)
-# @go_router.callback_query(F.data == "go:extended") -> await show_extended(...)
