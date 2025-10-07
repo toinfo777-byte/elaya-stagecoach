@@ -1,24 +1,24 @@
 from __future__ import annotations
 
 import importlib
-from typing import Awaitable, Callable, Iterable, Optional
+from typing import Awaitable, Iterable
 
 from aiogram import Router, F
 from aiogram.filters import Command, CommandStart
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 
-# Экран меню и базовые экраны берём из help.py
+# Экран меню + базовые экраны
 from app.routers.help import show_main_menu, show_help, show_privacy, show_settings
 
-# Точки входа в тренировки/прогресс — используем прямые функции, если есть
+# Прямые входы, если доступны
 try:
-    from app.routers.training import show_training_levels as training_entry  # expects (Message, FSMContext)
+    from app.routers.training import show_training_levels as training_entry  # (Message, FSMContext)
 except Exception:
-    training_entry = None  # подстрахуемся: вызовем динамически
+    training_entry = None
 
 try:
-    from app.routers.progress import show_progress as progress_entry  # expects (Message)
+    from app.routers.progress import show_progress as progress_entry  # (Message)
 except Exception:
     progress_entry = None
 
@@ -26,33 +26,25 @@ go_router = Router(name="entrypoints")
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# Вспомогательные динамические вызовы (не ломают архитектуру, если сигнатуры разные)
+# Утилита: безопасный динамический вызов
 # ──────────────────────────────────────────────────────────────────────────────
 async def _call_optional(module: str, candidates: Iterable[str], *args, **kwargs) -> bool:
-    """
-    Пытаемся импортировать модуль и вызвать первую найденную функцию из candidates.
-    Возвращаем True, если вызов состоялся, иначе False.
-    """
     try:
         mod = importlib.import_module(module)
     except Exception:
         return False
     for name in candidates:
-        func = getattr(mod, name, None)
-        if callable(func):
-            try:
-                res = func(*args, **kwargs)
-                if isinstance(res, Awaitable):
-                    await res
-                return True
-            except Exception:
-                # мягко гасим, чтобы не ронять поток
-                return False
+        fn = getattr(mod, name, None)
+        if callable(fn):
+            res = fn(*args, **kwargs)
+            if isinstance(res, Awaitable):
+                await res
+            return True
     return False
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# Команды (текстовые)
+# Команды (текст)
 # ──────────────────────────────────────────────────────────────────────────────
 @go_router.message(CommandStart(deep_link=False))
 async def cmd_start(m: Message, state: FSMContext):
@@ -71,7 +63,6 @@ async def cmd_help(m: Message):
 
 @go_router.message(Command("privacy"))
 async def cmd_privacy(m: Message):
-    # сначала пробуем модуль privacy
     if not await _call_optional("app.routers.privacy", ("show_privacy", "open_privacy"), m):
         await show_privacy(m)
 
@@ -86,51 +77,51 @@ async def cmd_settings(m: Message):
 async def cmd_progress(m: Message):
     if progress_entry:
         await progress_entry(m)
-    else:
-        # пробуем динамически
-        if not await _call_optional("app.routers.progress", ("show_progress", "open_progress"), m):
-            await m.answer("📈 Раздел «Мой прогресс» временно недоступен.")
+        return
+    if not await _call_optional("app.routers.progress", ("show_progress", "open_progress"), m):
+        await m.answer("📈 Раздел «Мой прогресс» временно недоступен.")
 
 
 @go_router.message(Command("training"))
 async def cmd_training(m: Message, state: FSMContext):
     if training_entry:
         await training_entry(m, state)
-    else:
-        # пробуем динамически
-        called = await _call_optional("app.routers.training",
-                                      ("show_training_levels", "open_training", "start_training"),
-                                      m, state)
-        if not called:
-            await m.answer("🏋️ Раздел «Тренировка дня» временно недоступен.")
+        return
+    called = await _call_optional("app.routers.training",
+                                  ("show_training_levels", "open_training", "start_training"),
+                                  m, state)
+    if not called:
+        await m.answer("🏋️ Раздел «Тренировка дня» временно недоступен.")
 
 
 @go_router.message(Command("leader"))
 async def cmd_leader(m: Message, state: FSMContext):
-    called = await _call_optional("app.routers.leader",
-                                  ("open_leader", "show_leader", "leader_entry", "start_leader"),
-                                  m, state)
-    if not called:
-        await m.answer("🧭 «Путь лидера» скоро будет доступен в этом сборке.")
+    if not await _call_optional("app.routers.leader",
+                                ("open_leader", "show_leader", "leader_entry", "start_leader"),
+                                m, state):
+        await m.answer("🧭 «Путь лидера» скоро будет доступен в этой сборке.")
 
 
 @go_router.message(Command("casting"))
 async def cmd_casting(m: Message, state: FSMContext):
-    called = await _call_optional("app.routers.minicasting",
-                                  ("open_minicasting", "show_minicasting", "mc_entry", "start_minicasting"),
-                                  m, state)
-    if not called:
-        await m.answer("🎭 «Мини-кастинг» скоро будет доступен в этом сборке.")
+    if not await _call_optional("app.routers.minicasting",
+                                ("open_minicasting", "show_minicasting", "mc_entry", "start_minicasting"),
+                                m, state):
+        await m.answer("🎭 «Мини-кастинг» скоро будет доступен в этой сборке.")
 
 
-@go_router.message(Command("apply"))
-async def cmd_apply(m: Message, state: FSMContext):
-    # передаём управление в apply, если есть
-    called = await _call_optional("app.routers.apply",
-                                  ("open_apply", "show_apply", "apply_entry", "start_apply"),
-                                  m, state)
-    if not called:
-        await m.answer("📝 Заявка лидера временно недоступна.")
+@go_router.message(Command("extended"))
+async def cmd_extended(m: Message):
+    if not await _call_optional("app.routers.extended",
+                                ("open_extended", "show_extended", "extended_entry"), m):
+        await m.answer("⭐️ «Расширенная версия» появится после стабилизации dev-сборки.")
+
+
+@go_router.message(Command("faq"))
+async def cmd_faq(m: Message):
+    done = await _call_optional("app.routers.faq", ("open_faq", "show_faq"), m)
+    if not done:
+        await show_help(m)
 
 
 @go_router.message(Command("ping"))
@@ -140,7 +131,6 @@ async def cmd_ping(m: Message):
 
 @go_router.message(Command("healthz"))
 async def cmd_healthz(m: Message):
-    # для health-check Render
     await m.answer("ok")
 
 
@@ -152,7 +142,7 @@ async def cmd_cancel(m: Message, state: FSMContext):
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# Callback-навигация (go:*)
+# Callback-навигация: go:*
 # ──────────────────────────────────────────────────────────────────────────────
 @go_router.callback_query(F.data == "go:menu")
 async def cb_go_menu(cq: CallbackQuery):
@@ -168,17 +158,14 @@ async def cb_go_help(cq: CallbackQuery):
 @go_router.callback_query(F.data == "go:privacy")
 async def cb_go_privacy(cq: CallbackQuery):
     await cq.answer()
-    # сначала пробуем модуль privacy
-    called = await _call_optional("app.routers.privacy", ("show_privacy", "open_privacy"), cq)
-    if not called:
+    if not await _call_optional("app.routers.privacy", ("show_privacy", "open_privacy"), cq):
         await show_privacy(cq)
 
 
 @go_router.callback_query(F.data == "go:settings")
 async def cb_go_settings(cq: CallbackQuery):
     await cq.answer()
-    called = await _call_optional("app.routers.settings", ("show_settings", "open_settings"), cq)
-    if not called:
+    if not await _call_optional("app.routers.settings", ("show_settings", "open_settings"), cq):
         await show_settings(cq)
 
 
@@ -188,8 +175,7 @@ async def cb_go_progress(cq: CallbackQuery):
     if progress_entry:
         await progress_entry(cq.message)
         return
-    called = await _call_optional("app.routers.progress", ("show_progress", "open_progress"), cq.message)
-    if not called:
+    if not await _call_optional("app.routers.progress", ("show_progress", "open_progress"), cq.message):
         await cq.message.answer("📈 Раздел «Мой прогресс» временно недоступен.")
 
 
@@ -213,7 +199,7 @@ async def cb_go_leader(cq: CallbackQuery, state: FSMContext):
                                   ("open_leader", "show_leader", "leader_entry", "start_leader"),
                                   cq.message, state)
     if not called:
-        await cq.message.answer("🧭 «Путь лидера» скоро будет доступен в этом сборке.")
+        await cq.message.answer("🧭 «Путь лидера» скоро будет доступен в этой сборке.")
 
 
 @go_router.callback_query(F.data == "go:casting")
@@ -223,13 +209,22 @@ async def cb_go_casting(cq: CallbackQuery, state: FSMContext):
                                   ("open_minicasting", "show_minicasting", "mc_entry", "start_minicasting"),
                                   cq.message, state)
     if not called:
-        await cq.message.answer("🎭 «Мини-кастинг» скоро будет доступен в этом сборке.")
+        await cq.message.answer("🎭 «Мини-кастинг» скоро будет доступен в этой сборке.")
 
 
 @go_router.callback_query(F.data == "go:extended")
 async def cb_go_extended(cq: CallbackQuery):
     await cq.answer()
     called = await _call_optional("app.routers.extended",
-                                  ("open_extended", "show_extended", "extended_entry"))
+                                  ("open_extended", "show_extended", "extended_entry"),
+                                  cq)
     if not called:
         await cq.message.answer("⭐️ «Расширенная версия» появится после стабилизации dev-сборки.")
+
+
+# Последний «сетевой фильтр»: перехватывает любые go:*,
+# чтобы кнопка не «молчала» даже если мы забыли обработчик.
+@go_router.callback_query(F.data.startswith("go:"))
+async def cb_go_fallback(cq: CallbackQuery):
+    await cq.answer()
+    await cq.message.answer("⏳ Этот раздел скоро будет подключён. Открой пока «🏋️ Тренировка дня».")
