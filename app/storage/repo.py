@@ -1,144 +1,138 @@
-# app/storage/repo.py
 from __future__ import annotations
 
-from datetime import date, timedelta
-from typing import Iterable
+import os
+import sqlite3
+import time
+from dataclasses import dataclass
+from datetime import datetime, timezone, timedelta
+from typing import List, Tuple, Optional
 
-from sqlalchemy import select, func, desc, delete
-from sqlalchemy.ext.asyncio import AsyncSession
+_DB_PATH_ENV = os.getenv("PROGRESS_DB_PATH")  # можно указать в ENV
+_DB_PATH = _DB_PATH_ENV or os.getenv("DATABASE_FILE") or "/data/elaya_progress.sqlite3"
 
-from app.storage.models import (
-    Base,
-    engine,
-    async_session_maker,
-    Profile,
-    TrainingLog,
-    CastingForm,
-)
-
-# ---------- INIT ----------
-async def ensure_schema() -> None:
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
+# ──────────────────────────────────────────────────────────────────────────────
+# Общая инициализация
+# ──────────────────────────────────────────────────────────────────────────────
+def _connect() -> sqlite3.Connection:
+    os.makedirs(os.path.dirname(_DB_PATH), exist_ok=True)
+    conn = sqlite3.connect(_DB_PATH, check_same_thread=False)
+    conn.row_factory = sqlite3.Row
+    return conn
 
 
-# ---------- Универсальное удаление пользователя ----------
-async def delete_user(tg_id: int) -> int:
+def ensure_schema() -> None:
     """
-    Удаляет все записи, связанные с пользователем tg_id,
-    во всех моделях, где есть колонка 'tg_id'.
-    Возвращает количество затронутых строк (сумма по всем таблицам).
+    Вызывается при старте из app/main.py
     """
-    total = 0
-    async with async_session_maker() as session:
-        async with session.begin():
-            for mapper in Base.registry.mappers:  # type: ignore[attr-defined]
-                model = mapper.class_
-                if hasattr(model, "tg_id"):
-                    stmt = delete(model).where(getattr(model, "tg_id") == tg_id)
-                    result = await session.execute(stmt)
-                    try:
-                        total += int(getattr(result, "rowcount", 0) or 0)
-                    except Exception:
-                        pass
-    return total
+    conn = _connect()
+    try:
+        # Таблица эпизодов прогресса
+        conn.execute("""
+        CREATE TABLE IF NOT EXISTS episodes (
+            id        INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id   INTEGER NOT NULL,
+            kind      TEXT    NOT NULL,      -- "training" / "casting" / etc
+            points    INTEGER NOT NULL DEFAULT 1,
+            ts        INTEGER NOT NULL       -- unix epoch (UTC)
+        );
+        """)
+        # Индексы для быстрых агрегатов
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_ep_user_ts ON episodes(user_id, ts);")
+        conn.commit()
+    finally:
+        conn.close()
 
 
-# ---------- Repo-класс ----------
-class Repo:
-    def __init__(self, session: AsyncSession):
-        self.session = session
-
-    async def delete_user(self, tg_id: int) -> None:
-        """Удалить пользователя и все его записи (точечный вариант по известным таблицам)."""
-        await self.session.execute(delete(Profile).where(Profile.tg_id == tg_id))
-        await self.session.execute(delete(TrainingLog).where(TrainingLog.tg_id == tg_id))
-        await self.session.execute(delete(CastingForm).where(CastingForm.tg_id == tg_id))
-        await self.session.commit()
+# ──────────────────────────────────────────────────────────────────────────────
+# Прогресс
+# ──────────────────────────────────────────────────────────────────────────────
+@dataclass
+class ProgressSummary:
+    streak: int
+    episodes_7d: int
+    points_7d: int
+    last_days: List[Tuple[str, int]]  # [(YYYY-MM-DD, episodes_count)]
 
 
-# ---------- Profile ----------
-async def upsert_profile(tg_id: int, username: str | None, name: str | None) -> None:
-    async with async_session_maker() as session:
-        q = await session.execute(select(Profile).where(Profile.tg_id == tg_id))
-        p = q.scalar_one_or_none()
-        if p is None:
-            p = Profile(tg_id=tg_id, username=username, name=name)
-            session.add(p)
-        else:
-            p.username = username or p.username
-            p.name = name or p.name
-        await session.commit()
+class ProgressRepo:
+    """
+    Лёгкий репозиторий прогресса на SQLite.
+    NB: UTC-даты. На проде можно заменить на вашу БД без изменения интерфейса.
+    """
+    def __init__(self, db_path: Optional[str] = None) -> None:
+        self.db_path = db_path or _DB_PATH
 
+    # low-level
+    def _conn(self) -> sqlite3.Connection:
+        conn = sqlite3.connect(self.db_path, check_same_thread=False)
+        conn.row_factory = sqlite3.Row
+        return conn
 
-# ---------- Training ----------
-async def log_training(tg_id: int, level: str, done: bool) -> None:
-    async with async_session_maker() as session:
-        session.add(
-            TrainingLog(
-                tg_id=tg_id,
-                date=date.today(),
-                level=level,
-                done=done,
+    # API
+    async def add_episode(self, *, user_id: int, kind: str = "training", points: int = 1) -> None:
+        """
+        Фиксируем завершение шага/тренировки.
+        """
+        ts = int(time.time())
+        conn = self._conn()
+        try:
+            conn.execute(
+                "INSERT INTO episodes(user_id, kind, points, ts) VALUES (?, ?, ?, ?)",
+                (user_id, kind, points, ts),
             )
-        )
-        await session.commit()
+            conn.commit()
+        finally:
+            conn.close()
 
+    async def get_summary(self, *, user_id: int) -> ProgressSummary:
+        """
+        Стрик (по дням, UTC) + агрегации за последние 7 дней.
+        """
+        conn = self._conn()
+        try:
+            now = datetime.now(timezone.utc)
+            start_7 = int((now - timedelta(days=7)).timestamp())
+            rows = conn.execute(
+                "SELECT ts, points FROM episodes WHERE user_id=? AND ts>=? ORDER BY ts DESC",
+                (user_id, start_7),
+            ).fetchall()
 
-async def calc_progress(tg_id: int) -> tuple[int, int]:
-    async with async_session_maker() as session:
-        # last7
-        since = date.today() - timedelta(days=6)
-        r7 = await session.execute(
-            select(func.count())
-            .select_from(TrainingLog)
-            .where(
-                TrainingLog.tg_id == tg_id,
-                TrainingLog.done.is_(True),
-                TrainingLog.date >= since,
+            # группируем по дню
+            per_day = {}
+            for r in rows:
+                d = datetime.fromtimestamp(r["ts"], tz=timezone.utc).date().isoformat()
+                per_day[d] = per_day.get(d, 0) + 1
+
+            # последние 7 дней (визуал/подсчёт)
+            days_list = []
+            for i in range(7):
+                d = (now.date() - timedelta(days=6 - i)).isoformat()
+                days_list.append((d, per_day.get(d, 0)))
+
+            # стрик: сколько подряд дней до сегодня включительно есть эпизоды
+            streak = 0
+            cur = now.date()
+            while True:
+                d = cur.isoformat()
+                if per_day.get(d, 0) > 0:
+                    streak += 1
+                    cur = cur - timedelta(days=1)
+                else:
+                    break
+
+            # очки за 7 дней
+            points_7d = sum(r["points"] for r in rows)
+            episodes_7d = sum(cnt for _, cnt in days_list)
+
+            return ProgressSummary(
+                streak=streak,
+                episodes_7d=episodes_7d,
+                points_7d=points_7d,
+                last_days=days_list,
             )
-        )
-        last7 = int(r7.scalar() or 0)
-
-        # streak
-        r = await session.execute(
-            select(TrainingLog.date)
-            .where(TrainingLog.tg_id == tg_id, TrainingLog.done.is_(True))
-            .order_by(desc(TrainingLog.date))
-        )
-        days = [row[0] for row in r.all()]
-        cur = date.today()
-        streak = 0
-        sset = set(days)
-        while cur in sset:
-            streak += 1
-            cur = cur - timedelta(days=1)
-
-        return streak, last7
+        finally:
+            conn.close()
 
 
-# ---------- Casting ----------
-async def save_casting(
-    tg_id: int,
-    name: str,
-    age: int,
-    city: str,
-    experience: str,
-    contact: str,
-    portfolio: str | None,
-    agree_contact: bool,
-) -> None:
-    async with async_session_maker() as session:
-        session.add(
-            CastingForm(
-                tg_id=tg_id,
-                name=name,
-                age=age,
-                city=city,
-                experience=experience,
-                contact=contact,
-                portfolio=portfolio,
-                agree_contact=agree_contact,
-            )
-        )
-        await session.commit()
+# экспортируем синглтон
+progress = ProgressRepo()
