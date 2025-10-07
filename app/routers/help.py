@@ -1,18 +1,11 @@
 from __future__ import annotations
-
-from aiogram import Router
-from aiogram.filters import Command
-from aiogram.types import (
-    Message,
-    CallbackQuery,
-    InlineKeyboardMarkup,
-    InlineKeyboardButton,
-)
+from aiogram import Router, F
+from aiogram.filters import Command, CommandStart
+from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 
 help_router = Router(name="help")
 
 def _menu_kb() -> InlineKeyboardMarkup:
-    # go:* ловит entrypoints.go-роутер
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🏋️ Тренировка дня", callback_data="go:training")],
         [InlineKeyboardButton(text="🎭 Мини-кастинг",   callback_data="go:casting")],
@@ -22,17 +15,6 @@ def _menu_kb() -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="🔐 Политика",       callback_data="go:privacy")],
         [InlineKeyboardButton(text="⚙️ Настройки",      callback_data="go:settings")],
         [InlineKeyboardButton(text="⭐ Расширенная версия", callback_data="go:extended")],
-    ])
-
-def _back_kb() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🏠 В меню", callback_data="go:menu")]
-    ])
-
-def _settings_kb() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🏠 В меню",          callback_data="settings:menu")],
-        [InlineKeyboardButton(text="🗑 Удалить профиль", callback_data="settings:delete")],
     ])
 
 async def _reply(obj: Message | CallbackQuery, text: str,
@@ -55,20 +37,23 @@ async def show_main_menu(obj: Message | CallbackQuery):
     )
     await _reply(obj, text, _menu_kb())
 
-async def show_privacy(obj: Message | CallbackQuery):
-    text = (
-        "🔐 Политика конфиденциальности\n\n"
-        "Мы бережно храним ваши данные и используем их только "
-        "для работы бота и улучшения сервиса."
-    )
-    await _reply(obj, text, _back_kb())
+# ── единые входы в меню ───────────────────────────────────────────
 
-async def show_settings(obj: Message | CallbackQuery):
-    text = "⚙️ Настройки. Можешь удалить профиль или вернуться в меню."
-    await _reply(obj, text, _settings_kb())
+@help_router.message(CommandStart(deep_link=False))
+async def start_no_payload(m: Message):
+    await show_main_menu(m)
 
+@help_router.message(Command("menu"))
+async def cmd_menu(m: Message):
+    await show_main_menu(m)
+
+@help_router.callback_query(F.data == "go:menu"))
+async def cb_go_menu(cb: CallbackQuery):
+    await show_main_menu(cb)
+
+# /help можно тоже сводить к главному меню
 @help_router.message(Command("help"))
 async def cmd_help(m: Message):
     await show_main_menu(m)
 
-__all__ = ["help_router", "show_main_menu", "show_privacy", "show_settings"]
+__all__ = ["help_router", "show_main_menu"]
