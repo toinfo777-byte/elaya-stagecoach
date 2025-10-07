@@ -1,130 +1,63 @@
-# app/storage/repo_extras.py
 from __future__ import annotations
-
-import logging
+import asyncio
+import os
 from datetime import datetime, timedelta, timezone
-from typing import Any, Optional
+import aiosqlite
 
-from sqlalchemy import insert, update
+_DB_PATH = os.getenv("PROGRESS_DB", "progress.sqlite3")
 
-from app.storage.db import async_session
-from app.storage.models_extras import CastingSession, Feedback, LeaderPath, PremiumRequest
+_SCHEMA = """
+CREATE TABLE IF NOT EXISTS training_episodes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    level TEXT NOT NULL,
+    ts_utc INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_training_user_ts ON training_episodes(user_id, ts_utc);
+"""
 
-logger = logging.getLogger(__name__)
+async def _ensure_db():
+    async with aiosqlite.connect(_DB_PATH) as db:
+        await db.executescript(_SCHEMA)
+        await db.commit()
 
+def _utc_now_ts() -> int:
+    return int(datetime.now(timezone.utc).timestamp())
 
-# ===== Мини-кастинг =====
-async def save_casting_session(user_id: int, answers: list[str], result: str) -> None:
-    async with async_session() as s:
-        await s.execute(
-            insert(CastingSession).values(
-                user_id=user_id,
-                answers=answers,
-                result=result,
-                finished_at=datetime.now(timezone.utc),
-                source="mini",
-            )
+async def save_training_episode(user_id: int, level: str) -> None:
+    await _ensure_db()
+    async with aiosqlite.connect(_DB_PATH) as db:
+        await db.execute(
+            "INSERT INTO training_episodes(user_id, level, ts_utc) VALUES (?,?,?)",
+            (int(user_id), str(level), _utc_now_ts())
         )
-        await s.commit()
+        await db.commit()
 
+async def get_progress(user_id: int) -> dict:
+    """Возвращает {'streak': int, 'episodes_7d': int}."""
+    await _ensure_db()
+    now = datetime.now(timezone.utc)
+    start_7d = int((now - timedelta(days=7)).timestamp())
 
-async def save_feedback(user_id: int, emoji: str, phrase: Optional[str]) -> None:
-    async with async_session() as s:
-        await s.execute(
-            insert(Feedback).values(
-                user_id=user_id,
-                emoji=emoji,
-                phrase=phrase,
-            )
-        )
-        await s.commit()
+    async with aiosqlite.connect(_DB_PATH) as db:
+        # эпизоды за 7 дней
+        async with db.execute(
+            "SELECT ts_utc FROM training_episodes WHERE user_id=? AND ts_utc>=? ORDER BY ts_utc DESC",
+            (int(user_id), start_7d)
+        ) as cur:
+            rows = await cur.fetchall()
+            ts_list = [r[0] for r in rows]
 
+    # считаем стрик по датам (день в день по UTC)
+    days = { datetime.fromtimestamp(ts, tz=timezone.utc).date() for ts in ts_list }
 
-# ===== Путь лидера / премиум =====
-async def save_leader_intent(
-    user_id: int,
-    intent: str,
-    micro_note: Optional[str],
-    upsert: bool = False,
-) -> None:
-    async with async_session() as s:
-        if upsert:
-            await s.execute(
-                update(LeaderPath)
-                .where(LeaderPath.user_id == user_id)
-                .values(intent=intent, micro_note=micro_note)
-            )
-        else:
-            await s.execute(
-                insert(LeaderPath).values(
-                    user_id=user_id,
-                    intent=intent,
-                    micro_note=micro_note,
-                    source="leader",
-                )
-            )
-        await s.commit()
+    streak = 0
+    d = now.date()
+    while d in days:
+        streak += 1
+        d = d - timedelta(days=1)
 
-
-async def save_premium_request(user_id: int, text: str, source: str) -> None:
-    async with async_session() as s:
-        await s.execute(
-            insert(PremiumRequest).values(
-                user_id=user_id,
-                text=text,
-                source=source,
-            )
-        )
-        await s.commit()
-
-
-# ===== Прогресс: события/агрегация =====
-async def log_progress_event(
-    user_id: int,
-    kind: str,                      # 'training' | 'minicasting' | 'leader' etc.
-    meta: Optional[dict[str, Any]] = None,
-    at: Optional[datetime] = None,
-) -> None:
-    """
-    Минимальная реализация: просто логируем. При желании замените на запись в отдельную таблицу.
-    """
-    at = at or datetime.now(timezone.utc)
-    logger.info(
-        "progress_event user=%s kind=%s at=%s meta=%s",
-        user_id, kind, at.isoformat(), meta or {},
-    )
-
-
-async def get_progress(user_id: int) -> dict[str, int]:
-    """
-    Безопасная заглушка: если нет отдельной таблицы ProgressEvent, вернём 0/0.
-    При желании посчитайте эпизоды за 7д из CastingSession/других таблиц.
-    """
-    try:
-        # пример грубой оценки по мини-кастингу за последние 7 дней
-        since = datetime.now(timezone.utc) - timedelta(days=6)
-        episodes_7d = 0
-        # Если хотите считать по кастингам — раскоммитьте и подгоните под вашу БД.
-        # from sqlalchemy import select, func
-        # from app.storage.db import async_session
-        # from app.storage.models_extras import CastingSession
-        # async with async_session() as s:
-        #     q = select(func.count()).select_from(CastingSession).where(
-        #         CastingSession.user_id == user_id,
-        #         CastingSession.finished_at >= since,
-        #     )
-        #     episodes_7d = (await s.execute(q)).scalar_one()
-        return {"streak": 0, "episodes_7d": int(episodes_7d)}
-    except Exception:  # на всякий случай не валим бота
-        logger.exception("get_progress failed; return zeros")
-        return {"streak": 0, "episodes_7d": 0}
-
-
-__all__ = [
-    "save_casting_session",
-    "save_feedback",
-    "save_leader_intent",
-    "save_premium_request",
-    "log_progress_event",
-    "get_progress",
-]
+    return {
+        "streak": streak,
+        "episodes_7d": len(ts_list),
+    }
