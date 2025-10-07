@@ -1,66 +1,47 @@
 from __future__ import annotations
-
-import asyncio
-import importlib
-import logging
-
+import asyncio, importlib, logging
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 from aiogram.types import BotCommand
-
 from app.config import settings
 from app.storage.repo import ensure_schema
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s"
-)
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 log = logging.getLogger("main")
 
 BUILD_MARK = "deploy-fixed-loggedout-2025-10-06"
 
-# ───────────────────────────────────────────────
-# Роутеры
-# ───────────────────────────────────────────────
+# routers
 from app.routers.faq import router as faq_router
 from app.routers.help import help_router
-
-# minicasting экспорты
 try:
     from app.routers.minicasting import mc_router
 except Exception:
     from app.routers.minicasting import router as mc_router
-
 from app.routers.training import router as tr_router
 from app.routers.leader import router as leader_router
 from app.routers.cmd_aliases import router as cmd_aliases_router
-from app.routers import (
-    privacy as r_privacy,
-    progress as r_progress,
-    settings as r_settings,
-    extended as r_extended,
-    casting as r_casting,
-    apply as r_apply,
-)
+from app.routers import privacy as r_privacy, progress as r_progress, settings as r_settings, \
+    extended as r_extended, casting as r_casting, apply as r_apply
+from app.routers.onboarding import router as onboarding_router
+from app.routers.system import router as system_router
+# НЕ подключаем: app/routers/menu.py (старый), app/routers/common.py (пустой/не нужен)
 
-# ───────────────────────────────────────────────
-# Команды бота (BotFather меню)
-# ───────────────────────────────────────────────
 async def _set_commands(bot: Bot) -> None:
     cmds = [
-        BotCommand(command="start",     description="Запуск / онбординг"),
-        BotCommand(command="menu",      description="Главное меню"),
-        BotCommand(command="help",      description="FAQ / помощь"),
-        BotCommand(command="training",  description="Тренировка дня"),
-        BotCommand(command="casting",   description="Мини-кастинг"),
-        BotCommand(command="leader",    description="Путь лидера"),
-        BotCommand(command="apply",     description="Путь лидера"),
-        BotCommand(command="progress",  description="Мой прогресс"),
-        BotCommand(command="privacy",   description="Политика"),
-        BotCommand(command="settings",  description="Настройки"),
-        BotCommand(command="cancel",    description="Сбросить форму"),
-        BotCommand(command="ping",      description="Проверка связи"),
+        BotCommand(command="start",    description="Запуск / онбординг"),
+        BotCommand(command="menu",     description="Главное меню"),
+        BotCommand(command="help",     description="FAQ / помощь"),
+        BotCommand(command="training", description="Тренировка дня"),
+        BotCommand(command="casting",  description="Мини-кастинг"),
+        BotCommand(command="leader",   description="Путь лидера"),
+        BotCommand(command="apply",    description="Путь лидера"),
+        BotCommand(command="progress", description="Мой прогресс"),
+        BotCommand(command="privacy",  description="Политика"),
+        BotCommand(command="settings", description="Настройки"),
+        BotCommand(command="cancel",   description="Сбросить форму"),
+        BotCommand(command="ping",     description="Проверка связи"),
     ]
     await bot.set_my_commands(cmds)
 
@@ -71,33 +52,26 @@ def _include(dp: Dispatcher, router_obj, name: str):
     except Exception:
         log.exception("❌ router failed: %s", name)
 
-# ───────────────────────────────────────────────
-# Точка входа
-# ───────────────────────────────────────────────
 async def main() -> None:
     log.info("=== BUILD %s ===", BUILD_MARK)
-
     await ensure_schema()
 
-    bot = Bot(
-        token=settings.bot_token,
-        default=DefaultBotProperties(parse_mode=ParseMode.HTML),
-    )
+    bot = Bot(token=settings.bot_token, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
     dp = Dispatcher()
 
-    # важный шаг: снимаем вебхук и сбрасываем висячие апдейты
     await bot.delete_webhook(drop_pending_updates=True)
     log.info("Webhook deleted, pending updates dropped")
 
-    # entrypoints берём «напрямую» и даём ему приоритет №1
     ep = importlib.import_module("app.routers.entrypoints")
     go_router = getattr(ep, "go_router", getattr(ep, "router"))
     log.info("entrypoints loaded: using %s", "go_router" if hasattr(ep, "go_router") else "router")
 
-    # Порядок имеет значение: entrypoints → help → алиасы → остальное
+    # порядок: entrypoints → help → aliases → остальное
     _include(dp, go_router, "entrypoints")
     _include(dp, help_router, "help")
     _include(dp, cmd_aliases_router, "cmd_aliases")
+    _include(dp, onboarding_router, "onboarding")
+    _include(dp, system_router, "system")
     _include(dp, mc_router, "minicasting")
     _include(dp, leader_router, "leader")
     _include(dp, tr_router, "training")
@@ -113,7 +87,8 @@ async def main() -> None:
     log.info("✅ Команды установлены")
 
     me = await bot.get_me()
-    log.info("🔑 Token hash: %s", __import__("hashlib").md5(settings.bot_token.encode()).hexdigest()[:8])
+    import hashlib
+    log.info("🔑 Token hash: %s", hashlib.md5(settings.bot_token.encode()).hexdigest()[:8])
     log.info("🤖 Bot: @%s (ID: %s)", me.username, me.id)
 
     log.info("🚀 Start polling…")
