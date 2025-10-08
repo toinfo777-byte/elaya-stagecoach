@@ -11,7 +11,7 @@ from app.storage.repo import ensure_schema
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 log = logging.getLogger("main")
 
-BUILD_MARK = "deploy-failsafe-go-2025-10-08"
+BUILD_MARK = "deploy-failsafe-go-fixed-2025-10-08"
 
 # routers
 from app.routers.nav_failsafe import router as nav_failsafe_router
@@ -66,11 +66,12 @@ async def main() -> None:
     # failsafe — ПЕРВЫМ
     _include(dp, nav_failsafe_router, "nav_failsafe")
 
-    # далее — остальное
+    # entrypoints — второй уровень маршрутизации (если он у тебя есть)
     ep = importlib.import_module("app.routers.entrypoints")
     go_router = getattr(ep, "go_router", getattr(ep, "router"))
     _include(dp, go_router, "entrypoints")
 
+    # остальное
     _include(dp, cmd_aliases_router, "cmd_aliases")
     _include(dp, onboarding_router, "onboarding")
     _include(dp, system_router, "system")
@@ -87,6 +88,7 @@ async def main() -> None:
 
     await _set_commands(bot)
     log.info("✅ Команды установлены")
+
     me = await bot.get_me()
     log.info("🔑 Token hash: %s", hashlib.md5(settings.bot_token.encode()).hexdigest()[:8])
     log.info("🤖 Bot: @%s (ID: %s)", me.username, me.id)
