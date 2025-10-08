@@ -96,12 +96,21 @@ async def help_cmd(m: Message):
     if not await _call_optional("app.routers.help", ("show_help",), m):
         await _show_menu(m)
 
-@router.message(Command("ping")))
+@router.message(Command("ping"))
 async def ping(m: Message):
     await m.answer("pong 🟢")
 
 
-# ── Callback: ЖЁСТКАЯ СТРАХОВКА для всех go:* ────────────────────────────────
+# ── Callback: ЖЁСТКАЯ СТРАХОВКА для всех go:* + общий логгер ─────────────────
+@router.callback_query()
+async def cb_any(cq: CallbackQuery, state: FSMContext):
+    data = (cq.data or "").strip()
+    log.info("failsafe callback: %r", data)
+    if data.startswith("go:"):
+        await cb_go_any(cq, state)
+    else:
+        await cq.answer()  # чтобы не висела «крутилка»
+
 @router.callback_query(F.data.startswith("go:"))
 async def cb_go_any(cq: CallbackQuery, state: FSMContext):
     data = cq.data or ""
@@ -174,15 +183,10 @@ TXT_TO_GO = {
 
 @router.message(F.text.in_(set(TXT_TO_GO.keys())))
 async def txt_redirect(m: Message, state: FSMContext):
-    # Снимаем липкую клаву и просто прокидываем в наш же обработчик
     go = TXT_TO_GO[m.text]
     await m.answer("·", reply_markup=ReplyKeyboardRemove())
-    # имитируем нажатие callback-кнопки
-    if go == "go:menu":
-        await _show_menu(m); return
+    # имитируем «нажатие» callback-кнопки, чтобы не дублировать логику
     class _FakeCQ:
-        # минимальный адаптер под наши вызовы
-        def __init__(self, message): self.message = message
+        def __init__(self, message, data): self.message, self.data = message, data
         async def answer(self): pass
-        data = go
-    await cb_go_any(_FakeCQ(m), state)
+    await cb_go_any(_FakeCQ(m, go), state)
