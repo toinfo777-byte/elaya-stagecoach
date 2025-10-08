@@ -11,9 +11,17 @@ from app.storage.repo import ensure_schema
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 log = logging.getLogger("main")
 
-BUILD_MARK = "hardfix-menu8-go-2025-10-08"
+BUILD_MARK = "allowed-updates-callback-fix-2025-10-08"
 
-# ❗ Подключаем только необходимые роутеры. Старые меню/хелп — НЕ подключаем.
+# --- routers ---
+# Главная навигация (рисует меню на 8 инлайн-кнопок и ловит go:*)
+ep = importlib.import_module("app.routers.entrypoints")
+go_router = getattr(ep, "go_router", getattr(ep, "router"))
+
+# Страхующий системный роутер (логирует все callback'и и тоже умеет меню)
+from app.routers.system import router as system_router
+
+# Остальные разделы (оставляем как есть)
 try:
     from app.routers.minicasting import mc_router
 except Exception:
@@ -24,11 +32,10 @@ from app.routers.cmd_aliases import router as cmd_aliases_router
 from app.routers import privacy as r_privacy, progress as r_progress, settings as r_settings, \
     extended as r_extended, casting as r_casting, apply as r_apply
 from app.routers.onboarding import router as onboarding_router
-from app.routers.system import router as system_router
 from app.routers.faq import router as faq_router
 
 async def _set_commands(bot: Bot) -> None:
-    cmds = [
+    await bot.set_my_commands([
         BotCommand(command="start",    description="Запуск / меню"),
         BotCommand(command="menu",     description="Главное меню"),
         BotCommand(command="help",     description="FAQ / помощь"),
@@ -42,8 +49,7 @@ async def _set_commands(bot: Bot) -> None:
         BotCommand(command="cancel",   description="Сбросить форму"),
         BotCommand(command="ping",     description="Проверка связи"),
         BotCommand(command="fixmenu",  description="Починить меню"),
-    ]
-    await bot.set_my_commands(cmds)
+    ])
 
 def _include(dp: Dispatcher, router_obj, name: str):
     try:
@@ -59,19 +65,15 @@ async def main() -> None:
     bot = Bot(token=settings.bot_token, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
     dp = Dispatcher()
 
-    # Всегда снимаем вебхук и чистим очередь
+    # Сбрасываем вебхук и очередь
     await bot.delete_webhook(drop_pending_updates=True)
     log.info("Webhook deleted, pending updates dropped")
 
-    # Главный роутер навигации (меню + go:*)
-    ep = importlib.import_module("app.routers.entrypoints")
-    go_router = getattr(ep, "go_router", getattr(ep, "router"))
+    # Порядок важен: сначала системный (лог), затем entrypoints (меню/го), затем прочее
+    _include(dp, system_router, "system")
     _include(dp, go_router, "entrypoints")
-
-    # Остальные разделы (без старых меню)
     _include(dp, cmd_aliases_router, "cmd_aliases")
     _include(dp, onboarding_router, "onboarding")
-    _include(dp, system_router, "system")
     _include(dp, mc_router, "minicasting")
     _include(dp, leader_router, "leader")
     _include(dp, tr_router, "training")
@@ -91,8 +93,10 @@ async def main() -> None:
     log.info("🤖 Bot: @%s (ID: %s)", me.username, me.id)
 
     log.info("🚀 Start polling…")
-    # Без allowed_updates — принимаем ВСЕ типы апдейтов (включая callback_query)
-    await dp.start_polling(bot)
+
+    # 🔧 КЛЮЧЕВОЕ: ЯВНО РАЗРЕШАЕМ callback_query (и message)
+    allowed = ["message", "callback_query"]
+    await dp.start_polling(bot, allowed_updates=allowed)
 
 if __name__ == "__main__":
     try:
