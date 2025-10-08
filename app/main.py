@@ -1,16 +1,17 @@
 from __future__ import annotations
-import asyncio, importlib, logging
+import asyncio, importlib, logging, hashlib
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 from aiogram.types import BotCommand
+
 from app.config import settings
 from app.storage.repo import ensure_schema
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 log = logging.getLogger("main")
 
-BUILD_MARK = "deploy-fixed-loggedout-2025-10-06"
+BUILD_MARK = "deploy-fixed-menu-callbacks-2025-10-08"
 
 # routers
 from app.routers.faq import router as faq_router
@@ -26,22 +27,22 @@ from app.routers import privacy as r_privacy, progress as r_progress, settings a
     extended as r_extended, casting as r_casting, apply as r_apply
 from app.routers.onboarding import router as onboarding_router
 from app.routers.system import router as system_router
-# НЕ подключаем: app/routers/menu.py (старый), app/routers/common.py (пустой/не нужен)
 
 async def _set_commands(bot: Bot) -> None:
     cmds = [
-        BotCommand(command="start",    description="Запуск / онбординг"),
+        BotCommand(command="start",    description="Запуск / меню"),
         BotCommand(command="menu",     description="Главное меню"),
         BotCommand(command="help",     description="FAQ / помощь"),
         BotCommand(command="training", description="Тренировка дня"),
         BotCommand(command="casting",  description="Мини-кастинг"),
         BotCommand(command="leader",   description="Путь лидера"),
-        BotCommand(command="apply",    description="Путь лидера"),
+        BotCommand(command="apply",    description="Заявка лидера"),
         BotCommand(command="progress", description="Мой прогресс"),
         BotCommand(command="privacy",  description="Политика"),
         BotCommand(command="settings", description="Настройки"),
         BotCommand(command="cancel",   description="Сбросить форму"),
         BotCommand(command="ping",     description="Проверка связи"),
+        BotCommand(command="fixmenu",  description="Починить меню"),
     ]
     await bot.set_my_commands(cmds)
 
@@ -59,16 +60,18 @@ async def main() -> None:
     bot = Bot(token=settings.bot_token, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
     dp = Dispatcher()
 
+    # всегда сбрасываем вебхук + очередь
     await bot.delete_webhook(drop_pending_updates=True)
     log.info("Webhook deleted, pending updates dropped")
 
+    # entrypoints — главный роутер
     ep = importlib.import_module("app.routers.entrypoints")
     go_router = getattr(ep, "go_router", getattr(ep, "router"))
     log.info("entrypoints loaded: using %s", "go_router" if hasattr(ep, "go_router") else "router")
 
     # порядок: entrypoints → help → aliases → остальное
     _include(dp, go_router, "entrypoints")
-    _include(dp, help_router, "help")
+    _include(dp, help_router, "help")              # в help НЕТ /start и /menu, только тексты/FAQ
     _include(dp, cmd_aliases_router, "cmd_aliases")
     _include(dp, onboarding_router, "onboarding")
     _include(dp, system_router, "system")
@@ -87,12 +90,12 @@ async def main() -> None:
     log.info("✅ Команды установлены")
 
     me = await bot.get_me()
-    import hashlib
     log.info("🔑 Token hash: %s", hashlib.md5(settings.bot_token.encode()).hexdigest()[:8])
     log.info("🤖 Bot: @%s (ID: %s)", me.username, me.id)
 
     log.info("🚀 Start polling…")
-    await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types())
+    # ВАЖНО: не ограничиваем allowed_updates — принимаем ВСЕ (иначе теряем callback_query)
+    await dp.start_polling(bot)
 
 if __name__ == "__main__":
     try:
