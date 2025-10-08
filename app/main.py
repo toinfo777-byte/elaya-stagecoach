@@ -11,9 +11,9 @@ from app.storage.repo import ensure_schema
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 log = logging.getLogger("main")
 
-BUILD_MARK = "build-menu8-go-failsafe-2025-10-08"
+BUILD_MARK = "hardfix-menu8-go-2025-10-08"
 
-# routers (НАМЕРЕННО не подключаем старые меню-роутеры)
+# ❗ Подключаем только необходимые роутеры. Старые меню/хелп — НЕ подключаем.
 try:
     from app.routers.minicasting import mc_router
 except Exception:
@@ -59,16 +59,16 @@ async def main() -> None:
     bot = Bot(token=settings.bot_token, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
     dp = Dispatcher()
 
-    # Сбрасываем вебхук + очередь апдейтов
+    # Всегда снимаем вебхук и чистим очередь
     await bot.delete_webhook(drop_pending_updates=True)
     log.info("Webhook deleted, pending updates dropped")
 
-    # Главный роутер навигации (именно он рисует меню и ловит go:*)
+    # Главный роутер навигации (меню + go:*)
     ep = importlib.import_module("app.routers.entrypoints")
     go_router = getattr(ep, "go_router", getattr(ep, "router"))
     _include(dp, go_router, "entrypoints")
 
-    # Остальные модули
+    # Остальные разделы (без старых меню)
     _include(dp, cmd_aliases_router, "cmd_aliases")
     _include(dp, onboarding_router, "onboarding")
     _include(dp, system_router, "system")
@@ -91,7 +91,7 @@ async def main() -> None:
     log.info("🤖 Bot: @%s (ID: %s)", me.username, me.id)
 
     log.info("🚀 Start polling…")
-    # Без allowed_updates — принимаем ВСЕ типы (включая callback_query)
+    # Без allowed_updates — принимаем ВСЕ типы апдейтов (включая callback_query)
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
