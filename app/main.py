@@ -11,17 +11,17 @@ from app.storage.repo import ensure_schema
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 log = logging.getLogger("main")
 
-BUILD_MARK = "allowed-updates-callback-fix-2025-10-08"
+BUILD_MARK = "probe-callback-hard-reset-2025-10-08"
 
 # --- routers ---
-# Главная навигация (рисует меню на 8 инлайн-кнопок и ловит go:*)
+# Диагностический роутер ДОЛЖЕН грузиться первым
+from app.routers.callback_probe import router as probe_router
+
+# Главная навигация
 ep = importlib.import_module("app.routers.entrypoints")
 go_router = getattr(ep, "go_router", getattr(ep, "router"))
 
-# Страхующий системный роутер (логирует все callback'и и тоже умеет меню)
-from app.routers.system import router as system_router
-
-# Остальные разделы (оставляем как есть)
+# Остальные разделы как были
 try:
     from app.routers.minicasting import mc_router
 except Exception:
@@ -32,6 +32,7 @@ from app.routers.cmd_aliases import router as cmd_aliases_router
 from app.routers import privacy as r_privacy, progress as r_progress, settings as r_settings, \
     extended as r_extended, casting as r_casting, apply as r_apply
 from app.routers.onboarding import router as onboarding_router
+from app.routers.system import router as system_router
 from app.routers.faq import router as faq_router
 
 async def _set_commands(bot: Bot) -> None:
@@ -49,6 +50,7 @@ async def _set_commands(bot: Bot) -> None:
         BotCommand(command="cancel",   description="Сбросить форму"),
         BotCommand(command="ping",     description="Проверка связи"),
         BotCommand(command="fixmenu",  description="Починить меню"),
+        BotCommand(command="probe",    description="Тест кнопок (диагностика)"),
     ])
 
 def _include(dp: Dispatcher, router_obj, name: str):
@@ -62,16 +64,31 @@ async def main() -> None:
     log.info("=== BUILD %s ===", BUILD_MARK)
     await ensure_schema()
 
+    # 1) Создаём бота и рвём все внешние сессии/хуки
     bot = Bot(token=settings.bot_token, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
-    dp = Dispatcher()
 
-    # Сбрасываем вебхук и очередь
+    # Снимаем webhook + чистим очередь
     await bot.delete_webhook(drop_pending_updates=True)
     log.info("Webhook deleted, pending updates dropped")
 
-    # Порядок важен: сначала системный (лог), затем entrypoints (меню/го), затем прочее
+    # На всякий: выходим из любых старых getUpdates-сессий (если где-то крутится второй процесс)
+    try:
+        await bot.log_out()
+        log.info("Bot logged out of previous long-polling sessions")
+    except Exception:
+        log.exception("log_out failed (ok to ignore if not previously logged in)")
+
+    # После log_out открываем новый Bot-клиент (рекомендуется)
+    await bot.session.close()
+    bot = Bot(token=settings.bot_token, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
+
+    dp = Dispatcher()
+
+    # 2) Подключаем роутеры (diagnostics -> system -> entrypoints -> прочее)
+    _include(dp, probe_router, "callback_probe")
     _include(dp, system_router, "system")
     _include(dp, go_router, "entrypoints")
+
     _include(dp, cmd_aliases_router, "cmd_aliases")
     _include(dp, onboarding_router, "onboarding")
     _include(dp, mc_router, "minicasting")
@@ -93,10 +110,8 @@ async def main() -> None:
     log.info("🤖 Bot: @%s (ID: %s)", me.username, me.id)
 
     log.info("🚀 Start polling…")
-
-    # 🔧 КЛЮЧЕВОЕ: ЯВНО РАЗРЕШАЕМ callback_query (и message)
-    allowed = ["message", "callback_query"]
-    await dp.start_polling(bot, allowed_updates=allowed)
+    # Без ограничений — пусть Telegram шлёт все типы апдейтов (message, callback_query, и т.д.)
+    await dp.start_polling(bot)
 
 if __name__ == "__main__":
     try:
