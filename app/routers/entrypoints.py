@@ -11,13 +11,7 @@ from aiogram.types import (
     InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardRemove,
 )
 
-# пробуем взять help/privacy/settings из help.py (если есть)
-try:
-    from app.routers.help import show_help, show_privacy, show_settings
-except Exception:
-    show_help = show_privacy = show_settings = None
-
-# прямые входы, если доступны
+# прямые входы
 try:
     from app.routers.training import show_training_levels as training_entry  # (Message, FSMContext)
 except Exception:
@@ -29,7 +23,8 @@ except Exception:
 
 go_router = Router(name="entrypoints")
 
-# ── меню (8 кнопок) ──────────────────────────────────────────────────────────
+
+# ── Меню (8 инлайн-кнопок) ───────────────────────────────────────────────────
 def _menu_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🏋️ Тренировка дня",    callback_data="go:training")],
@@ -43,7 +38,7 @@ def _menu_kb() -> InlineKeyboardMarkup:
     ])
 
 async def _reply_menu(obj: Message | CallbackQuery, text: str):
-    # снимаем старую reply-клаву (если была) и рисуем inline-меню
+    # 1) снимаем старую reply-клавиатуру; 2) рисуем инлайн-меню
     if isinstance(obj, CallbackQuery):
         await obj.answer()
         await obj.message.answer("·", reply_markup=ReplyKeyboardRemove())
@@ -65,7 +60,25 @@ async def show_main_menu(obj: Message | CallbackQuery):
     )
     await _reply_menu(obj, text)
 
-# ── утилита динамического вызова ─────────────────────────────────────────────
+
+# ── Fallback-экраны (встроенные тексты) ───────────────────────────────────────
+async def _show_help(obj: Message | CallbackQuery):
+    await _reply_menu(obj,
+        "💬 <b>Помощь / FAQ</b>\n\n"
+        "— «🏋️ Тренировка дня» — старт здесь.\n"
+        "— «📈 Мой прогресс» — стрик и эпизоды.\n"
+        "— «🧭 Путь лидера» — заявка и шаги.\n\n"
+        "Если что-то не работает — /ping."
+    )
+
+async def _show_privacy(obj: Message | CallbackQuery):
+    await _reply_menu(obj, "🔐 <b>Политика</b>\n\nДетали обновим перед релизом.")
+
+async def _show_settings(obj: Message | CallbackQuery):
+    await _reply_menu(obj, "⚙️ <b>Настройки</b>\n\nПрофиль в разработке.")
+
+
+# ── Динамический вызов, если есть профильные модули ──────────────────────────
 async def _call_optional(module: str, candidates: Iterable[str], *args, **kwargs) -> bool:
     try:
         mod = importlib.import_module(module)
@@ -80,7 +93,8 @@ async def _call_optional(module: str, candidates: Iterable[str], *args, **kwargs
             return True
     return False
 
-# ── команды ──────────────────────────────────────────────────────────────────
+
+# ── Команды ──────────────────────────────────────────────────────────────────
 @go_router.message(CommandStart(deep_link=False))
 async def cmd_start(m: Message, state: FSMContext):
     await show_main_menu(m)
@@ -96,22 +110,18 @@ async def cmd_fixmenu(m: Message):
 
 @go_router.message(Command("help"))
 async def cmd_help(m: Message):
-    if show_help:
-        await show_help(m)
-    else:
-        await m.answer("💬 Помощь скоро будет обновлена."); await show_main_menu(m)
+    if not await _call_optional("app.routers.help", ("show_help",), m):
+        await _show_help(m)
 
 @go_router.message(Command("privacy"))
 async def cmd_privacy(m: Message):
-    if show_privacy: await show_privacy(m)
-    elif not await _call_optional("app.routers.privacy", ("show_privacy","open_privacy"), m):
-        await m.answer("🔐 Политика скоро будет обновлена."); await show_main_menu(m)
+    if not await _call_optional("app.routers.privacy", ("show_privacy","open_privacy"), m):
+        await _show_privacy(m)
 
 @go_router.message(Command("settings"))
 async def cmd_settings(m: Message):
-    if show_settings: await show_settings(m)
-    elif not await _call_optional("app.routers.settings", ("show_settings","open_settings"), m):
-        await m.answer("⚙️ Настройки в разработке."); await show_main_menu(m)
+    if not await _call_optional("app.routers.settings", ("show_settings","open_settings"), m):
+        await _show_settings(m)
 
 @go_router.message(Command("progress"))
 async def cmd_progress(m: Message):
@@ -143,7 +153,7 @@ async def cmd_extended(m: Message):
 @go_router.message(Command("faq"))
 async def cmd_faq(m: Message):
     if not await _call_optional("app.routers.faq", ("open_faq","show_faq"), m):
-        await cmd_help(m)
+        await _show_help(m)
 
 @go_router.message(Command("ping"))
 async def cmd_ping(m: Message): await m.answer("pong 🟢")
@@ -155,29 +165,28 @@ async def cmd_healthz(m: Message): await m.answer("ok")
 async def cmd_cancel(m: Message, state: FSMContext):
     await state.clear(); await m.answer("↩️ Сброс состояний."); await show_main_menu(m)
 
-# ── callback go:* ────────────────────────────────────────────────────────────
+
+# ── Callback go:* ────────────────────────────────────────────────────────────
 @go_router.callback_query(F.data == "go:menu")
 async def cb_go_menu(cq: CallbackQuery): await show_main_menu(cq)
 
 @go_router.callback_query(F.data == "go:help")
 async def cb_go_help(cq: CallbackQuery):
     await cq.answer()
-    if show_help: await show_help(cq)
-    else: await cq.message.answer("💬 Помощь скоро будет обновлена."); await show_main_menu(cq)
+    if not await _call_optional("app.routers.help", ("show_help",), cq):
+        await _show_help(cq)
 
 @go_router.callback_query(F.data == "go:privacy")
 async def cb_go_privacy(cq: CallbackQuery):
     await cq.answer()
-    if show_privacy: await show_privacy(cq); return
     if not await _call_optional("app.routers.privacy", ("show_privacy","open_privacy"), cq):
-        await cq.message.answer("🔐 Политика скоро будет обновлена."); await show_main_menu(cq)
+        await _show_privacy(cq)
 
 @go_router.callback_query(F.data == "go:settings")
 async def cb_go_settings(cq: CallbackQuery):
     await cq.answer()
-    if show_settings: await show_settings(cq); return
     if not await _call_optional("app.routers.settings", ("show_settings","open_settings"), cq):
-        await cq.message.answer("⚙️ Настройки в разработке."); await show_main_menu(cq)
+        await _show_settings(cq)
 
 @go_router.callback_query(F.data == "go:progress")
 async def cb_go_progress(cq: CallbackQuery):
