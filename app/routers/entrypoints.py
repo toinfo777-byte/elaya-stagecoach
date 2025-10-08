@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import importlib
+import importlib, logging
 from typing import Awaitable, Iterable
 
 from aiogram import Router, F
@@ -11,21 +11,10 @@ from aiogram.types import (
     InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardRemove,
 )
 
-# прямые входы (если доступны)
-try:
-    from app.routers.training import show_training_levels as training_entry  # (Message, FSMContext)
-except Exception:
-    training_entry = None
-try:
-    from app.routers.progress import show_progress as progress_entry  # (Message)
-except Exception:
-    progress_entry = None
-
+log = logging.getLogger("entrypoints")
 go_router = Router(name="entrypoints")
 
-# ──────────────────────────────────────────────────────────────────────────────
-# Меню (8 инлайн-кнопок)
-# ──────────────────────────────────────────────────────────────────────────────
+# ───────────────────────────── UI ─────────────────────────────
 def _menu_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🏋️ Тренировка дня",    callback_data="go:training")],
@@ -38,32 +27,29 @@ def _menu_kb() -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="⭐ Расширенная версия", callback_data="go:extended")],
     ])
 
-async def _reply_menu(obj: Message | CallbackQuery, text: str):
-    # всегда снимаем старую reply-клавиатуру и показываем inline
+MENU_TEXT = (
+    "Команды и разделы: выбери нужное ⤵️\n\n"
+    "🏋️ <b>Тренировка дня</b> — ежедневная рутина 5–15 мин.\n"
+    "🎭 <b>Мини-кастинг</b> — быстрый чек 2–3 мин.\n"
+    "🧭 <b>Путь лидера</b> — цель + микро-задание + заявка.\n"
+    "📈 <b>Мой прогресс</b> — стрик и эпизоды за 7 дней.\n"
+    "💬 <b>Помощь / FAQ</b> — ответы на частые вопросы.\n"
+    "⚙️ <b>Настройки</b> — профиль.\n"
+    "🔐 <b>Политика</b> — как храним и используем данные.\n"
+    "⭐ <b>Расширенная версия</b> — скоро."
+)
+
+async def _show_menu(obj: Message | CallbackQuery):
+    # Всегда снимаем липкую reply-клаву и рисуем inline
     if isinstance(obj, CallbackQuery):
         await obj.answer()
         await obj.message.answer("·", reply_markup=ReplyKeyboardRemove())
-        return await obj.message.answer(text, reply_markup=_menu_kb())
-    await obj.answer("·", reply_markup=ReplyKeyboardRemove())
-    return await obj.answer(text, reply_markup=_menu_kb())
+        await obj.message.answer(MENU_TEXT, reply_markup=_menu_kb())
+    else:
+        await obj.answer("·", reply_markup=ReplyKeyboardRemove())
+        await obj.answer(MENU_TEXT, reply_markup=_menu_kb())
 
-async def show_main_menu(obj: Message | CallbackQuery):
-    text = (
-        "Команды и разделы: выбери нужное ⤵️\n\n"
-        "🏋️ <b>Тренировка дня</b> — ежедневная рутина 5–15 мин.\n"
-        "🎭 <b>Мини-кастинг</b> — быстрый чек 2–3 мин.\n"
-        "🧭 <b>Путь лидера</b> — цель + микро-задание + заявка.\n"
-        "📈 <b>Мой прогресс</b> — стрик и эпизоды за 7 дней.\n"
-        "💬 <b>Помощь / FAQ</b> — ответы на частые вопросы.\n"
-        "⚙️ <b>Настройки</b> — профиль.\n"
-        "🔐 <b>Политика</b> — как храним и используем данные.\n"
-        "⭐ <b>Расширенная версия</b> — скоро."
-    )
-    await _reply_menu(obj, text)
-
-# ──────────────────────────────────────────────────────────────────────────────
-# Динамический вызов, если есть профильные модули
-# ──────────────────────────────────────────────────────────────────────────────
+# ─────────────────── Dynamic import helper ────────────────────
 async def _call_optional(module: str, candidates: Iterable[str], *args, **kwargs) -> bool:
     try:
         mod = importlib.import_module(module)
@@ -78,53 +64,42 @@ async def _call_optional(module: str, candidates: Iterable[str], *args, **kwargs
             return True
     return False
 
-# ──────────────────────────────────────────────────────────────────────────────
-# Команды
-# ──────────────────────────────────────────────────────────────────────────────
+# ───────────────────────── Команды ────────────────────────────
 @go_router.message(CommandStart(deep_link=False))
 async def cmd_start(m: Message, state: FSMContext):
-    await show_main_menu(m)
+    await _show_menu(m)
 
 @go_router.message(Command("menu"))
 async def cmd_menu(m: Message, state: FSMContext):
-    await show_main_menu(m)
+    await _show_menu(m)
 
 @go_router.message(Command("fixmenu"))
 async def cmd_fixmenu(m: Message):
     await m.answer("Меню обновлено.", reply_markup=ReplyKeyboardRemove())
-    await show_main_menu(m)
+    await _show_menu(m)
 
 @go_router.message(Command("help"))
 async def cmd_help(m: Message):
-    # если есть help.show_help — используем, иначе свой текст
     if not await _call_optional("app.routers.help", ("show_help",), m):
-        await _reply_menu(m,
-            "💬 <b>Помощь / FAQ</b>\n\n"
-            "— «🏋️ Тренировка дня» — старт здесь.\n"
-            "— «📈 Мой прогресс» — стрик и эпизоды.\n"
-            "— «🧭 Путь лидера» — заявка и шаги.\n\n"
-            "Если что-то не работает — /ping."
-        )
+        await _show_menu(m)
 
 @go_router.message(Command("privacy"))
 async def cmd_privacy(m: Message):
     if not await _call_optional("app.routers.privacy", ("show_privacy","open_privacy"), m):
-        await _reply_menu(m, "🔐 <b>Политика</b>\n\nДетали обновим перед релизом.")
+        await _show_menu(m)
 
 @go_router.message(Command("settings"))
 async def cmd_settings(m: Message):
     if not await _call_optional("app.routers.settings", ("show_settings","open_settings"), m):
-        await _reply_menu(m, "⚙️ <b>Настройки</b>\n\nПрофиль в разработке.")
+        await _show_menu(m)
 
 @go_router.message(Command("progress"))
 async def cmd_progress(m: Message):
-    if progress_entry: await progress_entry(m); return
     if not await _call_optional("app.routers.progress", ("show_progress","open_progress"), m):
         await m.answer("📈 «Мой прогресс» временно недоступен.")
 
 @go_router.message(Command("training"))
 async def cmd_training(m: Message, state: FSMContext):
-    if training_entry: await training_entry(m, state); return
     if not await _call_optional("app.routers.training", ("show_training_levels","open_training","start_training"), m, state):
         await m.answer("🏋️ «Тренировка дня» временно недоступна.")
 
@@ -141,64 +116,50 @@ async def cmd_casting(m: Message, state: FSMContext):
 @go_router.message(Command("extended"))
 async def cmd_extended(m: Message):
     if not await _call_optional("app.routers.extended", ("open_extended","show_extended","extended_entry"), m):
-        await m.answer("⭐️ «Расширенная версия» — после стабилизации dev.")
-
-@go_router.message(Command("faq"))
-async def cmd_faq(m: Message):
-    if not await _call_optional("app.routers.faq", ("open_faq","show_faq"), m):
-        await cmd_help(m)
+        await m.answer("⭐️ «Расширенная версия» — позже.")
 
 @go_router.message(Command("ping"))
 async def cmd_ping(m: Message): await m.answer("pong 🟢")
 
-@go_router.message(Command("healthz"))
-async def cmd_healthz(m: Message): await m.answer("ok")
-
 @go_router.message(Command("cancel"))
 async def cmd_cancel(m: Message, state: FSMContext):
-    await state.clear(); await m.answer("↩️ Сброс состояний."); await show_main_menu(m)
+    await state.clear(); await m.answer("↩️ Сброс состояний."); await _show_menu(m)
 
-# ──────────────────────────────────────────────────────────────────────────────
-# Callback go:*
-# ──────────────────────────────────────────────────────────────────────────────
+# ─────────── Callback go:* (+ общий логгер на все callback) ───────────
+@go_router.callback_query()
+async def cb_any(cq: CallbackQuery):
+    log.info("callback: %r", (cq.data or "").strip())
+
 @go_router.callback_query(F.data == "go:menu")
-async def cb_go_menu(cq: CallbackQuery): await show_main_menu(cq)
+async def cb_go_menu(cq: CallbackQuery): await _show_menu(cq)
 
 @go_router.callback_query(F.data == "go:help")
 async def cb_go_help(cq: CallbackQuery):
     await cq.answer()
     if not await _call_optional("app.routers.help", ("show_help",), cq):
-        await _reply_menu(cq,
-            "💬 <b>Помощь / FAQ</b>\n\n"
-            "— «🏋️ Тренировка дня» — старт здесь.\n"
-            "— «📈 Мой прогресс» — стрик и эпизоды.\n"
-            "— «🧭 Путь лидера» — заявка и шаги.\n\n"
-            "Если что-то не работает — /ping."
-        )
+        await _show_menu(cq)
 
 @go_router.callback_query(F.data == "go:privacy")
 async def cb_go_privacy(cq: CallbackQuery):
     await cq.answer()
     if not await _call_optional("app.routers.privacy", ("show_privacy","open_privacy"), cq):
-        await _reply_menu(cq, "🔐 <b>Политика</b>\n\nДетали обновим перед релизом.")
+        await _show_menu(cq)
 
 @go_router.callback_query(F.data == "go:settings")
 async def cb_go_settings(cq: CallbackQuery):
     await cq.answer()
     if not await _call_optional("app.routers.settings", ("show_settings","open_settings"), cq):
-        await _reply_menu(cq, "⚙️ <b>Настройки</b>\n\nПрофиль в разработке.")
+        await _show_menu(cq)
 
 @go_router.callback_query(F.data == "go:progress")
 async def cb_go_progress(cq: CallbackQuery):
     await cq.answer()
-    if progress_entry: await progress_entry(cq.message); return
     if not await _call_optional("app.routers.progress", ("show_progress","open_progress"), cq.message):
         await cq.message.answer("📈 «Мой прогресс» временно недоступен.")
 
 @go_router.callback_query(F.data == "go:training")
 async def cb_go_training(cq: CallbackQuery, state: FSMContext):
     await cq.answer()
-    if training_entry: await training_entry(cq.message, state); return
     if not await _call_optional("app.routers.training", ("show_training_levels","open_training","start_training"), cq.message, state):
         await cq.message.answer("🏋️ «Тренировка дня» временно недоступна.")
 
@@ -218,62 +179,36 @@ async def cb_go_casting(cq: CallbackQuery, state: FSMContext):
 async def cb_go_extended(cq: CallbackQuery):
     await cq.answer()
     if not await _call_optional("app.routers.extended", ("open_extended","show_extended","extended_entry"), cq):
-        await cq.message.answer("⭐️ «Расширенная версия» — после стабилизации dev.")
+        await cq.message.answer("⭐️ «Расширенная версия» — позже.")
 
-# На всякий случай — ловим прочие go:*
-@go_router.callback_query(F.data.startswith("go:"))
-async def cb_go_fallback(cq: CallbackQuery):
-    await cq.answer()
-    await cq.message.answer("⏳ Раздел готовится. Открой пока «🏋️ Тренировка дня».")
-
-# ──────────────────────────────────────────────────────────────────────────────
-# ВАЖНО: перехват «липкой» reply-клавы (текстовые кнопки)
-# ──────────────────────────────────────────────────────────────────────────────
-TXT_TO_SECTION = {
-    "🏋️ Тренировка дня":  "training",
-    "🎭 Мини-кастинг":    "casting",
-    "🧭 Путь лидера":     "leader",
-    "📈 Мой прогресс":    "progress",
-    "💬 Помощь":          "help",
-    "💬 Помощь / FAQ":    "help",
-    "🔐 Политика":        "privacy",
-    "⚙️ Настройки":       "settings",
-    "⭐ Расширенная версия": "extended",
-    "Меню":               "menu",
-    "В меню":             "menu",
-    "🏠 В меню":          "menu",
+# ───────── Перехват «липкой» reply-клавы (текстовые кнопки) ─────────
+TXT_TO_GO = {
+    "🏋️ Тренировка дня":  "go:training",
+    "🎭 Мини-кастинг":    "go:casting",
+    "🧭 Путь лидера":     "go:leader",
+    "📈 Мой прогресс":    "go:progress",
+    "💬 Помощь":          "go:help",
+    "💬 Помощь / FAQ":    "go:help",
+    "🔐 Политика":        "go:privacy",
+    "⚙️ Настройки":       "go:settings",
+    "⭐ Расширенная версия": "go:extended",
+    "Меню":               "go:menu",
+    "В меню":             "go:menu",
+    "🏠 В меню":          "go:menu",
 }
 
-@go_router.message(F.text.in_(set(TXT_TO_SECTION.keys())))
-async def txt_nav(m: Message, state: FSMContext):
-    # сначала убираем reply-клаву
+@go_router.message(F.text.in_(set(TXT_TO_GO.keys())))
+async def txt_redirect(m: Message, state: FSMContext):
+    # снимаем reply-клаву и перенаправляем в нужный раздел
     await m.answer("·", reply_markup=ReplyKeyboardRemove())
-    target = TXT_TO_SECTION.get(m.text, "menu")
-
-    if target == "menu":
-        await show_main_menu(m); return
-    if target == "training":
-        if training_entry: await training_entry(m, state); return
-        if await _call_optional("app.routers.training", ("show_training_levels","open_training","start_training"), m, state): return
-    if target == "progress":
-        if progress_entry: await progress_entry(m); return
-        if await _call_optional("app.routers.progress", ("show_progress","open_progress"), m): return
-    if target == "leader":
-        if await _call_optional("app.routers.leader", ("open_leader","show_leader","leader_entry","start_leader"), m, state): return
-    if target == "casting":
-        if await _call_optional("app.routers.minicasting", ("open_minicasting","show_minicasting","mc_entry","start_minicasting"), m, state): return
-    if target == "help":
-        if await _call_optional("app.routers.help", ("show_help",), m): return
-        await cmd_help(m); return
-    if target == "privacy":
-        if await _call_optional("app.routers.privacy", ("show_privacy","open_privacy"), m): return
-        await cmd_privacy(m); return
-    if target == "settings":
-        if await _call_optional("app.routers.settings", ("show_settings","open_settings"), m): return
-        await cmd_settings(m); return
-    if target == "extended":
-        if await _call_optional("app.routers.extended", ("open_extended","show_extended","extended_entry"), m): return
-        await m.answer("⭐️ «Расширенная версия» — после стабилизации dev."); return
-
-    # если ничего не сработало — просто меню
-    await show_main_menu(m)
+    target = TXT_TO_GO[m.text]
+    if target == "go:menu":        await _show_menu(m); return
+    if target == "go:help":        await cmd_help(m); return
+    if target == "go:privacy":     await cmd_privacy(m); return
+    if target == "go:settings":    await cmd_settings(m); return
+    if target == "go:progress":    await cmd_progress(m); return
+    if target == "go:training":    await cmd_training(m, state); return
+    if target == "go:leader":      await _call_optional("app.routers.leader", ("open_leader","show_leader","leader_entry","start_leader"), m, state); return
+    if target == "go:casting":     await _call_optional("app.routers.minicasting", ("open_minicasting","show_minicasting","mc_entry","start_minicasting"), m, state); return
+    if target == "go:extended":    await _call_optional("app.routers.extended", ("open_extended","show_extended","extended_entry"), m); return
+    await _show_menu(m)
