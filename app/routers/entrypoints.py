@@ -125,11 +125,7 @@ async def cmd_ping(m: Message): await m.answer("pong 🟢")
 async def cmd_cancel(m: Message, state: FSMContext):
     await state.clear(); await m.answer("↩️ Сброс состояний."); await _show_menu(m)
 
-# ─────────── Callback go:* (+ общий логгер на все callback) ───────────
-@go_router.callback_query()
-async def cb_any(cq: CallbackQuery):
-    log.info("callback: %r", (cq.data or "").strip())
-
+# ─────────── Callback go:* (без catch-all, чтобы не глушить другие) ───────────
 @go_router.callback_query(F.data == "go:menu")
 async def cb_go_menu(cq: CallbackQuery): await _show_menu(cq)
 
