@@ -11,11 +11,9 @@ from app.storage.repo import ensure_schema
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 log = logging.getLogger("main")
 
-BUILD_MARK = "deploy-fixed-menu-callbacks-2025-10-08"
+BUILD_MARK = "deploy-nonstop-entrypoints-2025-10-08"
 
-# routers
-from app.routers.faq import router as faq_router
-from app.routers.help import help_router
+# routers (без help_router — убрали источник старого меню)
 try:
     from app.routers.minicasting import mc_router
 except Exception:
@@ -27,6 +25,7 @@ from app.routers import privacy as r_privacy, progress as r_progress, settings a
     extended as r_extended, casting as r_casting, apply as r_apply
 from app.routers.onboarding import router as onboarding_router
 from app.routers.system import router as system_router
+from app.routers.faq import router as faq_router
 
 async def _set_commands(bot: Bot) -> None:
     cmds = [
@@ -69,9 +68,8 @@ async def main() -> None:
     go_router = getattr(ep, "go_router", getattr(ep, "router"))
     log.info("entrypoints loaded: using %s", "go_router" if hasattr(ep, "go_router") else "router")
 
-    # порядок: entrypoints → help → aliases → остальное
+    # порядок: entrypoints → aliases → остальное
     _include(dp, go_router, "entrypoints")
-    _include(dp, help_router, "help")              # в help НЕТ /start и /menu, только тексты/FAQ
     _include(dp, cmd_aliases_router, "cmd_aliases")
     _include(dp, onboarding_router, "onboarding")
     _include(dp, system_router, "system")
@@ -94,7 +92,7 @@ async def main() -> None:
     log.info("🤖 Bot: @%s (ID: %s)", me.username, me.id)
 
     log.info("🚀 Start polling…")
-    # ВАЖНО: не ограничиваем allowed_updates — принимаем ВСЕ (иначе теряем callback_query)
+    # ВАЖНО: без allowed_updates — ловим ВСЁ (включая callback_query)
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
