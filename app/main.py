@@ -38,7 +38,7 @@ async def _set_commands(bot: Bot) -> None:
 async def main() -> None:
     log.info("=== BUILD %s ===", BUILD_MARK)
 
-    # ── Инициализация БД: поддержка sync/async ensure_schema ────────────────
+    # ── Инициализация БД (поддержка sync/async ensure_schema) ──────────────
     try:
         if iscoroutinefunction(ensure_schema):
             await ensure_schema()
@@ -48,7 +48,7 @@ async def main() -> None:
     except Exception:
         log.exception("ensure_schema failed")
 
-    # ── Bot/Dispatcher ───────────────────────────────────────────────────────
+    # ── Bot/Dispatcher ──────────────────────────────────────────────────────
     bot = Bot(
         token=settings.bot_token,
         default=DefaultBotProperties(parse_mode=ParseMode.HTML),
@@ -57,23 +57,6 @@ async def main() -> None:
     # Снимаем вебхук и чистим очередь
     await bot.delete_webhook(drop_pending_updates=True)
     log.info("Webhook deleted, pending updates dropped")
-
-    # На всякий — глушим старые long-polling сессии (может кидать 400/401 — не критично)
-    try:
-        await bot.log_out()
-        log.info("Logged out previous sessions")
-    except Exception:
-        log.exception("log_out failed (can ignore)")
-
-    # Пересоздаём клиент после logout
-    try:
-        await bot.session.close()
-    except Exception:
-        pass
-    bot = Bot(
-        token=settings.bot_token,
-        default=DefaultBotProperties(parse_mode=ParseMode.HTML),
-    )
 
     dp = Dispatcher()
     dp.include_router(diag_router);  log.info("✅ router loaded: diag")
