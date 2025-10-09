@@ -1,3 +1,4 @@
+cat > app/main.py <<'PY'
 from __future__ import annotations
 
 import asyncio
@@ -18,7 +19,6 @@ from app.routers.diag import router as diag_router
 from app.routers.panic import router as panic_router
 
 
-# ────────────────────────── Логирование ──────────────────────────
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
@@ -26,7 +26,6 @@ logging.basicConfig(
 log = logging.getLogger("main")
 
 
-# ─────────────────── Команды бота (может падать) ─────────────────
 async def _set_commands(bot: Bot) -> None:
     await bot.set_my_commands(
         [
@@ -42,12 +41,7 @@ async def _set_commands(bot: Bot) -> None:
     )
 
 
-# ───────────── Универсальный «гвард» для Logged out ──────────────
 async def _guard_logged_out(coro, *, what: str):
-    """
-    Оборачивает вызовы методов Bot API, которые могут падать TelegramBadRequest: Logged out.
-    В таком случае просто логируем и продолжаем запуск.
-    """
     try:
         return await coro
     except TelegramBadRequest as e:
@@ -57,11 +51,9 @@ async def _guard_logged_out(coro, *, what: str):
         raise
 
 
-# ─────────────────────────── main() ──────────────────────────────
 async def main() -> None:
     log.info("=== BUILD %s ===", BUILD_MARK)
 
-    # Инициализация/миграции БД: поддержка sync/async ensure_schema
     try:
         if iscoroutinefunction(ensure_schema):
             await ensure_schema()
@@ -71,33 +63,27 @@ async def main() -> None:
     except Exception:
         log.exception("ensure_schema failed")
 
-    # Создаём Bot/Dispatcher
     bot = Bot(
         token=settings.bot_token,
         default=DefaultBotProperties(parse_mode=ParseMode.HTML),
     )
     dp = Dispatcher()
 
-    # Снимаем вебхук (если стоял). На некоторых токенах даёт "Logged out" — игнорируем.
     await _guard_logged_out(
         bot.delete_webhook(drop_pending_updates=True),
         what="delete_webhook",
     )
 
-    # Роутеры диагностики
     dp.include_router(diag_router);  log.info("✅ router loaded: diag")
     dp.include_router(panic_router); log.info("✅ router loaded: panic")
 
-    # Попытка выставить команды — может словить "Logged out"
     await _guard_logged_out(_set_commands(bot), what="set_my_commands")
 
-    # Кто мы
     me = await bot.get_me()
     log.info("🔑 Token hash: %s", hashlib.md5(settings.bot_token.encode()).hexdigest()[:8])
     log.info("🤖 Bot: @%s (ID: %s)", me.username, me.id)
     log.info("🚀 Start polling…")
 
-    # Запуск long polling
     await dp.start_polling(bot, allowed_updates=["message", "callback_query"])
 
 
@@ -106,3 +92,4 @@ if __name__ == "__main__":
         asyncio.run(main())
     except KeyboardInterrupt:
         log.info("⏹ Stopped by user")
+PY
