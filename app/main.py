@@ -8,6 +8,7 @@ from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 from aiogram.types import BotCommand
+from aiogram.exceptions import TelegramBadRequest
 
 from app.config import settings
 from app.storage.repo import ensure_schema
@@ -15,10 +16,7 @@ from app.build import BUILD_MARK
 from app.routers.diag import router as diag_router
 from app.routers.panic import router as panic_router
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s"
-)
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 log = logging.getLogger("main")
 
 
@@ -38,7 +36,7 @@ async def _set_commands(bot: Bot) -> None:
 async def main() -> None:
     log.info("=== BUILD %s ===", BUILD_MARK)
 
-    # ── Инициализация БД (поддержка sync/async ensure_schema) ──────────────
+    # ── ensure_schema: поддержка sync/async реализаций
     try:
         if iscoroutinefunction(ensure_schema):
             await ensure_schema()
@@ -48,15 +46,18 @@ async def main() -> None:
     except Exception:
         log.exception("ensure_schema failed")
 
-    # ── Bot/Dispatcher ──────────────────────────────────────────────────────
-    bot = Bot(
-        token=settings.bot_token,
-        default=DefaultBotProperties(parse_mode=ParseMode.HTML),
-    )
+    # ── Bot/Dispatcher
+    bot = Bot(token=settings.bot_token, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
 
-    # Снимаем вебхук и чистим очередь
-    await bot.delete_webhook(drop_pending_updates=True)
-    log.info("Webhook deleted, pending updates dropped")
+    # Снять вебхук и очистить очередь, но игнорировать «Logged out»
+    try:
+        await bot.delete_webhook(drop_pending_updates=True)
+        log.info("Webhook deleted, pending updates dropped")
+    except TelegramBadRequest as e:
+        if "Logged out" in str(e):
+            log.warning("delete_webhook: Bot API reports 'Logged out' — игнорируем и продолжаем polling")
+        else:
+            raise
 
     dp = Dispatcher()
     dp.include_router(diag_router);  log.info("✅ router loaded: diag")
