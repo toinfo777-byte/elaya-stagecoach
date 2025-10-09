@@ -1,6 +1,7 @@
 from __future__ import annotations
 import asyncio, hashlib, logging
 from inspect import iscoroutinefunction
+
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
@@ -10,8 +11,27 @@ from aiogram.types import BotCommand
 from app.config import settings
 from app.storage.repo import ensure_schema
 from app.build import BUILD_MARK
+
+# боевые роутеры
+from app.routers.help import help_router
+from app.routers.entrypoints import go_router as entry_router
+from app.routers.cmd_aliases import router as aliases_router
+from app.routers.onboarding import router as onboarding_router
+from app.routers.system import router as system_router
+from app.routers.minicasting import router as mc_router
+from app.routers.leader import router as leader_router
+from app.routers.training import router as training_router
+from app.routers.progress import router as progress_router
+from app.routers.privacy import router as privacy_router
+from app.routers.settings import router as settings_router
+from app.routers.extended import router as extended_router
+from app.routers.casting import router as casting_router
+from app.routers.apply import router as apply_router
+from app.routers.faq import router as faq_router
+
+# диагностика
 from app.routers.panic import router as panic_router
-from app.routers.diag import router as diag_router  # ← останется последним
+from app.routers.diag import router as diag_router
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 log = logging.getLogger("main")
@@ -30,13 +50,13 @@ async def _set_commands(bot: Bot) -> None:
     ])
 
 
-async def _guard_logged_out(coro, *, what: str):
+async def _guard(coro, what: str):
     try:
         return await coro
     except TelegramBadRequest as e:
         if "Logged out" in str(e):
-            log.warning("%s: Bot API reports 'Logged out' — игнорируем и продолжаем", what)
-            return None
+            log.warning("%s: Bot API 'Logged out' — игнорируем", what)
+            return
         raise
 
 
@@ -52,13 +72,31 @@ async def main() -> None:
     bot = Bot(token=settings.bot_token, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
     dp = Dispatcher()
 
-    await _guard_logged_out(bot.delete_webhook(drop_pending_updates=True), what="delete_webhook")
+    await _guard(bot.delete_webhook(drop_pending_updates=True), "delete_webhook")
 
-    # ПОРЯДОК КРИТИЧЕН:
-    dp.include_router(panic_router); log.info("✅ router loaded: panic (first)")
-    dp.include_router(diag_router);  log.info("✅ router loaded: diag (last)")
+    # порядок: навигация → контент → утилиты → panic → diag
+    dp.include_router(entry_router);      log.info("✅ router loaded: entrypoints")
+    dp.include_router(help_router);       log.info("✅ router loaded: help")
+    dp.include_router(aliases_router);    log.info("✅ router loaded: aliases")
+    dp.include_router(onboarding_router); log.info("✅ router loaded: onboarding")
+    dp.include_router(system_router);     log.info("✅ router loaded: system")
 
-    await _guard_logged_out(_set_commands(bot), what="set_my_commands")
+    dp.include_router(mc_router);         log.info("✅ router loaded: minicasting")
+    dp.include_router(leader_router);     log.info("✅ router loaded: leader")
+    dp.include_router(training_router);   log.info("✅ router loaded: training")
+    dp.include_router(progress_router);   log.info("✅ router loaded: progress")
+    dp.include_router(privacy_router);    log.info("✅ router loaded: privacy")
+    dp.include_router(settings_router);   log.info("✅ router loaded: settings")
+    dp.include_router(extended_router);   log.info("✅ router loaded: extended")
+    dp.include_router(casting_router);    log.info("✅ router loaded: casting")
+    dp.include_router(apply_router);      log.info("✅ router loaded: apply")
+    dp.include_router(faq_router);        log.info("✅ router loaded: faq")
+
+    # диагностические — в самом конце
+    dp.include_router(panic_router);      log.info("✅ router loaded: panic (near last)")
+    dp.include_router(diag_router);       log.info("✅ router loaded: diag (last)")
+
+    await _guard(_set_commands(bot), "set_my_commands")
 
     me = await bot.get_me()
     log.info("🔑 Token hash: %s", hashlib.md5((await bot.get_token()).encode()).hexdigest()[:8])
