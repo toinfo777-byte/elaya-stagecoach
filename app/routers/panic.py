@@ -1,4 +1,3 @@
-# app/routers/panic.py
 from __future__ import annotations
 
 import logging
@@ -9,15 +8,12 @@ from aiogram import Router, F
 from aiogram.filters import Command, CommandStart
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import StatesGroup, State
-from aiogram.types import (
-    Message,
-    ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove,
-)
+from aiogram.types import Message, ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove
 
 log = logging.getLogger("panic")
 router = Router(name="panic")
 
-# ───────────────────── UI: главное reply-меню (8 кнопок) ─────────────────────
+# ---------- UI: главное reply-меню (8 кнопок) ----------
 def _main_kb() -> ReplyKeyboardMarkup:
     rows = [
         [KeyboardButton(text="🏋️ Тренировка дня"), KeyboardButton(text="📈 Мой прогресс")],
@@ -40,11 +36,13 @@ MENU_TEXT = (
 )
 
 async def _menu(m: Message):
-    # На всякий убираем старые клавы, затем рисуем актуальную
     await m.answer("·", reply_markup=ReplyKeyboardRemove())
     await m.answer(MENU_TEXT, reply_markup=_main_kb())
 
-# ───────────────────── помощник: мягкий вызов функции из модуля ─────────────────────
+# ---------- утилиты ----------
+def _norm(text: str | None) -> str:
+    return (text or "").strip().lower()
+
 async def _call_optional(module: str, candidates: Iterable[str], *args, **kwargs) -> bool:
     try:
         mod = importlib.import_module(module)
@@ -59,21 +57,33 @@ async def _call_optional(module: str, candidates: Iterable[str], *args, **kwargs
             return True
     return False
 
-# ───────────────────── Диагностические быстрые ответы (как раньше) ─────────────────────
-@router.message(Command("ping"))
-async def ping(m: Message): await m.answer("pong 🟢", reply_markup=_main_kb())
+def _log_incoming(m: Message):
+    t = m.text or ""
+    hexs = " ".join(f"{ord(c):04x}" for c in t)
+    log.info("panic:text=%r hex=[%s]", t, hexs)
 
-@router.message(CommandStart(deep_link=False))
-async def start(m: Message, state: FSMContext): await _menu(m)
+# ---------- команды (block=True, чтобы другие роутеры не перехватывали) ----------
+@router.message(CommandStart(deep_link=False), flags={"block": True})
+async def start(m: Message, state: FSMContext):
+    _log_incoming(m)
+    await _menu(m)
 
-@router.message(Command("menu"))
-async def cmd_menu(m: Message, state: FSMContext): await _menu(m)
+@router.message(Command("menu"), flags={"block": True})
+async def cmd_menu(m: Message, state: FSMContext):
+    _log_incoming(m)
+    await _menu(m)
 
-@router.message(Command("fixmenu"))
-async def cmd_fixmenu(m: Message): await _menu(m)
+@router.message(Command("fixmenu"), flags={"block": True})
+async def cmd_fixmenu(m: Message):
+    _log_incoming(m)
+    await _menu(m)
 
-# ───────────────────── Тренировка (встроено сюда) ─────────────────────
-# Пытаемся подключить сохранение эпизода, если доступно
+@router.message(Command("ping"), flags={"block": True})
+async def ping(m: Message):
+    _log_incoming(m)
+    await m.answer("pong 🟢", reply_markup=_main_kb())
+
+# ---------- Тренировка (встроено здесь) ----------
 try:
     from app.storage.repo_extras import save_training_episode
 except Exception:
@@ -99,45 +109,50 @@ LEVEL3_TEXT = (
 )
 
 class TrState(StatesGroup):
-    level = State()  # '1' | '2' | '3'
+    level = State()
 
 def _levels_kb() -> ReplyKeyboardMarkup:
-    rows = [
-        [KeyboardButton(text="Уровень 1"), KeyboardButton(text="Уровень 2")],
-        [KeyboardButton(text="Уровень 3"), KeyboardButton(text="🏠 В меню")],
-    ]
-    return ReplyKeyboardMarkup(resize_keyboard=True, keyboard=rows, input_field_placeholder="Выбери уровень…")
+    return ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text="Уровень 1"), KeyboardButton(text="Уровень 2")],
+            [KeyboardButton(text="Уровень 3"), KeyboardButton(text="🏠 В меню")],
+        ],
+        resize_keyboard=True, input_field_placeholder="Выбери уровень…"
+    )
 
 def _done_kb() -> ReplyKeyboardMarkup:
-    rows = [[KeyboardButton(text="✅ Выполнил(а)")], [KeyboardButton(text="🏠 В меню")]]
-    return ReplyKeyboardMarkup(resize_keyboard=True, keyboard=rows)
+    return ReplyKeyboardMarkup(
+        keyboard=[[KeyboardButton(text="✅ Выполнил(а)")], [KeyboardButton(text="🏠 В меню")]],
+        resize_keyboard=True
+    )
 
-@router.message(F.text == "🏋️ Тренировка дня")
+# мягкие фильтры по словам (а не по эмодзи/строке целиком)
+@router.message(F.text.func(lambda t: t and "трениров" in t.lower()), flags={"block": True})
 async def open_training(m: Message, state: FSMContext):
+    _log_incoming(m)
     await state.clear()
-    text = (
+    await m.answer(
         "🏋️ <b>Тренировка дня</b>\n\n"
         "Выбери уровень — внутри подробные шаги. Когда закончишь — жми «✅ Выполнил(а)». "
-        "Вернуться — «🏠 В меню»."
+        "Вернуться — «🏠 В меню».", reply_markup=_levels_kb()
     )
-    await m.answer(text, reply_markup=_levels_kb())
 
-@router.message(F.text.in_({"Уровень 1", "Уровень 2", "Уровень 3"}))
+@router.message(F.text.in_({"Уровень 1", "Уровень 2", "Уровень 3"}), flags={"block": True})
 async def training_level(m: Message, state: FSMContext):
+    _log_incoming(m)
     mp = {"Уровень 1": ("1", LEVEL1_TEXT), "Уровень 2": ("2", LEVEL2_TEXT), "Уровень 3": ("3", LEVEL3_TEXT)}
     lvl, txt = mp[m.text]
     await state.set_state(TrState.level)
     await state.update_data(level=lvl)
     await m.answer(txt, reply_markup=_done_kb())
 
-@router.message(F.text == "✅ Выполнил(а)")
+@router.message(F.text.func(lambda t: t and "выполнил" in t.lower()), flags={"block": True})
 async def training_done(m: Message, state: FSMContext):
+    _log_incoming(m)
     data = await state.get_data()
     level = data.get("level")
     if not level:
-        await m.answer("Сначала выбери уровень 🙌", reply_markup=_levels_kb())
-        return
-    # Запись эпизода (если доступна)
+        await m.answer("Сначала выбери уровень 🙌", reply_markup=_levels_kb()); return
     if save_training_episode:
         try:
             await save_training_episode(user_id=m.from_user.id, level=str(level))
@@ -146,56 +161,63 @@ async def training_done(m: Message, state: FSMContext):
             log.exception("training save failed: %s", e)
     else:
         log.warning("save_training_episode not available; progress not persisted")
-
     await m.answer("🔥 Отлично! День засчитан. Увидимся завтра!", reply_markup=_levels_kb())
     await state.clear()
 
-# ───────────────────── Остальные разделы через мягкий импорт ─────────────────────
-@router.message(F.text == "📈 Мой прогресс")
+# ---------- Остальные разделы: мягкий импорт + блокируем распространение ----------
+@router.message(F.text.func(lambda t: t and "прогресс" in t.lower()), flags={"block": True})
 async def open_progress(m: Message):
-    ok = await _call_optional("app.routers.progress", ("show_progress", "open_progress"), m)
+    _log_incoming(m)
+    ok = await _call_optional("app.routers.progress", ("show_progress","open_progress"), m)
     if not ok:
         await m.answer("📈 Раздел «Мой прогресс» будет доступен позже.", reply_markup=_main_kb())
 
-@router.message(F.text == "🎭 Мини-кастинг")
+@router.message(F.text.func(lambda t: t and "мини" in t.lower()), flags={"block": True})
 async def open_mc(m: Message, state: FSMContext):
+    _log_incoming(m)
     ok = await _call_optional("app.routers.minicasting", ("open_minicasting","show_minicasting","mc_entry","start_minicasting"), m, state)
     if not ok:
         await m.answer("🎭 «Мини-кастинг» скоро будет доступен.", reply_markup=_main_kb())
 
-@router.message(F.text == "🧭 Путь лидера")
+@router.message(F.text.func(lambda t: t and "лидер" in t.lower()), flags={"block": True})
 async def open_leader(m: Message, state: FSMContext):
+    _log_incoming(m)
     ok = await _call_optional("app.routers.leader", ("open_leader","show_leader","leader_entry","start_leader"), m, state)
     if not ok:
         await m.answer("🧭 «Путь лидера» скоро будет доступен.", reply_markup=_main_kb())
 
-@router.message(F.text == "💬 Помощь / FAQ")
+@router.message(F.text.func(lambda t: t and ("помощ" in t.lower() or "faq" in t.lower())), flags={"block": True})
 async def open_help(m: Message):
-    # стараемся сначала найти help.show_help, если нет — faq.show_help/open_faq
+    _log_incoming(m)
     ok = await _call_optional("app.routers.help", ("show_help",), m)
     if not ok:
         ok = await _call_optional("app.routers.faq", ("open_faq","show_faq"), m)
     if not ok:
         await m.answer("💬 Раздел помощи обновим чуть позже.", reply_markup=_main_kb())
 
-@router.message(F.text == "⚙️ Настройки")
+@router.message(F.text.func(lambda t: t and "настрой" in t.lower()), flags={"block": True})
 async def open_settings(m: Message):
+    _log_incoming(m)
     ok = await _call_optional("app.routers.settings", ("show_settings","open_settings"), m)
     if not ok:
         await m.answer("⚙️ Профиль скоро будет доступен.", reply_markup=_main_kb())
 
-@router.message(F.text == "🔐 Политика")
+@router.message(F.text.func(lambda t: t and "политик" in t.lower()), flags={"block": True})
 async def open_privacy(m: Message):
+    _log_incoming(m)
     ok = await _call_optional("app.routers.privacy", ("show_privacy","open_privacy"), m)
     if not ok:
         await m.answer("🔐 Политика будет опубликована перед релизом.", reply_markup=_main_kb())
 
-@router.message(F.text == "⭐ Расширенная версия")
+@router.message(F.text.func(lambda t: t and "расшир" in t.lower()), flags={"block": True})
 async def open_extended(m: Message):
+    _log_incoming(m)
     ok = await _call_optional("app.routers.extended", ("open_extended","show_extended","extended_entry"), m)
     if not ok:
         await m.answer("⭐️ «Расширенная версия» — позже.", reply_markup=_main_kb())
 
-# ───────────────────── Любой другой текст → главное меню ─────────────────────
-@router.message()
-async def fallback(m: Message): await _menu(m)
+# ---------- fallback: любое другое сообщение → меню (и блок) ----------
+@router.message(flags={"block": True})
+async def fallback(m: Message):
+    _log_incoming(m)
+    await _menu(m)
