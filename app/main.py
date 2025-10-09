@@ -1,3 +1,4 @@
+# app/main.py
 from __future__ import annotations
 import asyncio, logging, hashlib
 from aiogram import Bot, Dispatcher
@@ -7,18 +8,26 @@ from aiogram.types import BotCommand
 
 from app.config import settings
 from app.storage.repo import ensure_schema
-from app.routers.panic import router as panic_router
+
+# диагностика/паник-слой
+from app.build import BUILD_MARK                     # метка билда для логов и /build
+from app.routers.diag import router as diag_router   # /build /who /webhook /panicmenu /panicoff /ping
+from app.routers.panic import router as panic_router # ответ на любые апдейты + простые кнопки
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 log = logging.getLogger("main")
 
-BUILD_MARK = "panic-only-respond-2025-10-09"
-
 async def _set_commands(bot: Bot) -> None:
     await bot.set_my_commands([
-        BotCommand(command="start", description="Запуск / меню"),
-        BotCommand(command="menu",  description="Главное меню"),
-        BotCommand(command="ping",  description="Проверка связи"),
+        BotCommand(command="start",     description="Запуск / меню"),
+        BotCommand(command="menu",      description="Главное меню"),
+        BotCommand(command="ping",      description="Проверка связи"),
+        # диагностические:
+        BotCommand(command="build",     description="Текущий билд"),
+        BotCommand(command="who",       description="Инфо о боте / token-hash"),
+        BotCommand(command="webhook",   description="Статус вебхука"),
+        BotCommand(command="panicmenu", description="Диагностическая клавиатура"),
+        BotCommand(command="panicoff",  description="Скрыть клавиатуру"),
     ])
 
 async def main() -> None:
@@ -44,11 +53,14 @@ async def main() -> None:
 
     dp = Dispatcher()
 
-    # ❗ Подключаем ТОЛЬКО panic-роутер
+    # Подключаем сперва диагностический слой, потом «паник»-роутер
+    dp.include_router(diag_router)
+    log.info("✅ router loaded: diag")
     dp.include_router(panic_router)
     log.info("✅ router loaded: panic")
 
     await _set_commands(bot)
+
     me = await bot.get_me()
     log.info("🔑 Token hash: %s", hashlib.md5(settings.bot_token.encode()).hexdigest()[:8])
     log.info("🤖 Bot: @%s (ID: %s)", me.username, me.id)
