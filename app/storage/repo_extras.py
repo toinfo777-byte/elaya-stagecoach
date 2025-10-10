@@ -8,6 +8,7 @@ from typing import Any, Dict, Optional
 
 log = logging.getLogger("repo_extras")
 
+# Явно экспортируем нужные символы
 __all__ = [
     "save_casting_session",
     "save_feedback",
@@ -23,10 +24,12 @@ def _safe_dump(obj: Any) -> str:
 def save_casting_session(user_id: int, payload: Dict[str, Any]) -> None:
     """
     Совместимая заглушка для мини-кастинга.
-    В прод-версии тут должна быть запись в БД. Сейчас просто логируем событие,
-    чтобы не падал импорт и не рвались сценарии.
+    В реальной версии — запись в БД. Сейчас — лог, чтобы не падали импорты.
     """
-    log.info("save_casting_session(uid=%s): %s", user_id, _safe_dump(payload))
+    try:
+        log.info("save_casting_session(uid=%s): %s", user_id, _safe_dump(payload))
+    except Exception as e:
+        log.exception("save_casting_session error: %s", e)
 
 def save_feedback(
     user_id: int,
@@ -37,13 +40,13 @@ def save_feedback(
     """
     Совместимая заглушка для сохранения обратной связи.
     """
-    log.info(
-        "save_feedback(uid=%s, rating=%s): %s | meta=%s",
-        user_id,
-        rating,
-        text,
-        _safe_dump(meta or {}),
-    )
+    try:
+        log.info(
+            "save_feedback(uid=%s, rating=%s): %s | meta=%s",
+            user_id, rating, text, _safe_dump(meta or {}),
+        )
+    except Exception as e:
+        log.exception("save_feedback error: %s", e)
 
 def log_progress_event(
     user_id: int,
@@ -53,10 +56,11 @@ def log_progress_event(
     """
     Совместимая заглушка для логирования прогресса/метрик.
     """
-    log.info(
-        "log_progress_event(uid=%s) %s @ %s | meta=%s",
-        user_id,
-        event,
-        datetime.utcnow().isoformat(timespec="seconds"),
-        _safe_dump(meta or {}),
-    )
+    try:
+        log.info(
+            "log_progress_event(uid=%s) %s @ %s | meta=%s",
+            user_id, event, datetime.utcnow().isoformat(timespec="seconds"),
+            _safe_dump(meta or {}),
+        )
+    except Exception as e:
+        log.exception("log_progress_event error: %s", e)
