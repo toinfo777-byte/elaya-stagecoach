@@ -15,10 +15,10 @@ from app.build import BUILD_MARK
 # боевые роутеры
 from app.routers.help import help_router
 from app.routers.entrypoints import go_router as entry_router
-# from app.routers.cmd_aliases import router as aliases_router         # ⛔ временно отключено (ломает импорт)
+from app.routers.cmd_aliases import router as aliases_router          # ✅ снова включили
 from app.routers.onboarding import router as onboarding_router
 from app.routers.system import router as system_router
-# from app.routers.minicasting import router as mc_router              # ⛔ временно отключено (ломает импорт)
+from app.routers.minicasting import router as mc_router               # ✅ снова включили
 from app.routers.leader import router as leader_router
 from app.routers.training import router as training_router
 from app.routers.progress import router as progress_router
@@ -28,7 +28,7 @@ from app.routers.extended import router as extended_router
 from app.routers.casting import router as casting_router
 from app.routers.apply import router as apply_router
 from app.routers.faq import router as faq_router
-from app.routers.devops_sync import router as devops_sync_router  # ✅ наш роутер синхронизации
+from app.routers.devops_sync import router as devops_sync_router      # ✅ наш DevOps-синк
 
 # диагностика
 from app.routers.panic import router as panic_router
@@ -85,11 +85,11 @@ async def main() -> None:
     # порядок: навигация → контент → утилиты → devops → panic → diag
     dp.include_router(entry_router);       log.info("✅ router loaded: entrypoints")
     dp.include_router(help_router);        log.info("✅ router loaded: help")
-    # dp.include_router(aliases_router);   log.info("✅ router loaded: aliases (disabled)")
+    dp.include_router(aliases_router);     log.info("✅ router loaded: aliases")
     dp.include_router(onboarding_router);  log.info("✅ router loaded: onboarding")
     dp.include_router(system_router);      log.info("✅ router loaded: system")
 
-    # dp.include_router(mc_router);        log.info("✅ router loaded: minicasting (disabled)")
+    dp.include_router(mc_router);          log.info("✅ router loaded: minicasting")
     dp.include_router(leader_router);      log.info("✅ router loaded: leader")
     dp.include_router(training_router);    log.info("✅ router loaded: training")
     dp.include_router(progress_router);    log.info("✅ router loaded: progress")
@@ -100,7 +100,7 @@ async def main() -> None:
     dp.include_router(apply_router);       log.info("✅ router loaded: apply")
     dp.include_router(faq_router);         log.info("✅ router loaded: faq")
 
-    dp.include_router(devops_sync_router); log.info("✅ router loaded: devops_sync")  # наш роутер
+    dp.include_router(devops_sync_router); log.info("✅ router loaded: devops_sync")
 
     # диагностические — в самом конце
     dp.include_router(panic_router);       log.info("✅ router loaded: panic (near last)")
