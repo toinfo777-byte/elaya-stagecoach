@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone, timedelta
 from typing import List, Tuple, Optional
 
+# путь к БД
 _DB_PATH_ENV = os.getenv("PROGRESS_DB_PATH")  # можно указать в ENV
 _DB_PATH = _DB_PATH_ENV or os.getenv("DATABASE_FILE") or "/data/elaya_progress.sqlite3"
 
@@ -136,3 +137,74 @@ class ProgressRepo:
 
 # экспортируем синглтон
 progress = ProgressRepo()
+
+# ──────────────────────────────────────────────────────────────────────────────
+# COMPAT SHIM: прокидываем save_casting и delete_user, если их ищут старые импорты
+# ──────────────────────────────────────────────────────────────────────────────
+try:
+    from .repo_extras import save_casting as _save_casting
+except Exception:
+    _save_casting = None  # type: ignore[misc]
+
+
+def save_casting(
+    *,
+    tg_id: int,
+    name: str,
+    age: int,
+    city: str,
+    experience: str,
+    contact: str,
+    portfolio: str | None,
+    agree_contact: bool,
+) -> None:
+    """
+    Шима для совместимости: если старые модули импортируют save_casting из repo.
+    """
+    import logging, json
+    if _save_casting:
+        _save_casting(
+            tg_id=tg_id,
+            name=name,
+            age=age,
+            city=city,
+            experience=experience,
+            contact=contact,
+            portfolio=portfolio,
+            agree_contact=agree_contact,
+        )
+    else:
+        logging.getLogger(__name__).warning(
+            "save_casting shim no-op: %s",
+            json.dumps(
+                {
+                    "tg_id": tg_id,
+                    "name": name,
+                    "age": age,
+                    "city": city,
+                    "experience": experience,
+                    "contact": contact,
+                    "portfolio": portfolio,
+                    "agree_contact": agree_contact,
+                },
+                ensure_ascii=False,
+                default=str,
+            ),
+        )
+
+
+try:
+    from .repo_extras import delete_user as _delete_user
+except Exception:
+    _delete_user = None  # type: ignore[misc]
+
+
+async def delete_user(tg_id: int) -> None:
+    """
+    Асинхронная шима: если delete_user нет в repo_extras, просто логируем.
+    """
+    import logging
+    if _delete_user:
+        await _delete_user(tg_id)
+    else:
+        logging.getLogger(__name__).warning("delete_user shim no-op for tg_id=%s", tg_id)
