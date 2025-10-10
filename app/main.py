@@ -1,6 +1,5 @@
 from __future__ import annotations
 import asyncio, hashlib, logging
-from inspect import iscoroutinefunction
 
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
@@ -43,21 +42,21 @@ log = logging.getLogger("main")
 
 async def _set_commands(bot: Bot) -> None:
     await bot.set_my_commands([
-        BotCommand(command="start",     description="Запуск / меню"),
-        BotCommand(command="menu",      description="Главное меню"),
-        BotCommand(command="ping",      description="Проверка связи"),
-        BotCommand(command="build",     description="Текущий билд"),
-        BotCommand(command="who",       description="Инфо о боте / token-hash"),
-        BotCommand(command="webhook",   description="Статус вебхука"),
-        BotCommand(command="panicmenu", description="Диагностическая клавиатура"),
-        BotCommand(command="panicoff",  description="Скрыть клавиатуру"),
+        BotCommand(command="start",       description="Запуск / меню"),
+        BotCommand(command="menu",        description="Главное меню"),
+        BotCommand(command="ping",        description="Проверка связи"),
+        BotCommand(command="build",       description="Текущий билд"),
+        BotCommand(command="who",         description="Инфо о боте / token-hash"),
+        BotCommand(command="webhook",     description="Статус вебхука"),
+        BotCommand(command="panicmenu",   description="Диагностическая клавиатура"),
+        BotCommand(command="panicoff",    description="Скрыть клавиатуру"),
         BotCommand(command="sync_status", description="Синхронизировать штабные файлы с GitHub"),
     ])
 
 
-async def _guard(coro, what: str):
+async def _guard(awaitable, what: str):
     try:
-        return await coro
+        return await awaitable
     except TelegramBadRequest as e:
         if "Logged out" in str(e):
             log.warning("%s: Bot API 'Logged out' — игнорируем", what)
@@ -68,10 +67,8 @@ async def _guard(coro, what: str):
 async def main() -> None:
     log.info("=== BUILD %s ===", BUILD_MARK)
 
-    if iscoroutinefunction(ensure_schema):
-        await ensure_schema()
-    else:
-        ensure_schema()
+    # База: развернём схему (safe idempotent)
+    ensure_schema()
     log.info("DB schema ensured")
 
     bot = Bot(
@@ -80,6 +77,7 @@ async def main() -> None:
     )
     dp = Dispatcher()
 
+    # Чистим вебхук
     await _guard(bot.delete_webhook(drop_pending_updates=True), "delete_webhook")
 
     # порядок: навигация → контент → утилиты → devops → panic → diag
@@ -109,11 +107,15 @@ async def main() -> None:
     await _guard(_set_commands(bot), "set_my_commands")
 
     me = await bot.get_me()
-    log.info("🔑 Token hash: %s", hashlib.md5((await bot.get_token()).encode()).hexdigest()[:8])
+    token_hash = hashlib.md5((await bot.get_token()).encode()).hexdigest()[:8]
+    log.info("🔑 Token hash: %s", token_hash)
     log.info("🤖 Bot: @%s (ID: %s)", me.username, me.id)
     log.info("🚀 Start polling…")
 
-    await dp.start_polling(bot, allowed_updates=["message", "callback_query"])
+    await _guard(
+        dp.start_polling(bot, allowed_updates=["message", "callback_query"]),
+        "start_polling"
+    )
 
 
 if __name__ == "__main__":
