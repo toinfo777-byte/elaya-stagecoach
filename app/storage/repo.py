@@ -7,8 +7,8 @@ from dataclasses import dataclass
 from datetime import datetime, timezone, timedelta
 from typing import List, Tuple, Optional
 
-# путь к БД
-_DB_PATH_ENV = os.getenv("PROGRESS_DB_PATH")  # можно указать в ENV
+# Путь к БД (можно переопределить переменными окружения)
+_DB_PATH_ENV = os.getenv("PROGRESS_DB_PATH")
 _DB_PATH = _DB_PATH_ENV or os.getenv("DATABASE_FILE") or "/data/elaya_progress.sqlite3"
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -37,7 +37,6 @@ def ensure_schema() -> None:
             ts        INTEGER NOT NULL       -- unix epoch (UTC)
         );
         """)
-        # Индексы для быстрых агрегатов
         conn.execute("CREATE INDEX IF NOT EXISTS idx_ep_user_ts ON episodes(user_id, ts);")
         conn.commit()
     finally:
@@ -57,23 +56,17 @@ class ProgressSummary:
 
 class ProgressRepo:
     """
-    Лёгкий репозиторий прогресса на SQLite.
-    NB: UTC-даты. На проде можно заменить на вашу БД без изменения интерфейса.
+    Лёгкий репозиторий прогресса на SQLite (UTC).
     """
     def __init__(self, db_path: Optional[str] = None) -> None:
         self.db_path = db_path or _DB_PATH
 
-    # low-level
     def _conn(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self.db_path, check_same_thread=False)
         conn.row_factory = sqlite3.Row
         return conn
 
-    # API
     async def add_episode(self, *, user_id: int, kind: str = "training", points: int = 1) -> None:
-        """
-        Фиксируем завершение шага/тренировки.
-        """
         ts = int(time.time())
         conn = self._conn()
         try:
@@ -86,9 +79,6 @@ class ProgressRepo:
             conn.close()
 
     async def get_summary(self, *, user_id: int) -> ProgressSummary:
-        """
-        Стрик (по дням, UTC) + агрегации за последние 7 дней.
-        """
         conn = self._conn()
         try:
             now = datetime.now(timezone.utc)
@@ -98,30 +88,22 @@ class ProgressRepo:
                 (user_id, start_7),
             ).fetchall()
 
-            # группируем по дню
-            per_day = {}
+            per_day: dict[str, int] = {}
             for r in rows:
                 d = datetime.fromtimestamp(r["ts"], tz=timezone.utc).date().isoformat()
                 per_day[d] = per_day.get(d, 0) + 1
 
-            # последние 7 дней (визуал/подсчёт)
-            days_list = []
+            days_list: List[Tuple[str, int]] = []
             for i in range(7):
                 d = (now.date() - timedelta(days=6 - i)).isoformat()
                 days_list.append((d, per_day.get(d, 0)))
 
-            # стрик: сколько подряд дней до сегодня включительно есть эпизоды
             streak = 0
             cur = now.date()
-            while True:
-                d = cur.isoformat()
-                if per_day.get(d, 0) > 0:
-                    streak += 1
-                    cur = cur - timedelta(days=1)
-                else:
-                    break
+            while per_day.get(cur.isoformat(), 0) > 0:
+                streak += 1
+                cur = cur - timedelta(days=1)
 
-            # очки за 7 дней
             points_7d = sum(r["points"] for r in rows)
             episodes_7d = sum(cnt for _, cnt in days_list)
 
@@ -135,17 +117,16 @@ class ProgressRepo:
             conn.close()
 
 
-# экспортируем синглтон
+# Экспорт синглтона
 progress = ProgressRepo()
 
 # ──────────────────────────────────────────────────────────────────────────────
-# COMPAT SHIM: прокидываем save_casting и delete_user, если их ищут старые импорты
+# Совместимость со старыми импортами: save_casting / delete_user
 # ──────────────────────────────────────────────────────────────────────────────
 try:
-    from .repo_extras import save_casting as _save_casting
+    from .repo_extras import save_casting as _save_casting  # если есть реализация – используем её
 except Exception:
-    _save_casting = None  # type: ignore[misc]
-
+    _save_casting = None  # type: ignore
 
 def save_casting(
     *,
@@ -159,10 +140,12 @@ def save_casting(
     agree_contact: bool,
 ) -> None:
     """
-    Шима для совместимости: если старые модули импортируют save_casting из repo.
+    Гарантированно существует для роутера кастинга.
+    Если в repo_extras есть реальная реализация – делегируем туда,
+    иначе просто логируем (no-op), чтобы не ронять сервис.
     """
     import logging, json
-    if _save_casting:
+    if _save_casting is not None:
         _save_casting(
             tg_id=tg_id,
             name=name,
@@ -173,38 +156,34 @@ def save_casting(
             portfolio=portfolio,
             agree_contact=agree_contact,
         )
-    else:
-        logging.getLogger(__name__).warning(
-            "save_casting shim no-op: %s",
-            json.dumps(
-                {
-                    "tg_id": tg_id,
-                    "name": name,
-                    "age": age,
-                    "city": city,
-                    "experience": experience,
-                    "contact": contact,
-                    "portfolio": portfolio,
-                    "agree_contact": agree_contact,
-                },
-                ensure_ascii=False,
-                default=str,
-            ),
-        )
+        return
 
+    logging.getLogger(__name__).warning(
+        "save_casting shim no-op: %s",
+        json.dumps(
+            {
+                "tg_id": tg_id,
+                "name": name,
+                "age": age,
+                "city": city,
+                "experience": experience,
+                "contact": contact,
+                "portfolio": portfolio,
+                "agree_contact": agree_contact,
+            },
+            ensure_ascii=False,
+            default=str,
+        ),
+    )
 
 try:
-    from .repo_extras import delete_user as _delete_user
+    from .repo_extras import delete_user as _delete_user  # type: ignore
 except Exception:
-    _delete_user = None  # type: ignore[misc]
-
+    _delete_user = None  # type: ignore
 
 async def delete_user(tg_id: int) -> None:
-    """
-    Асинхронная шима: если delete_user нет в repo_extras, просто логируем.
-    """
     import logging
-    if _delete_user:
+    if _delete_user is not None:
         await _delete_user(tg_id)
     else:
         logging.getLogger(__name__).warning("delete_user shim no-op for tg_id=%s", tg_id)
