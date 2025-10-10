@@ -3,14 +3,16 @@ from __future__ import annotations
 import os, base64, datetime
 from pathlib import Path
 from github import Github
+
 try:
     from zoneinfo import ZoneInfo
 except Exception:
-    ZoneInfo = None  # py<3.9 fallback
+    ZoneInfo = None  # для Python < 3.9
 
 REPO_NAME  = os.getenv("GITHUB_REPO", "toinfo777-byte/elaya-stagecoach")
 STATUS_DIR = os.getenv("STATUS_DIR", "docs/elaya_status")
-BRANCH     = os.getenv("GITHUB_BRANCH", "develop")  # работаем из develop
+BRANCH     = os.getenv("GITHUB_BRANCH", "develop")
+STAMP_PREFIX = "🕰️ Последнее обновление штаба: "
 
 FILES = [
     "README.md",
@@ -18,11 +20,11 @@ FILES = [
     "Elaya_Roadmap_I_Основание_света.md",
 ]
 
-STAMP_PREFIX = "🕰️ Последнее обновление штаба: "
 
 def _now_str() -> str:
     tz = ZoneInfo("Europe/Berlin") if ZoneInfo else None
     return datetime.datetime.now(tz=tz).strftime("%Y-%m-%d %H:%M")
+
 
 def _ensure_stamp_anchor(text: str) -> str:
     if "<!--STAMP-->" not in text:
@@ -31,17 +33,18 @@ def _ensure_stamp_anchor(text: str) -> str:
         text += f"{STAMP_PREFIX}<!--STAMP-->\n"
     return text
 
+
 def _update_stamp(text: str) -> str:
     text = _ensure_stamp_anchor(text)
     return text.replace("<!--STAMP-->", _now_str())
 
+
 def _read_local(path: Path) -> str:
     return path.read_text(encoding="utf-8")
 
+
 def _create_or_update(repo, path: str, new_text: str, commit_message: str) -> bool:
-    """
-    True — был создан коммит (create/update), False — изменений нет.
-    """
+    """True — был создан или обновлён файл, False — без изменений"""
     try:
         current = repo.get_contents(path, ref=BRANCH)
         current_text = base64.b64decode(current.content).decode("utf-8")
@@ -56,7 +59,6 @@ def _create_or_update(repo, path: str, new_text: str, commit_message: str) -> bo
             return True
         return False
     except Exception:
-        # 404 — файла нет: создаём
         repo.create_file(
             path=path,
             message=commit_message.replace("update:", "new:"),
@@ -65,8 +67,12 @@ def _create_or_update(repo, path: str, new_text: str, commit_message: str) -> bo
         )
         return True
 
+
 def main():
-    token = os.environ["GITHUB_TOKEN"]
+    token = os.environ.get("GITHUB_TOKEN")
+    if not token:
+        raise RuntimeError("❌ GITHUB_TOKEN не найден в окружении")
+
     gh = Github(token)
     repo = gh.get_repo(REPO_NAME)
 
@@ -85,8 +91,10 @@ def main():
         changed = _create_or_update(repo, repo_path, new_text, commit_message)
         made_commits = made_commits or changed
 
-    print("✅ Синхронизация завершена — изменения зафиксированы." if made_commits
-          else "ℹ️ Изменений нет — коммиты не создавались.")
+    print("✅ Синхронизация завершена — изменения зафиксированы."
+          if made_commits else
+          "ℹ️ Изменений нет — коммиты не создавались.")
+
 
 if __name__ == "__main__":
     main()
