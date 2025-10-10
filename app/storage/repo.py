@@ -1,3 +1,4 @@
+# app/storage/repo.py
 from __future__ import annotations
 
 import os
@@ -6,12 +7,16 @@ import time
 import logging
 from dataclasses import dataclass
 from datetime import datetime, timezone, timedelta
-from typing import List, Tuple, Optional
+from typing import List, Tuple, Optional, Dict
 
 log = logging.getLogger(__name__)
 
-_DB_PATH_ENV = os.getenv("PROGRESS_DB_PATH")  # можно указать в ENV
-_DB_PATH = _DB_PATH_ENV or os.getenv("DATABASE_FILE") or "/data/elaya_progress.sqlite3"
+_DB_PATH = (
+    os.getenv("PROGRESS_DB_PATH")
+    or os.getenv("DATABASE_FILE")
+    or "/data/elaya_progress.sqlite3"
+)
+
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Общая инициализация
@@ -30,17 +35,20 @@ def ensure_schema() -> None:
     """
     conn = _connect()
     try:
-        # Таблица эпизодов прогресса
-        conn.execute("""
-        CREATE TABLE IF NOT EXISTS episodes (
-            id        INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id   INTEGER NOT NULL,
-            kind      TEXT    NOT NULL,      -- "training" / "casting" / etc
-            points    INTEGER NOT NULL DEFAULT 1,
-            ts        INTEGER NOT NULL       -- unix epoch (UTC)
-        );
-        """)
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_ep_user_ts ON episodes(user_id, ts);")
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS episodes (
+                id        INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id   INTEGER NOT NULL,
+                kind      TEXT    NOT NULL,      -- "training" / "casting" / etc
+                points    INTEGER NOT NULL DEFAULT 1,
+                ts        INTEGER NOT NULL       -- unix epoch (UTC)
+            );
+            """
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_ep_user_ts ON episodes(user_id, ts);"
+        )
         conn.commit()
     finally:
         conn.close()
@@ -72,9 +80,6 @@ class ProgressRepo:
 
     # API
     async def add_episode(self, *, user_id: int, kind: str = "training", points: int = 1) -> None:
-        """
-        Фиксируем завершение шага/тренировки.
-        """
         ts = int(time.time())
         conn = self._conn()
         try:
@@ -87,9 +92,6 @@ class ProgressRepo:
             conn.close()
 
     async def get_summary(self, *, user_id: int) -> ProgressSummary:
-        """
-        Стрик (по дням, UTC) + агрегации за последние 7 дней.
-        """
         conn = self._conn()
         try:
             now = datetime.now(timezone.utc)
@@ -100,7 +102,7 @@ class ProgressRepo:
             ).fetchall()
 
             # группируем по дню
-            per_day: dict[str, int] = {}
+            per_day: Dict[str, int] = {}
             for r in rows:
                 d = datetime.fromtimestamp(r["ts"], tz=timezone.utc).date().isoformat()
                 per_day[d] = per_day.get(d, 0) + 1
@@ -111,14 +113,13 @@ class ProgressRepo:
                 d = (now.date() - timedelta(days=6 - i)).isoformat()
                 days_list.append((d, per_day.get(d, 0)))
 
-            # стрик: сколько подряд дней до сегодня включительно есть эпизоды
+            # стрик
             streak = 0
             cur = now.date()
             while per_day.get(cur.isoformat(), 0) > 0:
                 streak += 1
                 cur = cur - timedelta(days=1)
 
-            # очки/эпизоды за 7 дней
             points_7d = sum(int(r["points"]) for r in rows)
             episodes_7d = sum(cnt for _, cnt in days_list)
 
@@ -137,7 +138,7 @@ progress = ProgressRepo()
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# Заглушка под кастинг — АСИНХРОННАЯ (важно, т.к. вызывается через await)
+# Заглушка под кастинг — то самое имя, которое импортируется в роутере
 # ──────────────────────────────────────────────────────────────────────────────
 async def save_casting(
     *,
@@ -150,10 +151,17 @@ async def save_casting(
     portfolio: Optional[str],
     agree_contact: bool = True,
 ) -> None:
-    """
-    Пока просто логируем. В будущем можно писать в отдельную таблицу.
-    """
+    """Пока просто логируем. В будущем можно писать в отдельную таблицу."""
     log.info(
         "save_casting(tg_id=%s): name=%r, age=%s, city=%r, exp=%r, contact=%r, portfolio=%r, agree=%s",
         tg_id, name, age, city, experience, contact, portfolio, agree_contact,
     )
+
+
+__all__ = [
+    "ensure_schema",
+    "ProgressRepo",
+    "ProgressSummary",
+    "progress",
+    "save_casting",
+]
