@@ -8,8 +8,8 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from app.routers.help import show_main_menu
 from app.keyboards.reply import BTN_SETTINGS
-# ВАЖНО: импортируем заглушку удаления из repo_extras
-from app.storage.repo_extras import delete_user  # async-функция удаления по tg_id
+# ВАЖНО: тянем безопасную обёртку из repo_extras, а не напрямую из repo.py
+from app.storage.repo_extras import delete_user
 
 router = Router(name="settings")
 
@@ -41,7 +41,7 @@ async def open_settings(m: Message, state: FSMContext):
 @router.callback_query(F.data == "settings:menu")
 async def back_to_menu(cb: CallbackQuery, state: FSMContext):
     await state.clear()
-    await cb.answer()  # снимаем "часики" у кнопки
+    await cb.answer()
     # показываем ровно то же меню, что и при /start
     await show_main_menu(cb)
 
@@ -51,8 +51,8 @@ async def delete_profile(cb: CallbackQuery, state: FSMContext):
     await state.clear()
     await cb.answer()
     try:
-        ok = await delete_user(cb.from_user.id)
-        text = "Готово. Профиль удалён." if ok else "Не удалось удалить профиль. Попробуй позже."
+        await delete_user(cb.from_user.id)
+        text = "Готово. Профиль удалён."
     except Exception:
         text = "Не удалось удалить профиль. Попробуй позже."
     await cb.message.answer(text)
