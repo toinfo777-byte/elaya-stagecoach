@@ -1,3 +1,18 @@
 # app/storage/__init__.py
-# пакет-обёртка для единых импортов БД: from app.storage.db import async_session, Base, engine
+from .repo import (
+    ensure_schema,
+    progress,
+    ProgressRepo,
+    ProgressSummary,
+    save_casting,
+    delete_user,
+)
 
+__all__ = [
+    "ensure_schema",
+    "progress",
+    "ProgressRepo",
+    "ProgressSummary",
+    "save_casting",
+    "delete_user",
+]
