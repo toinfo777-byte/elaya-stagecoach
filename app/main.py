@@ -28,12 +28,17 @@ from app.routers.extended import router as extended_router
 from app.routers.casting import router as casting_router
 from app.routers.apply import router as apply_router
 from app.routers.faq import router as faq_router
+from app.routers.devops_sync import router as devops_sync_router  # ✅ добавлено
 
 # диагностика
 from app.routers.panic import router as panic_router
 from app.routers.diag import router as diag_router
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s"
+)
 log = logging.getLogger("main")
 
 
@@ -69,7 +74,10 @@ async def main() -> None:
         ensure_schema()
     log.info("DB schema ensured")
 
-    bot = Bot(token=settings.bot_token, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
+    bot = Bot(
+        token=settings.bot_token,
+        default=DefaultBotProperties(parse_mode=ParseMode.HTML)
+    )
     dp = Dispatcher()
 
     await _guard(bot.delete_webhook(drop_pending_updates=True), "delete_webhook")
@@ -91,6 +99,7 @@ async def main() -> None:
     dp.include_router(casting_router);    log.info("✅ router loaded: casting")
     dp.include_router(apply_router);      log.info("✅ router loaded: apply")
     dp.include_router(faq_router);        log.info("✅ router loaded: faq")
+    dp.include_router(devops_sync_router);log.info("✅ router loaded: devops_sync")  # ✅ добавлено
 
     # диагностические — в самом конце
     dp.include_router(panic_router);      log.info("✅ router loaded: panic (near last)")
