@@ -1,4 +1,3 @@
-# app/storage/repo.py
 from __future__ import annotations
 
 import os
@@ -7,13 +6,23 @@ import time
 import logging
 from dataclasses import dataclass
 from datetime import datetime, timezone, timedelta
-from typing import List, Tuple, Optional, Any, Dict
+from typing import List, Tuple, Optional
 
 log = logging.getLogger(__name__)
 
 _DB_PATH_ENV = os.getenv("PROGRESS_DB_PATH")
 _DB_PATH = _DB_PATH_ENV or os.getenv("DATABASE_FILE") or "/data/elaya_progress.sqlite3"
 
+__all__ = [
+    "ensure_schema",
+    "ProgressRepo",
+    "progress",
+    "save_casting",
+]
+
+# ───────────────────────────────
+# Общая инициализация БД
+# ───────────────────────────────
 def _connect() -> sqlite3.Connection:
     os.makedirs(os.path.dirname(_DB_PATH), exist_ok=True)
     conn = sqlite3.connect(_DB_PATH, check_same_thread=False)
@@ -37,6 +46,9 @@ def ensure_schema() -> None:
     finally:
         conn.close()
 
+# ───────────────────────────────
+# Прогресс
+# ───────────────────────────────
 @dataclass
 class ProgressSummary:
     streak: int
@@ -75,7 +87,7 @@ class ProgressRepo:
                 (user_id, start_7),
             ).fetchall()
 
-            per_day: Dict[str, int] = {}
+            per_day: dict[str, int] = {}
             for r in rows:
                 d = datetime.fromtimestamp(r["ts"], tz=timezone.utc).date().isoformat()
                 per_day[d] = per_day.get(d, 0) + 1
@@ -105,7 +117,9 @@ class ProgressRepo:
 
 progress = ProgressRepo()
 
-# ---------- ВАЖНО: та самая функция, из-за которой падает импорт ----------
+# ───────────────────────────────
+# Заглушка под кастинг
+# ───────────────────────────────
 def save_casting(
     *,
     tg_id: int,
@@ -117,16 +131,7 @@ def save_casting(
     portfolio: Optional[str],
     agree_contact: bool = True,
 ) -> None:
-    """Пока заглушка: просто логируем событие, чтобы сервис не падал."""
     log.info(
-        "save_casting(tg_id=%s): name=%r age=%s city=%r exp=%r contact=%r portfolio=%r agree=%s",
+        "save_casting(tg_id=%s): name=%r, age=%s, city=%r, exp=%r, contact=%r, portfolio=%r, agree=%s",
         tg_id, name, age, city, experience, contact, portfolio, agree_contact,
     )
-
-__all__ = [
-    "ensure_schema",
-    "progress",
-    "ProgressRepo",
-    "ProgressSummary",
-    "save_casting",
-]
