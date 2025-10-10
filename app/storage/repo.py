@@ -1,3 +1,4 @@
+# app/storage/repo.py
 from __future__ import annotations
 
 import os
@@ -10,14 +11,22 @@ from typing import List, Tuple, Optional
 
 log = logging.getLogger(__name__)
 
-_DB_PATH_ENV = os.getenv("PROGRESS_DB_PATH")  # можно указать в ENV
+# Путь к файлу БД (можно переопределить через ENV)
+_DB_PATH_ENV = os.getenv("PROGRESS_DB_PATH")
 _DB_PATH = _DB_PATH_ENV or os.getenv("DATABASE_FILE") or "/data/elaya_progress.sqlite3"
+
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Общая инициализация
 # ──────────────────────────────────────────────────────────────────────────────
 def _connect() -> sqlite3.Connection:
-    os.makedirs(os.path.dirname(_DB_PATH), exist_ok=True)
+    """
+    Возвращает соединение с SQLite и гарантирует наличие директории для файла БД.
+    """
+    dirpath = os.path.dirname(_DB_PATH)
+    if dirpath:
+        os.makedirs(dirpath, exist_ok=True)
+
     conn = sqlite3.connect(_DB_PATH, check_same_thread=False)
     conn.row_factory = sqlite3.Row
     return conn
@@ -31,16 +40,20 @@ def ensure_schema() -> None:
     conn = _connect()
     try:
         # Таблица эпизодов прогресса
-        conn.execute("""
-        CREATE TABLE IF NOT EXISTS episodes (
-            id        INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id   INTEGER NOT NULL,
-            kind      TEXT    NOT NULL,      -- "training" / "casting" / etc
-            points    INTEGER NOT NULL DEFAULT 1,
-            ts        INTEGER NOT NULL       -- unix epoch (UTC)
-        );
-        """)
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_ep_user_ts ON episodes(user_id, ts);")
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS episodes (
+                id        INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id   INTEGER NOT NULL,
+                kind      TEXT    NOT NULL,      -- "training" / "casting" / etc
+                points    INTEGER NOT NULL DEFAULT 1,
+                ts        INTEGER NOT NULL       -- unix epoch (UTC)
+            );
+            """
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_ep_user_ts ON episodes(user_id, ts);"
+        )
         conn.commit()
     finally:
         conn.close()
@@ -61,6 +74,7 @@ class ProgressRepo:
     """
     Лёгкий репозиторий прогресса на SQLite (UTC-даты).
     """
+
     def __init__(self, db_path: Optional[str] = None) -> None:
         self.db_path = db_path or _DB_PATH
 
@@ -71,7 +85,9 @@ class ProgressRepo:
         return conn
 
     # API
-    async def add_episode(self, *, user_id: int, kind: str = "training", points: int = 1) -> None:
+    async def add_episode(
+        self, *, user_id: int, kind: str = "training", points: int = 1
+    ) -> None:
         """
         Фиксируем завершение шага/тренировки.
         """
@@ -94,6 +110,7 @@ class ProgressRepo:
         try:
             now = datetime.now(timezone.utc)
             start_7 = int((now - timedelta(days=7)).timestamp())
+
             rows = conn.execute(
                 "SELECT ts, points FROM episodes WHERE user_id=? AND ts>=? ORDER BY ts DESC",
                 (user_id, start_7),
@@ -105,7 +122,7 @@ class ProgressRepo:
                 d = datetime.fromtimestamp(r["ts"], tz=timezone.utc).date().isoformat()
                 per_day[d] = per_day.get(d, 0) + 1
 
-            # последние 7 дней
+            # последние 7 дней (для графиков/сводки)
             days_list: List[Tuple[str, int]] = []
             for i in range(7):
                 d = (now.date() - timedelta(days=6 - i)).isoformat()
@@ -151,9 +168,19 @@ def save_casting(
     agree_contact: bool = True,
 ) -> None:
     """
-    Пока просто логируем. В будущем можно писать в отдельную таблицу.
+    Совместимая с роутером функция.
+    Сейчас просто логируем событие; при необходимости замените на запись в БД
+    или проксируйте в repo_extras.save_casting_session(...).
     """
     log.info(
         "save_casting(tg_id=%s): name=%r, age=%s, city=%r, exp=%r, contact=%r, portfolio=%r, agree=%s",
-        tg_id, name, age, city, experience, contact, portfolio, agree_contact,
+        tg_id,
+        name,
+        age,
+        city,
+        experience,
+        contact,
+        portfolio,
+        agree_contact,
     )
+    return None
