@@ -1,5 +1,6 @@
 # app/routers/casting.py
 from __future__ import annotations
+
 import re
 from aiogram import Router, F
 from aiogram.filters import Command, StateFilter
@@ -7,28 +8,31 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import Message, CallbackQuery
 
 from app.keyboards.reply import main_menu_kb
-from app.keyboards.inline import casting_skip_kb
+from app.keyboards.inline import casting_skip_kb  # callback_data: "cast:skip_url"
 from app.utils.admin import notify_admin
-
-# Безопасный импорт с фолбэком — чтобы бот не падал даже если в образе старый код
-try:
-    from app.storage.repo import save_casting  # type: ignore
-except Exception:  # pragma: no cover
-    def save_casting(**kwargs):
-        import logging
-        logging.getLogger(__name__).warning("Fallback save_casting used (no-op)")
+# ⬇️ импортируем весь модуль, чтобы не падать на этапе импорта из-за отсутствия имени
+from app.storage import repo as storage_repo
 
 router = Router(name="casting")
 
+# ---- Фоллбэк на случай отсутствия flows/casting_flow.py ----
 try:
     from app.flows.casting_flow import start_casting_flow, ApplyForm  # type: ignore
 except Exception:
     from aiogram.fsm.state import StatesGroup, State
+
     class ApplyForm(StatesGroup):
-        name = State(); age = State(); city = State()
-        experience = State(); contact = State(); portfolio = State()
+        name = State()
+        age = State()
+        city = State()
+        experience = State()
+        contact = State()
+        portfolio = State()
+
     async def start_casting_flow(m: Message, state: FSMContext):
-        await state.clear(); await state.set_state(ApplyForm.name); await m.answer("Как тебя зовут?")
+        await state.clear()
+        await state.set_state(ApplyForm.name)
+        await m.answer("Как тебя зовут?")
 
 HTTP_RE = re.compile(r"^https?://", re.I)
 
@@ -36,6 +40,7 @@ HTTP_RE = re.compile(r"^https?://", re.I)
 async def casting_entry(m: Message, state: FSMContext):
     await start_casting_flow(m, state)
 
+# ==== ВОПРОСЫ ====
 @router.message(StateFilter(ApplyForm.name))
 async def q_name(m: Message, state: FSMContext):
     await state.update_data(name=(m.text or "").strip())
@@ -46,9 +51,11 @@ async def q_name(m: Message, state: FSMContext):
 async def q_age(m: Message, state: FSMContext):
     try:
         age = int((m.text or "").strip())
-        if not (10 <= age <= 99): raise ValueError
+        if not (10 <= age <= 99):
+            raise ValueError
     except Exception:
-        await m.answer("Допустимый диапазон: 10–99. Введи число."); return
+        await m.answer("Допустимый диапазон: 10–99. Введи число.")
+        return
     await state.update_data(age=age)
     await state.set_state(ApplyForm.city)
     await m.answer("Из какого ты города?")
@@ -71,35 +78,46 @@ async def q_contact(m: Message, state: FSMContext):
     await state.set_state(ApplyForm.portfolio)
     await m.answer("Ссылка на портфолио (если есть)", reply_markup=casting_skip_kb())
 
+# ==== ПОРТФОЛИО (опционально) ====
 @router.callback_query(StateFilter(ApplyForm.portfolio), F.data == "cast:skip_url")
 async def skip_portfolio(cb: CallbackQuery, state: FSMContext):
-    await state.update_data(portfolio=None); await _finish(cb.message, state); await cb.answer()
+    await state.update_data(portfolio=None)
+    await _finish(cb.message, state)
+    await cb.answer()
 
 @router.message(StateFilter(ApplyForm.portfolio), F.text.casefold().in_({"пропустить", "нет", "пусто"}))
 async def portfolio_skip_text(m: Message, state: FSMContext):
-    await state.update_data(portfolio=None); await _finish(m, state)
+    await state.update_data(portfolio=None)
+    await _finish(m, state)
 
 @router.message(StateFilter(ApplyForm.portfolio), F.text)
 async def q_portfolio(m: Message, state: FSMContext):
     text = (m.text or "").strip()
-    if text.startswith("/"): return
+    if text.startswith("/"):
+        return  # пропускаем глобальные команды
     if HTTP_RE.match(text):
-        await state.update_data(portfolio=text); await _finish(m, state)
+        await state.update_data(portfolio=text)
+        await _finish(m, state)
     else:
         await m.answer("Нужна ссылка (http/https) или нажми «Пропустить».")
 
+# ==== ФИНИШ ====
 async def _finish(m: Message, state: FSMContext):
-    data = await state.get_data(); await state.clear()
-    save_casting(
+    data = await state.get_data()
+    await state.clear()
+
+    # ⬇️ вызов через модуль, без await (функция синхронная и просто логирует)
+    storage_repo.save_casting(
         tg_id=m.from_user.id,
-        name=str(data.get("name","")),
-        age=int(data.get("age",0) or 0),
-        city=str(data.get("city","")),
-        experience=str(data.get("experience","")),
-        contact=str(data.get("contact","")),
+        name=str(data.get("name", "")),
+        age=int(data.get("age", 0) or 0),
+        city=str(data.get("city", "")),
+        experience=str(data.get("experience", "")),
+        contact=str(data.get("contact", "")),
         portfolio=data.get("portfolio"),
         agree_contact=True,
     )
+
     summary = (
         "🎭 Новая заявка (кастинг / путь лидера)\n"
         f"Имя: {data.get('name')}\n"
