@@ -11,7 +11,9 @@ __all__ = [
     "log_progress_event",
     "save_leader_intent",
     "save_premium_request",
+    "delete_user",  # добавили в публичный интерфейс
 ]
+
 
 def _safe_dump(obj: Any) -> str:
     try:
@@ -19,12 +21,14 @@ def _safe_dump(obj: Any) -> str:
     except Exception:
         return str(obj)
 
+
 def save_casting_session(user_id: int, payload: Dict[str, Any]) -> None:
     """
     Заглушка для мини-кастинга.
     В проде здесь будет запись в БД. Пока просто логируем событие.
     """
     log.info("save_casting_session(uid=%s): %s", user_id, _safe_dump(payload))
+
 
 def save_feedback(
     user_id: int,
@@ -37,8 +41,12 @@ def save_feedback(
     """
     log.info(
         "save_feedback(uid=%s): text=%r, rating=%s, meta=%s",
-        user_id, text, rating, _safe_dump(meta),
+        user_id,
+        text,
+        rating,
+        _safe_dump(meta),
     )
+
 
 def log_progress_event(user_id: int, kind: str, data: Optional[Dict[str, Any]] = None) -> None:
     """
@@ -46,14 +54,31 @@ def log_progress_event(user_id: int, kind: str, data: Optional[Dict[str, Any]] =
     """
     log.info("log_progress_event(uid=%s): kind=%s data=%s", user_id, kind, _safe_dump(data))
 
+
 def save_leader_intent(user_id: int, intent: str, meta: Optional[Dict[str, Any]] = None) -> None:
     """
     Заглушка: пользователь проявил интерес к «Пути лидера».
     """
     log.info("save_leader_intent(uid=%s): intent=%s meta=%s", user_id, intent, _safe_dump(meta))
 
+
 def save_premium_request(user_id: int, plan: str, meta: Optional[Dict[str, Any]] = None) -> None:
     """
     Заглушка: запрос на премиум/расширенную версию.
     """
     log.info("save_premium_request(uid=%s): plan=%s meta=%s", user_id, plan, _safe_dump(meta))
+
+
+# --- совместимая заглушка удаления пользователя по tg_id ---
+async def delete_user(tg_id: int) -> bool:
+    """
+    Совместимая заглушка: «удаление пользователя по tg_id».
+    В прод-версии здесь должна быть реальная операция в БД.
+    Сейчас просто логируем и возвращаем True, чтобы не падали хендлеры.
+    """
+    try:
+        log.info("delete_user(tg_id=%s): заглушка выполнена", tg_id)
+        return True
+    except Exception as e:
+        log.exception("delete_user(tg_id=%s): ошибка заглушки: %s", tg_id, e)
+        return False
