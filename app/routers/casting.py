@@ -10,12 +10,16 @@ from aiogram.types import Message, CallbackQuery
 from app.keyboards.reply import main_menu_kb
 from app.keyboards.inline import casting_skip_kb  # callback_data: "cast:skip_url"
 from app.utils.admin import notify_admin
-# ⬇️ импортируем весь модуль, чтобы не падать на этапе импорта из-за отсутствия имени
-from app.storage import repo as storage_repo
+
+# безопасный импорт: сначала основная реализация, затем фолбэк из repo_extras
+try:
+    from app.storage.repo import save_casting
+except Exception:
+    from app.storage.repo_extras import save_casting  # type: ignore
 
 router = Router(name="casting")
 
-# ---- Фоллбэк на случай отсутствия flows/casting_flow.py ----
+# ---- Фоллбэк: если нет flows/casting_flow.py, объявим стейты и старт тут ----
 try:
     from app.flows.casting_flow import start_casting_flow, ApplyForm  # type: ignore
 except Exception:
@@ -36,6 +40,7 @@ except Exception:
 
 HTTP_RE = re.compile(r"^https?://", re.I)
 
+# Скрытая команда для длинной формы
 @router.message(StateFilter("*"), Command("apply_form"))
 async def casting_entry(m: Message, state: FSMContext):
     await start_casting_flow(m, state)
@@ -94,7 +99,7 @@ async def portfolio_skip_text(m: Message, state: FSMContext):
 async def q_portfolio(m: Message, state: FSMContext):
     text = (m.text or "").strip()
     if text.startswith("/"):
-        return  # пропускаем глобальные команды
+        return  # дай пройти глобальным командам
     if HTTP_RE.match(text):
         await state.update_data(portfolio=text)
         await _finish(m, state)
@@ -106,8 +111,7 @@ async def _finish(m: Message, state: FSMContext):
     data = await state.get_data()
     await state.clear()
 
-    # ⬇️ вызов через модуль, без await (функция синхронная и просто логирует)
-    storage_repo.save_casting(
+    await save_casting(
         tg_id=m.from_user.id,
         name=str(data.get("name", "")),
         age=int(data.get("age", 0) or 0),
@@ -129,4 +133,5 @@ async def _finish(m: Message, state: FSMContext):
         f"От: @{m.from_user.username or m.from_user.id}"
     )
     await notify_admin(summary, m.bot)
+
     await m.answer("✅ Заявка принята! Мы свяжемся в течение 1–2 дней.", reply_markup=main_menu_kb())
