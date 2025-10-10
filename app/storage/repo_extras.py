@@ -1,8 +1,9 @@
+# app/storage/repo_extras.py
 from __future__ import annotations
+
 from typing import Any, Dict, Optional
 import json
 import logging
-import asyncio
 
 log = logging.getLogger(__name__)
 
@@ -12,24 +13,20 @@ __all__ = [
     "log_progress_event",
     "save_leader_intent",
     "save_premium_request",
-    "delete_user",
     "save_casting",
+    "delete_user",
 ]
 
-
-# === Вспомогательные функции ===
 def _safe_dump(obj: Any) -> str:
     try:
         return json.dumps(obj, ensure_ascii=False, default=str)
     except Exception:
         return str(obj)
 
-
-# === Заглушки для событий ===
+# ===== Мини-кастинг (быстрые события) =====
 def save_casting_session(user_id: int, payload: Dict[str, Any]) -> None:
-    """Мини-кастинг: сохраняем заявку (логируем вместо БД)."""
+    """Заглушка: логируем мини-кастинг."""
     log.info("save_casting_session(uid=%s): %s", user_id, _safe_dump(payload))
-
 
 def save_feedback(
     user_id: int,
@@ -37,36 +34,26 @@ def save_feedback(
     rating: Optional[int] = None,
     meta: Optional[Dict[str, Any]] = None,
 ) -> None:
-    """Обратная связь пользователя."""
+    """Заглушка: обратная связь."""
     log.info(
         "save_feedback(uid=%s): text=%r, rating=%s, meta=%s",
         user_id, text, rating, _safe_dump(meta),
     )
 
-
 def log_progress_event(user_id: int, kind: str, data: Optional[Dict[str, Any]] = None) -> None:
-    """Унифицированный лог прогресса/событий."""
+    """Заглушка: единый лог прогресса/событий."""
     log.info("log_progress_event(uid=%s): kind=%s data=%s", user_id, kind, _safe_dump(data))
 
-
+# ===== Путь лидера / премиум =====
 def save_leader_intent(user_id: int, intent: str, meta: Optional[Dict[str, Any]] = None) -> None:
-    """Пользователь проявил интерес к «Пути лидера»."""
+    """Заглушка: интерес к «Пути лидера»."""
     log.info("save_leader_intent(uid=%s): intent=%s meta=%s", user_id, intent, _safe_dump(meta))
 
-
 def save_premium_request(user_id: int, plan: str, meta: Optional[Dict[str, Any]] = None) -> None:
-    """Запрос на премиум/расширенную версию."""
+    """Заглушка: запрос на премиум."""
     log.info("save_premium_request(uid=%s): plan=%s meta=%s", user_id, plan, _safe_dump(meta))
 
-
-# === Заглушка удаления пользователя ===
-async def delete_user(user_id: int) -> None:
-    """Асинхронная заглушка удаления пользователя по tg_id."""
-    await asyncio.sleep(0)
-    log.info("delete_user(uid=%s): stub OK", user_id)
-
-
-# === Заглушка полной формы кастинга ===
+# ===== Полный кастинг (длинная анкета) =====
 def save_casting(
     *,
     tg_id: int,
@@ -78,7 +65,7 @@ def save_casting(
     portfolio: Optional[str],
     agree_contact: bool,
 ) -> None:
-    """Полный кастинг (анкета)."""
+    """Заглушка: полноценная анкета кастинга."""
     payload = {
         "tg_id": tg_id,
         "name": name,
@@ -89,4 +76,9 @@ def save_casting(
         "portfolio": portfolio,
         "agree_contact": agree_contact,
     }
-    log.info("save_casting(uid=%s): %s", tg_id, _safe_dump(payload))
+    log.info("save_casting: %s", _safe_dump(payload))
+
+# ===== Сервисные заглушки =====
+async def delete_user(tg_id: int) -> None:
+    """Заглушка async-удаления пользователя по tg_id."""
+    log.info("delete_user(uid=%s)", tg_id)
