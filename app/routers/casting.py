@@ -2,20 +2,36 @@
 from __future__ import annotations
 
 import re
+import logging
 from aiogram import Router, F
 from aiogram.filters import Command, StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.types import Message, CallbackQuery
 
 from app.keyboards.reply import main_menu_kb
-from app.keyboards.inline import casting_skip_kb  # callback_data: "cast:skip_url"
+from app.keyboards.inline import casting_skip_kb  # callback: "cast:skip_url"
 from app.utils.admin import notify_admin
-# ВАЖНО: тянем заглушку сохранения из repo_extras
-from app.storage.repo_extras import save_casting
+
+log = logging.getLogger(__name__)
+
+# Надёжный импорт: сначала из repo, при проблемах — локальная заглушка
+try:
+    from app.storage.repo import save_casting  # type: ignore
+except Exception:
+    log.warning("save_casting(): fallback stub active (old image on runtime)")
+    def save_casting(
+        *, tg_id: int, name: str, age: int, city: str,
+        experience: str, contact: str, portfolio: str | None,
+        agree_contact: bool = True
+    ) -> None:
+        log.info(
+            "STUB save_casting tg_id=%s name=%r age=%s city=%r exp=%r contact=%r portfolio=%r agree=%s",
+            tg_id, name, age, city, experience, contact, portfolio, agree_contact
+        )
 
 router = Router(name="casting")
 
-# ---- Фоллбэк: если нет flows/casting_flow.py, объявим стейты и старт тут ----
+# --- компактный встроенный флоу (если нет flows/casting_flow.py) ---
 try:
     from app.flows.casting_flow import start_casting_flow, ApplyForm  # type: ignore
 except Exception:
@@ -41,7 +57,6 @@ HTTP_RE = re.compile(r"^https?://", re.I)
 async def casting_entry(m: Message, state: FSMContext):
     await start_casting_flow(m, state)
 
-# ==== ВОПРОСЫ ====
 @router.message(StateFilter(ApplyForm.name))
 async def q_name(m: Message, state: FSMContext):
     await state.update_data(name=(m.text or "").strip())
@@ -79,7 +94,6 @@ async def q_contact(m: Message, state: FSMContext):
     await state.set_state(ApplyForm.portfolio)
     await m.answer("Ссылка на портфолио (если есть)", reply_markup=casting_skip_kb())
 
-# ==== ПОРТФОЛИО (опционально) ====
 @router.callback_query(StateFilter(ApplyForm.portfolio), F.data == "cast:skip_url")
 async def skip_portfolio(cb: CallbackQuery, state: FSMContext):
     await state.update_data(portfolio=None)
@@ -95,27 +109,25 @@ async def portfolio_skip_text(m: Message, state: FSMContext):
 async def q_portfolio(m: Message, state: FSMContext):
     text = (m.text or "").strip()
     if text.startswith("/"):
-        return  # дай пройти глобальным командам
+        return
     if HTTP_RE.match(text):
         await state.update_data(portfolio=text)
         await _finish(m, state)
     else:
         await m.answer("Нужна ссылка (http/https) или нажми «Пропустить».")
 
-# ==== ФИНИШ ====
 async def _finish(m: Message, state: FSMContext):
     data = await state.get_data()
     await state.clear()
 
-    # Заглушка: просто логируем факт заявки
     save_casting(
         tg_id=m.from_user.id,
         name=str(data.get("name", "")),
-        age=int(data.get("age", 0) or 0),
+        age=int(data.get("age") or 0),
         city=str(data.get("city", "")),
         experience=str(data.get("experience", "")),
         contact=str(data.get("contact", "")),
-        portfolio=data.get("portfolio"),
+        portfolio=(data.get("portfolio") or None),
         agree_contact=True,
     )
 
@@ -130,5 +142,4 @@ async def _finish(m: Message, state: FSMContext):
         f"От: @{m.from_user.username or m.from_user.id}"
     )
     await notify_admin(summary, m.bot)
-
     await m.answer("✅ Заявка принята! Мы свяжемся в течение 1–2 дней.", reply_markup=main_menu_kb())
