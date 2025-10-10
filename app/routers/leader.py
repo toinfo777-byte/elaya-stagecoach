@@ -29,9 +29,8 @@ except Exception as e:
 
 @router.message(Command("leader"))
 async def cmd_leader(message: Message):
-    await message.reply("🏁 Путь лидера: выбери намерение из меню или пришли текстом.\nНапр.: <code>хочу в премиум</code>")
+    await message.reply("🏁 Путь лидера: пришли намерение текстом (например: «хочу в премиум»).")
 
-# Пример: простой приём текста как «намерение»
 @router.message(F.text)
 async def any_text_as_intent(message: Message):
     intent = (message.text or "").strip()
@@ -40,7 +39,6 @@ async def any_text_as_intent(message: Message):
     save_leader_intent(message.from_user.id, intent, meta={"source": "text"})
     await message.reply("✅ Намерение зафиксировано.")
 
-# Пример: фиксация запроса на премиум через команду
 @router.message(Command("premium"))
 async def cmd_premium(message: Message):
     save_premium_request(message.from_user.id, plan="premium", meta={"source": "command"})
