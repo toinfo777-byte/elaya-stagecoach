@@ -7,90 +7,56 @@ import time
 import logging
 from dataclasses import dataclass
 from datetime import datetime, timezone, timedelta
-from typing import List, Tuple, Optional
+from typing import List, Tuple, Optional, Dict
 
 log = logging.getLogger(__name__)
 
-# Путь к файлу БД (можно переопределить через ENV)
-_DB_PATH_ENV = os.getenv("PROGRESS_DB_PATH")
-_DB_PATH = _DB_PATH_ENV or os.getenv("DATABASE_FILE") or "/data/elaya_progress.sqlite3"
+_DB_PATH = (
+    os.getenv("PROGRESS_DB_PATH")
+    or os.getenv("DATABASE_FILE")
+    or "/data/elaya_progress.sqlite3"
+)
 
-
-# ──────────────────────────────────────────────────────────────────────────────
-# Общая инициализация
-# ──────────────────────────────────────────────────────────────────────────────
 def _connect() -> sqlite3.Connection:
-    """
-    Возвращает соединение с SQLite и гарантирует наличие директории для файла БД.
-    """
-    dirpath = os.path.dirname(_DB_PATH)
-    if dirpath:
-        os.makedirs(dirpath, exist_ok=True)
-
+    os.makedirs(os.path.dirname(_DB_PATH), exist_ok=True)
     conn = sqlite3.connect(_DB_PATH, check_same_thread=False)
     conn.row_factory = sqlite3.Row
     return conn
 
-
 def ensure_schema() -> None:
-    """
-    Вызывается при старте из app/main.py.
-    Делает БД для прогресса (idempotent).
-    """
     conn = _connect()
     try:
-        # Таблица эпизодов прогресса
-        conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS episodes (
-                id        INTEGER PRIMARY KEY AUTOINCREMENT,
-                user_id   INTEGER NOT NULL,
-                kind      TEXT    NOT NULL,      -- "training" / "casting" / etc
-                points    INTEGER NOT NULL DEFAULT 1,
-                ts        INTEGER NOT NULL       -- unix epoch (UTC)
-            );
-            """
-        )
-        conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_ep_user_ts ON episodes(user_id, ts);"
-        )
+        conn.execute("""
+        CREATE TABLE IF NOT EXISTS episodes (
+            id        INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id   INTEGER NOT NULL,
+            kind      TEXT    NOT NULL,
+            points    INTEGER NOT NULL DEFAULT 1,
+            ts        INTEGER NOT NULL
+        );
+        """)
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_ep_user_ts ON episodes(user_id, ts);")
         conn.commit()
     finally:
         conn.close()
 
-
-# ──────────────────────────────────────────────────────────────────────────────
-# Прогресс
-# ──────────────────────────────────────────────────────────────────────────────
 @dataclass
 class ProgressSummary:
     streak: int
     episodes_7d: int
     points_7d: int
-    last_days: List[Tuple[str, int]]  # [(YYYY-MM-DD, episodes_count)]
-
+    last_days: List[Tuple[str, int]]
 
 class ProgressRepo:
-    """
-    Лёгкий репозиторий прогресса на SQLite (UTC-даты).
-    """
-
     def __init__(self, db_path: Optional[str] = None) -> None:
         self.db_path = db_path or _DB_PATH
 
-    # low-level
     def _conn(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self.db_path, check_same_thread=False)
         conn.row_factory = sqlite3.Row
         return conn
 
-    # API
-    async def add_episode(
-        self, *, user_id: int, kind: str = "training", points: int = 1
-    ) -> None:
-        """
-        Фиксируем завершение шага/тренировки.
-        """
+    async def add_episode(self, *, user_id: int, kind: str = "training", points: int = 1) -> None:
         ts = int(time.time())
         conn = self._conn()
         try:
@@ -103,39 +69,31 @@ class ProgressRepo:
             conn.close()
 
     async def get_summary(self, *, user_id: int) -> ProgressSummary:
-        """
-        Стрик (по дням, UTC) + агрегации за последние 7 дней.
-        """
         conn = self._conn()
         try:
             now = datetime.now(timezone.utc)
             start_7 = int((now - timedelta(days=7)).timestamp())
-
             rows = conn.execute(
                 "SELECT ts, points FROM episodes WHERE user_id=? AND ts>=? ORDER BY ts DESC",
                 (user_id, start_7),
             ).fetchall()
 
-            # группируем по дню
-            per_day: dict[str, int] = {}
+            per_day: Dict[str, int] = {}
             for r in rows:
                 d = datetime.fromtimestamp(r["ts"], tz=timezone.utc).date().isoformat()
                 per_day[d] = per_day.get(d, 0) + 1
 
-            # последние 7 дней (для графиков/сводки)
             days_list: List[Tuple[str, int]] = []
             for i in range(7):
                 d = (now.date() - timedelta(days=6 - i)).isoformat()
                 days_list.append((d, per_day.get(d, 0)))
 
-            # стрик: сколько подряд дней до сегодня включительно есть эпизоды
             streak = 0
             cur = now.date()
             while per_day.get(cur.isoformat(), 0) > 0:
                 streak += 1
                 cur = cur - timedelta(days=1)
 
-            # очки/эпизоды за 7 дней
             points_7d = sum(int(r["points"]) for r in rows)
             episodes_7d = sum(cnt for _, cnt in days_list)
 
@@ -148,14 +106,9 @@ class ProgressRepo:
         finally:
             conn.close()
 
-
-# Синглтон
 progress = ProgressRepo()
 
-
-# ──────────────────────────────────────────────────────────────────────────────
-# Заглушка под кастинг (то, чего не хватало)
-# ──────────────────────────────────────────────────────────────────────────────
+# ---- бизнес-заглушки (минимум, чтобы сервис жил) ----
 def save_casting(
     *,
     tg_id: int,
@@ -167,20 +120,11 @@ def save_casting(
     portfolio: Optional[str],
     agree_contact: bool = True,
 ) -> None:
-    """
-    Совместимая с роутером функция.
-    Сейчас просто логируем событие; при необходимости замените на запись в БД
-    или проксируйте в repo_extras.save_casting_session(...).
-    """
     log.info(
-        "save_casting(tg_id=%s): name=%r, age=%s, city=%r, exp=%r, contact=%r, portfolio=%r, agree=%s",
-        tg_id,
-        name,
-        age,
-        city,
-        experience,
-        contact,
-        portfolio,
-        agree_contact,
+        "save_casting(tg_id=%s): name=%r age=%s city=%r exp=%r contact=%r portfolio=%r agree=%s",
+        tg_id, name, age, city, experience, contact, portfolio, agree_contact,
     )
-    return None
+
+def delete_user(tg_id: int) -> None:
+    # Заглушка удаления профиля (если вызывается из settings.py)
+    log.info("delete_user(tg_id=%s) called (stub)", tg_id)
