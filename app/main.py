@@ -34,7 +34,6 @@ from app.routers.devops_sync import router as devops_sync_router  # ✅ доба
 from app.routers.panic import router as panic_router
 from app.routers.diag import router as diag_router
 
-
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s"
@@ -82,28 +81,29 @@ async def main() -> None:
 
     await _guard(bot.delete_webhook(drop_pending_updates=True), "delete_webhook")
 
-    # порядок: навигация → контент → утилиты → panic → diag
-    dp.include_router(entry_router);      log.info("✅ router loaded: entrypoints")
-    dp.include_router(help_router);       log.info("✅ router loaded: help")
-    dp.include_router(aliases_router);    log.info("✅ router loaded: aliases")
-    dp.include_router(onboarding_router); log.info("✅ router loaded: onboarding")
-    dp.include_router(system_router);     log.info("✅ router loaded: system")
+    # порядок: навигация → контент → утилиты → devops → panic → diag
+    dp.include_router(entry_router);       log.info("✅ router loaded: entrypoints")
+    dp.include_router(help_router);        log.info("✅ router loaded: help")
+    dp.include_router(aliases_router);     log.info("✅ router loaded: aliases")
+    dp.include_router(onboarding_router);  log.info("✅ router loaded: onboarding")
+    dp.include_router(system_router);      log.info("✅ router loaded: system")
 
-    dp.include_router(mc_router);         log.info("✅ router loaded: minicasting")
-    dp.include_router(leader_router);     log.info("✅ router loaded: leader")
-    dp.include_router(training_router);   log.info("✅ router loaded: training")
-    dp.include_router(progress_router);   log.info("✅ router loaded: progress")
-    dp.include_router(privacy_router);    log.info("✅ router loaded: privacy")
-    dp.include_router(settings_router);   log.info("✅ router loaded: settings")
-    dp.include_router(extended_router);   log.info("✅ router loaded: extended")
-    dp.include_router(casting_router);    log.info("✅ router loaded: casting")
-    dp.include_router(apply_router);      log.info("✅ router loaded: apply")
-    dp.include_router(faq_router);        log.info("✅ router loaded: faq")
-    dp.include_router(devops_sync_router);log.info("✅ router loaded: devops_sync")  # ✅ добавлено
+    dp.include_router(mc_router);          log.info("✅ router loaded: minicasting")
+    dp.include_router(leader_router);      log.info("✅ router loaded: leader")
+    dp.include_router(training_router);    log.info("✅ router loaded: training")
+    dp.include_router(progress_router);    log.info("✅ router loaded: progress")
+    dp.include_router(privacy_router);     log.info("✅ router loaded: privacy")
+    dp.include_router(settings_router);    log.info("✅ router loaded: settings")
+    dp.include_router(extended_router);    log.info("✅ router loaded: extended")
+    dp.include_router(casting_router);     log.info("✅ router loaded: casting")
+    dp.include_router(apply_router);       log.info("✅ router loaded: apply")
+    dp.include_router(faq_router);         log.info("✅ router loaded: faq")
+
+    dp.include_router(devops_sync_router); log.info("✅ router loaded: devops_sync")  # ✅ добавлено
 
     # диагностические — в самом конце
-    dp.include_router(panic_router);      log.info("✅ router loaded: panic (near last)")
-    dp.include_router(diag_router);       log.info("✅ router loaded: diag (last)")
+    dp.include_router(panic_router);       log.info("✅ router loaded: panic (near last)")
+    dp.include_router(diag_router);        log.info("✅ router loaded: diag (last)")
 
     await _guard(_set_commands(bot), "set_my_commands")
 
