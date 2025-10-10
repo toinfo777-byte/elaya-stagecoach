@@ -1,4 +1,3 @@
-# app/routers/casting.py
 from __future__ import annotations
 
 import re
@@ -10,10 +9,7 @@ from aiogram.types import Message, CallbackQuery
 from app.keyboards.reply import main_menu_kb
 from app.keyboards.inline import casting_skip_kb  # callback_data: "cast:skip_url"
 from app.utils.admin import notify_admin
-
-# ВАЖНО: больше не импортируем из app.storage.repo
-# Заглушка логирует события и не требует БД.
-from app.storage.repo_extras import save_casting_session
+from app.storage.repo_extras import save_casting  # безопасная заглушка
 
 router = Router(name="casting")
 
@@ -44,12 +40,14 @@ HTTP_RE = re.compile(r"^https?://", re.I)
 async def casting_entry(m: Message, state: FSMContext):
     await start_casting_flow(m, state)
 
+
 # ==== ВОПРОСЫ ====
 @router.message(StateFilter(ApplyForm.name))
 async def q_name(m: Message, state: FSMContext):
     await state.update_data(name=(m.text or "").strip())
     await state.set_state(ApplyForm.age)
     await m.answer("Сколько тебе лет?")
+
 
 @router.message(StateFilter(ApplyForm.age))
 async def q_age(m: Message, state: FSMContext):
@@ -64,11 +62,13 @@ async def q_age(m: Message, state: FSMContext):
     await state.set_state(ApplyForm.city)
     await m.answer("Из какого ты города?")
 
+
 @router.message(StateFilter(ApplyForm.city))
 async def q_city(m: Message, state: FSMContext):
     await state.update_data(city=(m.text or "").strip())
     await state.set_state(ApplyForm.experience)
     await m.answer("Какой у тебя опыт?\n– нет\n– 1–2 года\n– 3+ лет")
+
 
 @router.message(StateFilter(ApplyForm.experience))
 async def q_exp(m: Message, state: FSMContext):
@@ -76,11 +76,13 @@ async def q_exp(m: Message, state: FSMContext):
     await state.set_state(ApplyForm.contact)
     await m.answer("Контакт для связи\n@username / телефон / email")
 
+
 @router.message(StateFilter(ApplyForm.contact))
 async def q_contact(m: Message, state: FSMContext):
     await state.update_data(contact=(m.text or "").strip())
     await state.set_state(ApplyForm.portfolio)
     await m.answer("Ссылка на портфолио (если есть)", reply_markup=casting_skip_kb())
+
 
 # ==== ПОРТФОЛИО (опционально) ====
 @router.callback_query(StateFilter(ApplyForm.portfolio), F.data == "cast:skip_url")
@@ -89,10 +91,12 @@ async def skip_portfolio(cb: CallbackQuery, state: FSMContext):
     await _finish(cb.message, state)
     await cb.answer()
 
+
 @router.message(StateFilter(ApplyForm.portfolio), F.text.casefold().in_({"пропустить", "нет", "пусто"}))
 async def portfolio_skip_text(m: Message, state: FSMContext):
     await state.update_data(portfolio=None)
     await _finish(m, state)
+
 
 @router.message(StateFilter(ApplyForm.portfolio), F.text)
 async def q_portfolio(m: Message, state: FSMContext):
@@ -105,31 +109,32 @@ async def q_portfolio(m: Message, state: FSMContext):
     else:
         await m.answer("Нужна ссылка (http/https) или нажми «Пропустить».")
 
+
 # ==== ФИНИШ ====
 async def _finish(m: Message, state: FSMContext):
     data = await state.get_data()
     await state.clear()
 
-    # заглушка синхронная → БЕЗ await
-    payload = {
-        "name": str(data.get("name", "")),
-        "age": int(data.get("age", 0) or 0),
-        "city": str(data.get("city", "")),
-        "experience": str(data.get("experience", "")),
-        "contact": str(data.get("contact", "")),
-        "portfolio": data.get("portfolio"),
-        "agree_contact": True,
-    }
-    save_casting_session(m.from_user.id, payload)
+    # вызываем безопасную заглушку
+    save_casting(
+        tg_id=m.from_user.id,
+        name=str(data.get("name", "")),
+        age=int(data.get("age", 0) or 0),
+        city=str(data.get("city", "")),
+        experience=str(data.get("experience", "")),
+        contact=str(data.get("contact", "")),
+        portfolio=data.get("portfolio"),
+        agree_contact=True,
+    )
 
     summary = (
         "🎭 Новая заявка (кастинг / путь лидера)\n"
-        f"Имя: {payload['name']}\n"
-        f"Возраст: {payload['age']}\n"
-        f"Город: {payload['city']}\n"
-        f"Опыт: {payload['experience']}\n"
-        f"Контакт: {payload['contact']}\n"
-        f"Портфолио: {payload['portfolio'] or '—'}\n"
+        f"Имя: {data.get('name')}\n"
+        f"Возраст: {data.get('age')}\n"
+        f"Город: {data.get('city')}\n"
+        f"Опыт: {data.get('experience')}\n"
+        f"Контакт: {data.get('contact')}\n"
+        f"Портфолио: {data.get('portfolio') or '—'}\n"
         f"От: @{m.from_user.username or m.from_user.id}"
     )
     await notify_admin(summary, m.bot)
