@@ -28,11 +28,12 @@ from app.routers.extended import router as extended_router
 from app.routers.casting import router as casting_router
 from app.routers.apply import router as apply_router
 from app.routers.faq import router as faq_router
-from app.routers.devops_sync import router as devops_sync_router  # ✅ добавлено
+from app.routers.devops_sync import router as devops_sync_router  # ✅ добавлен DevOps sync
 
 # диагностика
 from app.routers.panic import router as panic_router
 from app.routers.diag import router as diag_router
+
 
 logging.basicConfig(
     level=logging.INFO,
@@ -51,6 +52,7 @@ async def _set_commands(bot: Bot) -> None:
         BotCommand(command="webhook",   description="Статус вебхука"),
         BotCommand(command="panicmenu", description="Диагностическая клавиатура"),
         BotCommand(command="panicoff",  description="Скрыть клавиатуру"),
+        BotCommand(command="sync_status", description="Синхронизировать штабные файлы с GitHub"),  # ✅ добавлена команда
     ])
 
 
@@ -99,7 +101,7 @@ async def main() -> None:
     dp.include_router(apply_router);       log.info("✅ router loaded: apply")
     dp.include_router(faq_router);         log.info("✅ router loaded: faq")
 
-    dp.include_router(devops_sync_router); log.info("✅ router loaded: devops_sync")  # ✅ добавлено
+    dp.include_router(devops_sync_router); log.info("✅ router loaded: devops_sync")  # ✅ подключение роутера
 
     # диагностические — в самом конце
     dp.include_router(panic_router);       log.info("✅ router loaded: panic (near last)")
