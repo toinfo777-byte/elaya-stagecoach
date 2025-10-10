@@ -7,15 +7,12 @@ import time
 import logging
 from dataclasses import dataclass
 from datetime import datetime, timezone, timedelta
-from typing import List, Tuple, Optional, Dict
+from typing import List, Tuple, Optional, Any, Dict
 
 log = logging.getLogger(__name__)
 
-_DB_PATH = (
-    os.getenv("PROGRESS_DB_PATH")
-    or os.getenv("DATABASE_FILE")
-    or "/data/elaya_progress.sqlite3"
-)
+_DB_PATH_ENV = os.getenv("PROGRESS_DB_PATH")
+_DB_PATH = _DB_PATH_ENV or os.getenv("DATABASE_FILE") or "/data/elaya_progress.sqlite3"
 
 def _connect() -> sqlite3.Connection:
     os.makedirs(os.path.dirname(_DB_PATH), exist_ok=True)
@@ -108,7 +105,7 @@ class ProgressRepo:
 
 progress = ProgressRepo()
 
-# ---- бизнес-заглушки (минимум, чтобы сервис жил) ----
+# ---------- ВАЖНО: та самая функция, из-за которой падает импорт ----------
 def save_casting(
     *,
     tg_id: int,
@@ -120,11 +117,16 @@ def save_casting(
     portfolio: Optional[str],
     agree_contact: bool = True,
 ) -> None:
+    """Пока заглушка: просто логируем событие, чтобы сервис не падал."""
     log.info(
         "save_casting(tg_id=%s): name=%r age=%s city=%r exp=%r contact=%r portfolio=%r agree=%s",
         tg_id, name, age, city, experience, contact, portfolio, agree_contact,
     )
 
-def delete_user(tg_id: int) -> None:
-    # Заглушка удаления профиля (если вызывается из settings.py)
-    log.info("delete_user(tg_id=%s) called (stub)", tg_id)
+__all__ = [
+    "ensure_schema",
+    "progress",
+    "ProgressRepo",
+    "ProgressSummary",
+    "save_casting",
+]
