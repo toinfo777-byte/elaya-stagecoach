@@ -10,7 +10,10 @@ from aiogram.types import Message, CallbackQuery
 from app.keyboards.reply import main_menu_kb
 from app.keyboards.inline import casting_skip_kb  # callback_data: "cast:skip_url"
 from app.utils.admin import notify_admin
-from app.storage.repo import save_casting
+
+# ВАЖНО: больше не импортируем из app.storage.repo
+# Заглушка логирует события и не требует БД.
+from app.storage.repo_extras import save_casting_session
 
 router = Router(name="casting")
 
@@ -107,25 +110,26 @@ async def _finish(m: Message, state: FSMContext):
     data = await state.get_data()
     await state.clear()
 
-    await save_casting(
-        tg_id=m.from_user.id,
-        name=str(data.get("name", "")),
-        age=int(data.get("age", 0) or 0),
-        city=str(data.get("city", "")),
-        experience=str(data.get("experience", "")),
-        contact=str(data.get("contact", "")),
-        portfolio=data.get("portfolio"),
-        agree_contact=True,
-    )
+    # заглушка синхронная → БЕЗ await
+    payload = {
+        "name": str(data.get("name", "")),
+        "age": int(data.get("age", 0) or 0),
+        "city": str(data.get("city", "")),
+        "experience": str(data.get("experience", "")),
+        "contact": str(data.get("contact", "")),
+        "portfolio": data.get("portfolio"),
+        "agree_contact": True,
+    }
+    save_casting_session(m.from_user.id, payload)
 
     summary = (
         "🎭 Новая заявка (кастинг / путь лидера)\n"
-        f"Имя: {data.get('name')}\n"
-        f"Возраст: {data.get('age')}\n"
-        f"Город: {data.get('city')}\n"
-        f"Опыт: {data.get('experience')}\n"
-        f"Контакт: {data.get('contact')}\n"
-        f"Портфолио: {data.get('portfolio') or '—'}\n"
+        f"Имя: {payload['name']}\n"
+        f"Возраст: {payload['age']}\n"
+        f"Город: {payload['city']}\n"
+        f"Опыт: {payload['experience']}\n"
+        f"Контакт: {payload['contact']}\n"
+        f"Портфолио: {payload['portfolio'] or '—'}\n"
         f"От: @{m.from_user.username or m.from_user.id}"
     )
     await notify_admin(summary, m.bot)
