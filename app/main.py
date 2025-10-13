@@ -15,7 +15,7 @@ from app.build import BUILD_MARK
 from app.storage.repo import ensure_schema  # фиксированный импорт
 
 # Роутеры (безопасный, минимально-достаточный набор)
-from app.routers.help import help_router
+from app.routers.help import router as help_router
 from app.routers.entrypoints import go_router as entry_router
 from app.routers.cmd_aliases import router as aliases_router
 from app.routers.onboarding import router as onboarding_router
@@ -34,7 +34,10 @@ from app.routers.devops_sync import router as devops_sync_router
 from app.routers.panic import router as panic_router
 from app.routers.diag import router as diag_router
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s"
+)
 log = logging.getLogger("main")
 
 
@@ -101,9 +104,7 @@ async def main() -> None:
 
     await _guard(_set_commands(bot), "set_my_commands")
 
-    # Безопасный хеш токена (в Aiogram 3 нет bot.get_token())
     token_hash = hashlib.md5(settings.bot_token.encode()).hexdigest()[:8]
-
     me = await bot.get_me()
     log.info("🔑 Token hash: %s", token_hash)
     log.info("🤖 Bot: @%s (ID: %s)", me.username, me.id)
