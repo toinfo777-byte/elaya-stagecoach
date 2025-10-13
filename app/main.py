@@ -1,6 +1,8 @@
 # app/main.py
 from __future__ import annotations
-import asyncio, hashlib, logging
+import asyncio
+import hashlib
+import logging
 
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
@@ -12,7 +14,7 @@ from app.config import settings
 from app.build import BUILD_MARK
 from app.storage.repo import ensure_schema  # фиксированный импорт
 
-# Роутеры (оставил безопасный набор)
+# Роутеры (безопасный, минимально-достаточный набор)
 from app.routers.help import help_router
 from app.routers.entrypoints import go_router as entry_router
 from app.routers.cmd_aliases import router as aliases_router
@@ -37,17 +39,19 @@ log = logging.getLogger("main")
 
 
 async def _set_commands(bot: Bot) -> None:
-    await bot.set_my_commands([
-        BotCommand(command="start",       description="Запуск / меню"),
-        BotCommand(command="menu",        description="Главное меню"),
-        BotCommand(command="ping",        description="Проверка связи"),
-        BotCommand(command="build",       description="Текущий билд"),
-        BotCommand(command="who",         description="Инфо о боте / token-hash"),
-        BotCommand(command="webhook",     description="Статус вебхука"),
-        BotCommand(command="panicmenu",   description="Диагностическая клавиатура"),
-        BotCommand(command="panicoff",    description="Скрыть клавиатуру"),
-        BotCommand(command="sync_status", description="Синхронизировать штабные файлы с GitHub"),
-    ])
+    await bot.set_my_commands(
+        [
+            BotCommand(command="start", description="Запуск / меню"),
+            BotCommand(command="menu", description="Главное меню"),
+            BotCommand(command="ping", description="Проверка связи"),
+            BotCommand(command="build", description="Текущий билд"),
+            BotCommand(command="who", description="Инфо о боте / token-hash"),
+            BotCommand(command="webhook", description="Статус вебхука"),
+            BotCommand(command="panicmenu", description="Диагностическая клавиатура"),
+            BotCommand(command="panicoff", description="Скрыть клавиатуру"),
+            BotCommand(command="sync_status", description="Синхронизировать штабные файлы с GitHub"),
+        ]
+    )
 
 
 async def _guard(coro, what: str):
@@ -67,12 +71,10 @@ async def main() -> None:
     ensure_schema()
     log.info("DB schema ensured")
 
-    bot = Bot(
-        token=settings.bot_token,
-        default=DefaultBotProperties(parse_mode=ParseMode.HTML)
-    )
+    bot = Bot(token=settings.bot_token, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
     dp = Dispatcher()
 
+    # Чистый старт без «висящего» вебхука
     await _guard(bot.delete_webhook(drop_pending_updates=True), "delete_webhook")
 
     # Порядок: навигация → контент → утилиты → devops → panic → diag
@@ -99,9 +101,10 @@ async def main() -> None:
 
     await _guard(_set_commands(bot), "set_my_commands")
 
+    # Безопасный хеш токена (в Aiogram 3 нет bot.get_token())
+    token_hash = hashlib.md5(settings.bot_token.encode()).hexdigest()[:8]
+
     me = await bot.get_me()
-    # aiogram v3: у Bot нет get_token(); используем bot.token
-    token_hash = hashlib.md5(bot.token.encode()).hexdigest()[:8]
     log.info("🔑 Token hash: %s", token_hash)
     log.info("🤖 Bot: @%s (ID: %s)", me.username, me.id)
     log.info("🚀 Start polling…")
