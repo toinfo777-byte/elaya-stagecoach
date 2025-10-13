@@ -1,34 +1,40 @@
+# app/routers/cmd_aliases.py
 from __future__ import annotations
-from typing import Any, Awaitable, Callable
 
 from aiogram import Router
-from aiogram.filters import Command, StateFilter
-from aiogram.types import Message
+from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
+from aiogram.types import Message
 
-# вызываем ПУБЛИЧНЫЕ функции из ваших модулей
-from app.routers.training import show_training_levels
-from app.routers.minicasting import start_minicasting
+router = Router(name="aliases")
 
-router = Router(name="cmd_aliases")
-__all__ = ["router"]
 
-async def _safe_call(fn: Callable[..., Awaitable[Any]], obj: Message, state: FSMContext) -> Any:
+@router.message(Command("levels", "уровни", "training"))
+async def alias_training(m: Message):
     """
-    Универсальный безопасный вызов: сначала (obj, state), если TypeError — (obj).
-    Нужно, потому что в одних ваших модулях state обязателен, в других — нет.
+    Алиас на показ тренировки/уровней.
+    Пытаемся импортировать старое имя show_training_levels,
+    если его нет — используем новую entry-функцию.
     """
     try:
-        return await fn(obj, state)   # type: ignore[misc]
-    except TypeError:
-        return await fn(obj)          # type: ignore[misc]
+        from app.routers.training import show_training_levels as _show  # старый контракт
+    except Exception:
+        try:
+            from app.routers.training import training_entry as _show  # новый минимал
+        except Exception:
+            await m.answer("Тренировка временно недоступна.")
+            return
+    await _show(m)
 
-@router.message(StateFilter("*"), Command("training"))
-async def cmd_training(m: Message, state: FSMContext):
-    await state.clear()
-    await _safe_call(show_training_levels, m, state)
 
-@router.message(StateFilter("*"), Command("casting"))
-async def cmd_casting(m: Message, state: FSMContext):
-    await state.clear()
-    await _safe_call(start_minicasting, m, state)
+@router.message(Command("casting"))
+async def alias_casting(m: Message, state: FSMContext):
+    """
+    Алиас на мини-кастинг.
+    """
+    try:
+        from app.routers.minicasting import start_minicasting as _start
+    except Exception:
+        await m.answer("Мини-кастинг временно недоступен.")
+        return
+    await _start(m, state)
