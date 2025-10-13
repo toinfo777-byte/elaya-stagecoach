@@ -1,23 +1,16 @@
-# app/routers/privacy.py
+from __future__ import annotations
 from aiogram import Router, F
-from aiogram.filters import Command, StateFilter
+from aiogram.filters import Command
 from aiogram.types import Message
-from aiogram.fsm.context import FSMContext
 
-from app.keyboards.reply import main_menu_kb, BTN_POLICY
+privacy_router = Router(name="privacy")
 
-router = Router(name="privacy")
-
-PRIVACY_TEXT = (
-    "Политика конфиденциальности: мы бережно храним ваши данные и "
-    "используем их только для работы бота.\n\n"
-    "Подробнее: https://example.com/privacy"
-)
-
-# Глобально: работает из ЛЮБОГО состояния и выводит в меню
-@router.message(StateFilter("*"), Command("privacy"))
-@router.message(StateFilter("*"), F.text == BTN_POLICY)
-async def show_privacy(msg: Message, state: FSMContext):
-    await state.clear()
-    await msg.answer(PRIVACY_TEXT)
-    await msg.answer("Готово! Открываю меню.", reply_markup=main_menu_kb())
+@privacy_router.message(Command("policy"))
+@privacy_router.message(F.text.casefold().in_({"🔐 политика", "политика", "policy"}))
+async def show_policy(m: Message):
+    await m.answer(
+        "🔐 <b>Политика</b>\n\n"
+        "Мы бережно относимся к данным. Личные сведения не собираем.\n"
+        "Диалоги используются только для обучения навыкам речи.\n"
+        "Можно в любой момент завершить работу командой /stop."
+    )
