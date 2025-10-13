@@ -5,61 +5,70 @@ from aiogram import Router, F
 from aiogram.filters import Command
 from aiogram.types import Message
 
-# Безопасные импорты кнопки и клавиатуры
+# Безопасные импорты UI
 try:
     from app.keyboards.reply import BTN_PROGRESS, main_menu_kb
 except Exception:
     BTN_PROGRESS = "📈 Мой прогресс"
     def main_menu_kb():
-        # Можно вернуть пустую клавиатуру — не критично
         return None
 
-# Пытаемся подтянуть репозиторий прогресса
+# Пытаемся взять реальный репозиторий прогресса; иначе — заглушка
 try:
-    from app.storage.repo import progress as progress_repo
+    from app.storage.repo import progress as _progress_repo  # ProgressRepo singleton
 except Exception:
-    progress_repo = None  # не роняем импорт — покажем заглушку
+    _progress_repo = None
 
 router = Router(name="progress")
 
 
-def _sparkline(days):
-    """Простейшая визуализация за 7 дней: 0 → '□', >=1 → '■'."""
-    return "".join("■" if cnt > 0 else "□" for _, cnt in days)
+async def _get_summary(user_id: int):
+    """
+    Унифицированный доступ к сводке прогресса.
+    Ожидаемый интерфейс ProgressRepo.get_summary(user_id=...)
+    """
+    if _progress_repo is None:
+        # Заглушка на случай отсутствия хранилища
+        class _Dummy:
+            async def get_summary(self, *, user_id: int):
+                from dataclasses import dataclass
+                from typing import List, Tuple
+                @dataclass
+                class Summary:
+                    streak: int
+                    episodes_7d: int
+                    points_7d: int
+                    last_days: List[Tuple[str, int]]
+                return Summary(streak=0, episodes_7d=0, points_7d=0, last_days=[])
+        return await _Dummy().get_summary(user_id=user_id)
+    return await _progress_repo.get_summary(user_id=user_id)
 
 
-async def _render_progress(m: Message) -> None:
-    if not progress_repo:
-        await m.answer("Прогресс пока недоступен. Попробуй позже.")
-        return
+def _format_summary(s) -> str:
+    # s.last_days: [(YYYY-MM-DD, count)]
+    days_lines = []
+    for d, c in (s.last_days or []):
+        box = "■" if c > 0 else "□"
+        days_lines.append(f"{d}: {box} x{c}")
+    days_block = "\n".join(days_lines) if days_lines else "Нет активностей за 7 дней."
 
-    try:
-        s = await progress_repo.get_summary(user_id=m.from_user.id)
-    except Exception:
-        await m.answer("Не удалось загрузить прогресс. Попробуй позже.")
-        return
-
-    txt = (
-        "📈 Твой прогресс за 7 дней\n"
-        f"Стрик: <b>{s.streak}</b> дней\n"
-        f"Эпизодов: <b>{s.episodes_7d}</b>\n"
-        f"Очков: <b>{s.points_7d}</b>\n"
-        f"{_sparkline(s.last_days)}"
+    return (
+        "📈 <b>Твой прогресс</b>\n\n"
+        f"🔥 Серия по дням: <b>{s.streak}</b>\n"
+        f"✅ Эпизодов за 7 дней: <b>{s.episodes_7d}</b>\n"
+        f"⭐️ Баллов за 7 дней: <b>{s.points_7d}</b>\n\n"
+        f"{days_block}\n\n"
+        "Продолжай! Любая короткая тренировка засчитывается."
     )
-    await m.answer(txt, reply_markup=main_menu_kb())
 
 
 @router.message(Command("progress"))
-async def cmd_progress(m: Message) -> None:
-    await _render_progress(m)
-
-
 @router.message(F.text == BTN_PROGRESS)
-async def btn_progress(m: Message) -> None:
-    await _render_progress(m)
+async def show_progress(m: Message):
+    summary = await _get_summary(m.from_user.id)
+    await m.answer(_format_summary(summary), reply_markup=main_menu_kb())
 
 
-# Алиас на всякий случай — чтобы можно было импортировать как progress_router
+# Алиас на всякий случай
 progress_router = router
-
-__all__ = ["router", "progress_router"]
+__all__ = ["router", "progress_router", "show_progress"]
