@@ -23,3 +23,7 @@ async def help_btn(m: Message):
         "Помощь / FAQ\n\n• /menu — главное меню\n• /levels — список тренингов\n• /casting — мини-кастинг\n\nЕсли что-то не работает — напиши сюда же.",
         reply_markup=main_menu_kb()
     )
+
+# ✔ Совместимость: чтобы работало и 'from ... import router', и 'from ... import help_router'
+router = help_router
+__all__ = ["help_router", "router", "show_main_menu"]
