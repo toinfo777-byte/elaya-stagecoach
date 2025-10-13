@@ -38,14 +38,14 @@ log = logging.getLogger("main")
 
 async def _set_commands(bot: Bot) -> None:
     await bot.set_my_commands([
-        BotCommand(command="start",     description="Запуск / меню"),
-        BotCommand(command="menu",      description="Главное меню"),
-        BotCommand(command="ping",      description="Проверка связи"),
-        BotCommand(command="build",     description="Текущий билд"),
-        BotCommand(command="who",       description="Инфо о боте / token-hash"),
-        BotCommand(command="webhook",   description="Статус вебхука"),
-        BotCommand(command="panicmenu", description="Диагностическая клавиатура"),
-        BotCommand(command="panicoff",  description="Скрыть клавиатуру"),
+        BotCommand(command="start",       description="Запуск / меню"),
+        BotCommand(command="menu",        description="Главное меню"),
+        BotCommand(command="ping",        description="Проверка связи"),
+        BotCommand(command="build",       description="Текущий билд"),
+        BotCommand(command="who",         description="Инфо о боте / token-hash"),
+        BotCommand(command="webhook",     description="Статус вебхука"),
+        BotCommand(command="panicmenu",   description="Диагностическая клавиатура"),
+        BotCommand(command="panicoff",    description="Скрыть клавиатуру"),
         BotCommand(command="sync_status", description="Синхронизировать штабные файлы с GitHub"),
     ])
 
@@ -100,7 +100,9 @@ async def main() -> None:
     await _guard(_set_commands(bot), "set_my_commands")
 
     me = await bot.get_me()
-    log.info("🔑 Token hash: %s", hashlib.md5((await bot.get_token()).encode()).hexdigest()[:8])
+    # aiogram v3: у Bot нет get_token(); используем bot.token
+    token_hash = hashlib.md5(bot.token.encode()).hexdigest()[:8]
+    log.info("🔑 Token hash: %s", token_hash)
     log.info("🤖 Bot: @%s (ID: %s)", me.username, me.id)
     log.info("🚀 Start polling…")
 
