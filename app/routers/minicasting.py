@@ -1,6 +1,7 @@
 # app/routers/minicasting.py
 from __future__ import annotations
 
+import json
 from aiogram import Router, F
 from aiogram.filters import Command, StateFilter
 from aiogram.fsm.context import FSMContext
@@ -8,9 +9,9 @@ from aiogram.fsm.state import StatesGroup, State
 from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 
 from app.keyboards.reply import main_menu_kb, BTN_CASTING
-from app.storage.repo_extras import save_casting_session, save_feedback, log_progress_event
+# ВАЖНО: единый источник – app.storage.repo
+from app.storage.repo import save_casting_session, save_feedback, log_progress_event
 
-# основной роутер модуля
 router = Router(name="minicasting")
 
 
@@ -19,10 +20,8 @@ router = Router(name="minicasting")
 # ===========================
 def kb_start() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
-        [
-            InlineKeyboardButton(text="Да", callback_data="mc:s0:yes"),
-            InlineKeyboardButton(text="Нет", callback_data="mc:s0:no"),
-        ],
+        [InlineKeyboardButton(text="Да", callback_data="mc:s0:yes"),
+         InlineKeyboardButton(text="Нет", callback_data="mc:s0:no")],
         [InlineKeyboardButton(text="Дальше", callback_data="mc:s0:next")],
         [InlineKeyboardButton(text="🏠 В меню", callback_data="go:menu")],
     ])
@@ -30,48 +29,36 @@ def kb_start() -> InlineKeyboardMarkup:
 
 def kb_q1() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
-        [
-            InlineKeyboardButton(text="Да", callback_data="mc:s1:yes"),
-            InlineKeyboardButton(text="Нет", callback_data="mc:s1:no"),
-        ],
-        [
-            InlineKeyboardButton(text="Дальше", callback_data="mc:s1:next"),
-            InlineKeyboardButton(text="🏠 В меню", callback_data="go:menu"),
-        ],
+        [InlineKeyboardButton(text="Да", callback_data="mc:s1:yes"),
+         InlineKeyboardButton(text="Нет", callback_data="mc:s1:no")],
+        [InlineKeyboardButton(text="Дальше", callback_data="mc:s1:next"),
+         InlineKeyboardButton(text="🏠 В меню", callback_data="go:menu")],
     ])
 
 
 def kb_q2() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
-        [
-            InlineKeyboardButton(text="Да", callback_data="mc:s2:yes"),
-            InlineKeyboardButton(text="Нет", callback_data="mc:s2:no"),
-        ],
-        [
-            InlineKeyboardButton(text="Дальше", callback_data="mc:s2:next"),
-            InlineKeyboardButton(text="🏠 В меню", callback_data="go:menu"),
-        ],
+        [InlineKeyboardButton(text="Да", callback_data="mc:s2:yes"),
+         InlineKeyboardButton(text="Нет", callback_data="mc:s2:no")],
+        [InlineKeyboardButton(text="Дальше", callback_data="mc:s2:next"),
+         InlineKeyboardButton(text="🏠 В меню", callback_data="go:menu")],
     ])
 
 
 def kb_q3() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
-        [
-            InlineKeyboardButton(text="Пауза", callback_data="mc:s3:pause"),
-            InlineKeyboardButton(text="Тембр", callback_data="mc:s3:timbre"),
-            InlineKeyboardButton(text="То же", callback_data="mc:s3:same"),
-        ],
+        [InlineKeyboardButton(text="Пауза", callback_data="mc:s3:pause"),
+         InlineKeyboardButton(text="Тембр", callback_data="mc:s3:timbre"),
+         InlineKeyboardButton(text="То же", callback_data="mc:s3:same")],
         [InlineKeyboardButton(text="🏠 В меню", callback_data="go:menu")],
     ])
 
 
 def kb_rate() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
-        [
-            InlineKeyboardButton(text="🔥", callback_data="mc:rate:fire"),
-            InlineKeyboardButton(text="👌", callback_data="mc:rate:ok"),
-            InlineKeyboardButton(text="😐", callback_data="mc:rate:meh"),
-        ],
+        [InlineKeyboardButton(text="🔥", callback_data="mc:rate:fire"),
+         InlineKeyboardButton(text="👌", callback_data="mc:rate:ok"),
+         InlineKeyboardButton(text="😐", callback_data="mc:rate:meh")],
         [InlineKeyboardButton(text="Пропустить", callback_data="mc:rate:skip")],
         [InlineKeyboardButton(text="🏠 В меню", callback_data="go:menu")],
     ])
@@ -103,10 +90,7 @@ async def start_minicasting(target: Message | CallbackQuery, state: FSMContext) 
         "🎭 Мини-кастинг: короткий чек — пауза, тембр, ощущение. "
         "На выходе — 1 рекомендация и круг тренировки."
     )
-    await m.answer(
-        "Это мини-кастинг: 2–3 мин. Отвечай коротко. Готов?",
-        reply_markup=kb_start(),
-    )
+    await m.answer("Это мини-кастинг: 2–3 мин. Отвечай коротко. Готов?", reply_markup=kb_start())
 
 
 # Старт по кнопке из ReplyKeyboard (если используете) и по команде /casting
@@ -126,7 +110,6 @@ async def start_minicasting_cmd(msg: Message, state: FSMContext):
 @router.callback_query(StateFilter("*"), F.data.in_({"mc:s0:yes", "mc:s0:no", "mc:s0:next"}))
 async def mc_step_1(cq: CallbackQuery, state: FSMContext):
     await cq.answer()
-    # фиксируем факт старта по желанию, но не сохраняем в БД
     await cq.message.answer("Q1. Удержал ли 2 сек тишины перед фразой?", reply_markup=kb_q1())
 
 
@@ -163,8 +146,11 @@ async def mc_summary(cq: CallbackQuery, state: FSMContext):
     data = await state.get_data()
     answers: list[str] = list(data.get("ans", []))
 
-    # простая рекомендация по итогам первых двух ответов
-    tip = "Точка роста: не давай паузе проваливаться." if answers[:2].count("no") >= 1 else "Отлично! Держи курс и темп."
+    tip = (
+        "Точка роста: не давай паузе проваливаться."
+        if answers[:2].count("no") >= 1
+        else "Отлично! Держи курс и темп."
+    )
 
     await cq.message.answer(f"Итог: {tip}")
     await cq.message.answer(
@@ -172,14 +158,15 @@ async def mc_summary(cq: CallbackQuery, state: FSMContext):
         reply_markup=kb_rate(),
     )
 
-    # сохранить сессию (без блокировки UX)
+    # сохранить сессию (единый контракт repo: tg_id + payload:str)
     try:
-        await save_casting_session(
-            user_id=cq.from_user.id,
-            answers=answers + [diff],
-            result=("pause" if "no" in answers[:2] else "ok"),
-        )
-        await log_progress_event(cq.from_user.id, kind="minicasting", meta={"diff": diff})
+        payload = json.dumps({
+            "answers": answers,
+            "diff": diff,
+            "result": "pause" if "no" in answers[:2] else "ok",
+        }, ensure_ascii=False)
+        await save_casting_session(tg_id=cq.from_user.id, payload=payload)
+        await log_progress_event(tg_id=cq.from_user.id, kind="minicasting")
     except Exception:
         # не роняем поток при ошибке записи
         pass
@@ -188,6 +175,8 @@ async def mc_summary(cq: CallbackQuery, state: FSMContext):
 # ===========================
 # Фидбэк (эмодзи + слово)
 # ===========================
+_EMOJI_TO_RATING = {"fire": 3, "ok": 2, "meh": 1}
+
 @router.callback_query(StateFilter("*"), F.data.startswith("mc:rate:"))
 async def mc_rate(cq: CallbackQuery, state: FSMContext):
     await cq.answer()
@@ -198,7 +187,6 @@ async def mc_rate(cq: CallbackQuery, state: FSMContext):
         await cq.message.answer("Ок, вернёмся завтра. Возвращаю в меню.", reply_markup=main_menu_kb())
         return
 
-    # сохраняем эмодзи и ждём одно слово
     await state.update_data(emoji=rate)
     await state.set_state(MC.wait_word)
     await cq.message.answer(
@@ -209,11 +197,13 @@ async def mc_rate(cq: CallbackQuery, state: FSMContext):
 @router.message(MC.wait_word)
 async def mc_word(msg: Message, state: FSMContext):
     data = await state.get_data()
-    emoji = data.get("emoji", "ok")
-    phrase = (msg.text or "").strip()[:140] if msg.text else None
+    emoji = str(data.get("emoji", "ok"))
+    phrase = (msg.text or "").strip()[:140] if msg.text else ""
 
     try:
-        await save_feedback(user_id=msg.from_user.id, emoji=emoji, phrase=phrase)
+        rating = _EMOJI_TO_RATING.get(emoji, None)
+        text = (f"emoji={emoji}; " + phrase).strip()
+        await save_feedback(tg_id=msg.from_user.id, text=text, rating=rating)
     except Exception:
         pass
 
@@ -221,10 +211,6 @@ async def mc_word(msg: Message, state: FSMContext):
     await msg.answer("Спасибо! Записал. Возвращаю в меню.", reply_markup=main_menu_kb())
 
 
-# ===========================
-# Публичный алиас для main.py
-# ===========================
-# main.py ожидает mc_router — дадим алиас на локальный router
+# Публичные экспортируемые имена
 mc_router = router
-
 __all__ = ["router", "mc_router", "start_minicasting", "start_minicasting_cmd"]
