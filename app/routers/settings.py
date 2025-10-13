@@ -1,39 +1,30 @@
 # app/routers/settings.py
 from __future__ import annotations
-
 from aiogram import Router, F
-from aiogram.filters import Command, StateFilter
-from aiogram.types import Message, ReplyKeyboardMarkup, KeyboardButton
-
-from app.keyboards.reply import main_menu_kb
-from app.storage.repo_extras import delete_user  # stub – уже есть
+from aiogram.filters import Command
+from aiogram.types import Message
+from app.keyboards.reply import main_menu_kb, BTN_SETTINGS
+try:
+    from app.storage.repo_extras import delete_user
+except Exception:
+    async def delete_user(tg_id: int) -> None:
+        # no-op fallback
+        return
 
 router = Router(name="settings")
 
-def settings_kb() -> ReplyKeyboardMarkup:
-    return ReplyKeyboardMarkup(
-        keyboard=[
-            [KeyboardButton(text="🗑 Удалить мои данные")],
-            [KeyboardButton(text="🏠 В меню")],
-        ],
-        resize_keyboard=True
-    )
-
 @router.message(Command("settings"))
-@router.message(StateFilter("*"), F.text == "⚙️ Настройки")
-async def settings_home(msg: Message):
-    await msg.answer(
-        "⚙️ <b>Настройки</b>\n\n"
-        "— Здесь можно удалить ваши данные, если передумали пользоваться ботом.\n"
-        "— Остальные опции появятся позже.",
-        reply_markup=settings_kb()
+@router.message(F.text == BTN_SETTINGS)
+async def settings_menu(m: Message):
+    await m.answer(
+        "⚙️ Настройки (демо):\n• /delete_me — удалить аккаунт/данные",
+        reply_markup=main_menu_kb()
     )
 
-@router.message(StateFilter("*"), F.text == "🗑 Удалить мои данные")
-async def settings_delete(msg: Message):
-    await delete_user(msg.from_user.id)  # stub: просто логирует
-    await msg.answer("Ок, запись помечена на удаление (заглушка).", reply_markup=main_menu_kb())
-
-@router.message(StateFilter("*"), F.text == "🏠 В меню")
-async def back_home(msg: Message):
-    await msg.answer("Вернул в меню.", reply_markup=main_menu_kb())
+@router.message(Command("delete_me"))
+async def settings_delete(m: Message):
+    try:
+        await delete_user(m.from_user.id)
+        await m.answer("Готово. Данные помечены к удалению.", reply_markup=main_menu_kb())
+    except Exception:
+        await m.answer("Не удалось удалить. Попробуй позже.", reply_markup=main_menu_kb())
