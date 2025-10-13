@@ -1,35 +1,32 @@
 # app/routers/help.py
 from __future__ import annotations
 
-from aiogram import Router
-from aiogram.filters import Command
+from aiogram import Router, F
+from aiogram.filters import Command, StateFilter
 from aiogram.types import Message
 
 from app.keyboards.reply import main_menu_kb
 
-help_router = Router(name="help")
+router = Router(name="help")
 
-async def show_main_menu(m: Message) -> None:
-    """Единая точка вывода главного меню (используют /menu и др.)."""
-    await m.answer(
-        "Команды и разделы: выбери нужное ⤵️",
-        reply_markup=main_menu_kb(),
-    )
+async def show_main_menu(msg: Message):
+    await msg.answer("Команды и разделы: выбери нужное ⤵️", reply_markup=main_menu_kb())
 
-@help_router.message(Command("menu"))
-async def cmd_menu(m: Message) -> None:
-    await show_main_menu(m)
+@router.message(Command("menu"))
+@router.message(Command("start"))
+async def menu_cmd(msg: Message):
+    await show_main_menu(msg)
 
-@help_router.message(Command("help", "faq"))
-async def cmd_help(m: Message) -> None:
-    await m.answer(
-        "💬 Помощь / FAQ\n\n"
+@router.message(StateFilter("*"), F.text == "💬 Помощь / FAQ")
+@router.message(Command("help"))
+async def show_help(msg: Message):
+    await msg.answer(
+        "💬 <b>Помощь / FAQ</b>\n\n"
         "🏋️ «Тренировка дня» — старт здесь.\n"
-        "📈 «Мой прогресс» — стрик и эпизоды.\n"
-        "🧭 «Путь лидера» — заявка и шаги (скоро).\n"
-        "Если что-то не работает — /ping."
+        "📈 «Мой прогресс» — стрик и эпизоды за 7 дней.\n"
+        "🧭 «Путь лидера» — заявка и шаги (скоро).\n\n"
+        "Если что-то не работает — /ping.",
+        reply_markup=main_menu_kb()
     )
 
-# Совместимость: некоторые места ждут переменную `router`
-router = help_router
-__all__ = ["help_router", "router", "show_main_menu"]
+__all__ = ["router", "show_main_menu"]
