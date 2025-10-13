@@ -5,7 +5,6 @@ from aiogram.types import Message
 
 router = Router(name="training")
 
-# Точки входа: кнопка из меню и /training
 ENTRY_TEXTS = {
     "🏋️ тренировка дня", "тренировка дня", "training", "уровень 1",
 }
@@ -22,3 +21,11 @@ async def training_entry(m: Message):
         "4) Повтори 3 минуты.\n\n"
         "✅ Когда завершишь — вернись в меню: /menu"
     )
+
+# 🔁 ШИМ ДЛЯ СОВМЕСТИМОСТИ СО СТАРЫМ КОДОМ
+# Раньше cmd_aliases импортировал show_training_levels — вернём имя.
+async def show_training_levels(m: Message):
+    # Просто переиспользуем текущую точку входа
+    await training_entry(m)
+
+__all__ = ["router", "training_entry", "show_training_levels"]
