@@ -7,14 +7,16 @@ import time
 import logging
 from dataclasses import dataclass
 from datetime import datetime, timezone, timedelta
-from typing import List, Tuple, Optional
+from typing import List, Tuple, Optional, Dict, Any
 
 log = logging.getLogger(__name__)
 
-_DB_PATH_ENV = os.getenv("PROGRESS_DB_PATH")
-_DB_PATH = _DB_PATH_ENV or os.getenv("DATABASE_FILE") or "/data/elaya_progress.sqlite3"
+_DB_PATH = os.getenv("PROGRESS_DB_PATH") or os.getenv("DATABASE_FILE") or "/data/elaya_progress.sqlite3"
 
 
+# ──────────────────────────────────────────────────────────────────────────────
+# low-level
+# ──────────────────────────────────────────────────────────────────────────────
 def _connect() -> sqlite3.Connection:
     os.makedirs(os.path.dirname(_DB_PATH), exist_ok=True)
     conn = sqlite3.connect(_DB_PATH, check_same_thread=False)
@@ -24,27 +26,67 @@ def _connect() -> sqlite3.Connection:
 
 def ensure_schema() -> None:
     """
-    Идемпотентная инициализация БД прогресса.
-    Вызывается на старте из app/main.py.
+    Создаёт/мигрит простые таблицы. Идём без внешних зависимостей.
     """
     conn = _connect()
     try:
+        # Прогресс (эпизоды)
         conn.execute("""
         CREATE TABLE IF NOT EXISTS episodes (
             id        INTEGER PRIMARY KEY AUTOINCREMENT,
             user_id   INTEGER NOT NULL,
-            kind      TEXT    NOT NULL,      -- "training" / "casting" / etc
+            kind      TEXT    NOT NULL,    -- "training" / "casting" / etc
             points    INTEGER NOT NULL DEFAULT 1,
-            ts        INTEGER NOT NULL       -- unix epoch (UTC)
+            ts        INTEGER NOT NULL     -- unix epoch (UTC)
         );
         """)
         conn.execute("CREATE INDEX IF NOT EXISTS idx_ep_user_ts ON episodes(user_id, ts);")
+
+        # Заявки кастинга (длинная форма)
+        conn.execute("""
+        CREATE TABLE IF NOT EXISTS casting_applications (
+            id        INTEGER PRIMARY KEY AUTOINCREMENT,
+            tg_id     INTEGER NOT NULL,
+            name      TEXT,
+            age       INTEGER,
+            city      TEXT,
+            experience TEXT,
+            contact   TEXT,
+            portfolio TEXT,
+            agree_contact INTEGER NOT NULL DEFAULT 1,
+            ts        INTEGER NOT NULL
+        );
+        """)
+
+        # Сессии мини-кастинга (очень простая структура)
+        conn.execute("""
+        CREATE TABLE IF NOT EXISTS casting_sessions (
+            id        INTEGER PRIMARY KEY AUTOINCREMENT,
+            tg_id     INTEGER NOT NULL,
+            payload   TEXT,                 -- json/text с ответами/шагами
+            ts        INTEGER NOT NULL
+        );
+        """)
+
+        # Отзывы/фидбек (мини-кастинг и др.)
+        conn.execute("""
+        CREATE TABLE IF NOT EXISTS feedback (
+            id        INTEGER PRIMARY KEY AUTOINCREMENT,
+            tg_id     INTEGER NOT NULL,
+            rating    INTEGER,
+            text      TEXT,
+            ts        INTEGER NOT NULL
+        );
+        """)
+
         conn.commit()
     finally:
         conn.close()
 
 
-# ── Прогресс (легковесные агрегаты) ────────────────────────────────────────────
+# ──────────────────────────────────────────────────────────────────────────────
+# Примитивная модель прогресса (для /progress и т.п.)
+# ──────────────────────────────────────────────────────────────────────────────
 @dataclass
 class ProgressSummary:
     streak: int
@@ -84,7 +126,7 @@ class ProgressRepo:
                 (user_id, start_7),
             ).fetchall()
 
-            per_day: dict[str, int] = {}
+            per_day: Dict[str, int] = {}
             for r in rows:
                 d = datetime.fromtimestamp(r["ts"], tz=timezone.utc).date().isoformat()
                 per_day[d] = per_day.get(d, 0) + 1
@@ -102,23 +144,18 @@ class ProgressRepo:
 
             points_7d = sum(int(r["points"]) for r in rows)
             episodes_7d = sum(cnt for _, cnt in days_list)
-
-            return ProgressSummary(
-                streak=streak,
-                episodes_7d=episodes_7d,
-                points_7d=points_7d,
-                last_days=days_list,
-            )
+            return ProgressSummary(streak, episodes_7d, points_7d, days_list)
         finally:
             conn.close()
 
 
-# Экспортируем синглтон для удобства
 progress = ProgressRepo()
 
 
-# ── Кастинг: фиксированный контракт, без побочных импортов ────────────────────
-def save_casting(
+# ──────────────────────────────────────────────────────────────────────────────
+# Контракт для кастинга/мини-кастинга (async, чтобы можно было `await`-ить)
+# ──────────────────────────────────────────────────────────────────────────────
+async def save_casting(
     *,
     tg_id: int,
     name: str,
@@ -129,11 +166,52 @@ def save_casting(
     portfolio: Optional[str],
     agree_contact: bool = True,
 ) -> None:
+    ts = int(time.time())
+    conn = _connect()
+    try:
+        conn.execute(
+            """INSERT INTO casting_applications
+               (tg_id, name, age, city, experience, contact, portfolio, agree_contact, ts)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (tg_id, name, age, city, experience, contact, portfolio, 1 if agree_contact else 0, ts),
+        )
+        conn.commit()
+        log.info("save_casting: tg_id=%s, name=%r, age=%s, city=%r", tg_id, name, age, city)
+    finally:
+        conn.close()
+
+
+async def save_casting_session(*, tg_id: int, payload: str) -> None:
     """
-    Минимальная реализация: логируем событие.
-    (Позже можно положить в отдельную таблицу.)
+    Мини-кастинг — сохранить «шаги/ответы» одним куском текста/JSON.
     """
-    log.info(
-        "save_casting(tg_id=%s): name=%r, age=%s, city=%r, exp=%r, contact=%r, portfolio=%r, agree=%s",
-        tg_id, name, age, city, experience, contact, portfolio, agree_contact,
-    )
+    ts = int(time.time())
+    conn = _connect()
+    try:
+        conn.execute(
+            "INSERT INTO casting_sessions(tg_id, payload, ts) VALUES (?, ?, ?)",
+            (tg_id, payload, ts),
+        )
+        conn.commit()
+        log.info("save_casting_session: tg_id=%s", tg_id)
+    finally:
+        conn.close()
+
+
+async def save_feedback(*, tg_id: int, text: str, rating: Optional[int] = None) -> None:
+    ts = int(time.time())
+    conn = _connect()
+    try:
+        conn.execute(
+            "INSERT INTO feedback(tg_id, rating, text, ts) VALUES (?, ?, ?, ?)",
+            (tg_id, rating, text, ts),
+        )
+        conn.commit()
+        log.info("save_feedback: tg_id=%s, rating=%s", tg_id, rating)
+    finally:
+        conn.close()
+
+
+async def log_progress_event(*, tg_id: int, kind: str, points: int = 1) -> None:
+    # тупо прокидываем в episodes как «событие прогресса»
+    await progress.add_episode(user_id=tg_id, kind=kind, points=points)
