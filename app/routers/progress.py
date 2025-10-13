@@ -5,37 +5,31 @@ from aiogram import Router, F
 from aiogram.filters import Command
 from aiogram.types import Message
 
-# Кнопка может отсутствовать в некоторых сборках — делаем безопасно
+# Безопасные импорты кнопки и клавиатуры
 try:
     from app.keyboards.reply import BTN_PROGRESS, main_menu_kb
 except Exception:
     BTN_PROGRESS = "📈 Мой прогресс"
     def main_menu_kb():
-        return None  # без клавы тоже ок
+        # Можно вернуть пустую клавиатуру — не критично
+        return None
 
-# Лёгкий доступ к репозиторию прогресса
+# Пытаемся подтянуть репозиторий прогресса
 try:
-    # ожидаем, что в app.storage.repo есть синглтон progress и ensure_schema уже вызван в main.py
     from app.storage.repo import progress as progress_repo
 except Exception:
-    progress_repo = None  # не роняем импорт — вернём заглушку
+    progress_repo = None  # не роняем импорт — покажем заглушку
 
 router = Router(name="progress")
 
 
 def _sparkline(days):
-    """
-    Простейшая визуализация за 7 дней:
-    0 — '□', >=1 — '■'
-    """
-    blocks = []
-    for d, cnt in days:
-        blocks.append("■" if cnt > 0 else "□")
-    return "".join(blocks)
+    """Простейшая визуализация за 7 дней: 0 → '□', >=1 → '■'."""
+    return "".join("■" if cnt > 0 else "□" for _, cnt in days)
 
 
 async def _render_progress(m: Message) -> None:
-    if progress_repo is None:
+    if not progress_repo:
         await m.answer("Прогресс пока недоступен. Попробуй позже.")
         return
 
@@ -45,14 +39,12 @@ async def _render_progress(m: Message) -> None:
         await m.answer("Не удалось загрузить прогресс. Попробуй позже.")
         return
 
-    days_vis = _sparkline(s.last_days)
     txt = (
         "📈 Твой прогресс за 7 дней\n"
         f"Стрик: <b>{s.streak}</b> дней\n"
         f"Эпизодов: <b>{s.episodes_7d}</b>\n"
         f"Очков: <b>{s.points_7d}</b>\n"
-        f"{days_vis}  (последние 7 дней)\n\n"
-        "Продолжай — даже маленький шаг сегодня держит стрик живым."
+        f"{_sparkline(s.last_days)}"
     )
     await m.answer(txt, reply_markup=main_menu_kb())
 
@@ -67,4 +59,7 @@ async def btn_progress(m: Message) -> None:
     await _render_progress(m)
 
 
-__all__ = ["router"]
+# Алиас на всякий случай — чтобы можно было импортировать как progress_router
+progress_router = router
+
+__all__ = ["router", "progress_router"]
