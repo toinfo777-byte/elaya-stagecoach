@@ -1,44 +1,24 @@
 from __future__ import annotations
-
-from aiogram import Router
+from aiogram import Router, F
 from aiogram.filters import Command
 from aiogram.types import Message
 
-from app.storage.repo import progress  # синглтон ProgressRepo
+progress_router = Router(name="progress")
 
-router = Router(name="progress")
+def _bar(streak: int, width: int = 7) -> str:
+    streak = max(0, min(width, streak))
+    return "🟩" * streak + "⬜" * (width - streak)
 
-
-def _days_bar(last_days: list[tuple[str, int]]) -> str:
-    """
-    Рисуем простую полоску за 7 дней: ◻︎/■
-    """
-    cells = []
-    for _, cnt in last_days:
-        cells.append("■" if cnt > 0 else "◻︎")
-    return "".join(cells)
-
-
+@progress_router.message(Command("progress"))
+@progress_router.message(F.text.casefold().in_({"📈 мой прогресс", "мой прогресс", "progress"}))
 async def show_progress(m: Message):
-    s = await progress.get_summary(user_id=m.from_user.id)
-    bar = _days_bar(s.last_days)
-    text = (
-        "<b>Мой прогресс</b>\n\n"
-        f"• Стрик: <b>{s.streak}</b>\n"
-        f"• Эпизодов за 7 дней: <b>{s.episodes_7d}</b>\n"
-        f"• Очков за 7 дней: <b>{s.points_7d}</b>\n\n"
-        f"{bar}\n"
-        "Продолжай каждый день — «Тренировка дня» в один клик 🟡"
+    # Пока простая «рабочая» заглушка: стрик 1
+    streak = 1
+    await m.answer(
+        "📈 <b>Мой прогресс</b>\n"
+        f"• Стрик: {streak}\n"
+        f"• Эпизодов за 7 дней: {streak}\n"
+        f"• Очков за 7 дней: {streak}\n\n"
+        f"{_bar(streak)}\n"
+        "Продолжай каждый день — «Тренировка дня» в один клик. ✨"
     )
-    await m.answer(text)
-
-
-# Команда на всякий случай
-@router.message(Command("progress"))
-async def cmd_progress(m: Message):
-    await show_progress(m)
-
-
-# Утилита: можно вызывать из тренировки
-async def record_training_episode(m: Message, points: int = 1):
-    await progress.add_episode(user_id=m.from_user.id, kind="training", points=points)
