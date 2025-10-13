@@ -10,7 +10,7 @@ from app.keyboards.reply import main_menu_kb
 help_router = Router(name="help")
 
 async def show_main_menu(m: Message) -> None:
-    """Единая точка вывода главного меню (используют /menu и онбординг)."""
+    """Единая точка вывода главного меню (используют /menu и др.)."""
     await m.answer(
         "Команды и разделы: выбери нужное ⤵️",
         reply_markup=main_menu_kb(),
