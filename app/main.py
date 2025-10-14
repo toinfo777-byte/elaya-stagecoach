@@ -3,6 +3,8 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import logging
+import importlib
+import sys
 
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
@@ -12,31 +14,33 @@ from aiogram.types import BotCommand
 
 from app.config import settings
 from app.build import BUILD_MARK
-from app.storage.repo import ensure_schema  # фиксированный импорт
+from app.storage.repo import ensure_schema
 
-# Роутеры (безопасный, минимально-достаточный набор)
-from app.routers.help import router as help_router
-from app.routers.entrypoints import go_router as entry_router
-from app.routers.cmd_aliases import router as aliases_router
-from app.routers.onboarding import router as onboarding_router
-from app.routers.system import router as system_router
-from app.routers.minicasting import router as mc_router
-from app.routers.leader import router as leader_router
-from app.routers.training import router as training_router
-from app.routers.progress import router as progress_router
-from app.routers.privacy import router as privacy_router
-from app.routers.settings import router as settings_router
-from app.routers.extended import router as extended_router
-from app.routers.casting import router as casting_router
-from app.routers.apply import router as apply_router
-from app.routers.faq import router as faq_router
-from app.routers.devops_sync import router as devops_sync_router
-from app.routers.panic import router as panic_router
-from app.routers.diag import router as diag_router
+# Импортируем только router из всех стабильных модулей
+from app.routers import (
+    entrypoints,
+    help,
+    cmd_aliases,
+    onboarding,
+    system,
+    minicasting,
+    leader,
+    training,
+    progress,
+    privacy,
+    settings as settings_mod,
+    extended,
+    casting,
+    apply,
+    faq,
+    devops_sync,
+    panic,
+    diag,
+)
 
 logging.basicConfig(
     level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s"
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
 )
 log = logging.getLogger("main")
 
@@ -46,13 +50,10 @@ async def _set_commands(bot: Bot) -> None:
         [
             BotCommand(command="start", description="Запуск / меню"),
             BotCommand(command="menu", description="Главное меню"),
+            BotCommand(command="levels", description="Тренировка дня"),
+            BotCommand(command="progress", description="Мой прогресс"),
+            BotCommand(command="help", description="Помощь / FAQ"),
             BotCommand(command="ping", description="Проверка связи"),
-            BotCommand(command="build", description="Текущий билд"),
-            BotCommand(command="who", description="Инфо о боте / token-hash"),
-            BotCommand(command="webhook", description="Статус вебхука"),
-            BotCommand(command="panicmenu", description="Диагностическая клавиатура"),
-            BotCommand(command="panicoff", description="Скрыть клавиатуру"),
-            BotCommand(command="sync_status", description="Синхронизировать штабные файлы с GitHub"),
         ]
     )
 
@@ -69,43 +70,71 @@ async def _guard(coro, what: str):
 
 async def main() -> None:
     log.info("=== BUILD %s ===", BUILD_MARK)
-
-    # Чёткий контракт storage
     ensure_schema()
     log.info("DB schema ensured")
 
     bot = Bot(token=settings.bot_token, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
     dp = Dispatcher()
 
-    # Чистый старт без «висящего» вебхука
+    # Удаляем webhook (если был)
     await _guard(bot.delete_webhook(drop_pending_updates=True), "delete_webhook")
 
-    # Порядок: навигация → контент → утилиты → devops → panic → diag
-    dp.include_router(entry_router);       log.info("✅ router loaded: entrypoints")
-    dp.include_router(help_router);        log.info("✅ router loaded: help")
-    dp.include_router(aliases_router);     log.info("✅ router loaded: aliases")
-    dp.include_router(onboarding_router);  log.info("✅ router loaded: onboarding")
-    dp.include_router(system_router);      log.info("✅ router loaded: system")
+    # ── SMOKE CHECK ────────────────────────────────────────────────
+    smoke_modules = [
+        "app.routers.entrypoints",
+        "app.routers.help",
+        "app.routers.cmd_aliases",
+        "app.routers.onboarding",
+        "app.routers.system",
+        "app.routers.minicasting",
+        "app.routers.leader",
+        "app.routers.training",
+        "app.routers.progress",
+        "app.routers.privacy",
+        "app.routers.settings",
+        "app.routers.extended",
+        "app.routers.casting",
+        "app.routers.apply",
+        "app.routers.faq",
+        "app.routers.devops_sync",
+        "app.routers.panic",
+        "app.routers.diag",
+    ]
+    for modname in smoke_modules:
+        try:
+            mod = importlib.import_module(modname)
+            assert hasattr(mod, "router"), f"{modname}: no `router` export"
+        except Exception as e:
+            log.error("❌ SMOKE FAIL %s: %r", modname, e)
+            sys.exit(1)
+    log.info("✅ SMOKE OK: routers exports are valid")
+    # ───────────────────────────────────────────────────────────────
 
-    dp.include_router(mc_router);          log.info("✅ router loaded: minicasting")
-    dp.include_router(leader_router);      log.info("✅ router loaded: leader")
-    dp.include_router(training_router);    log.info("✅ router loaded: training")
-    dp.include_router(progress_router);    log.info("✅ router loaded: progress")
-    dp.include_router(privacy_router);     log.info("✅ router loaded: privacy")
-    dp.include_router(settings_router);    log.info("✅ router loaded: settings")
-    dp.include_router(extended_router);    log.info("✅ router loaded: extended")
-    dp.include_router(casting_router);     log.info("✅ router loaded: casting")
-    dp.include_router(apply_router);       log.info("✅ router loaded: apply")
-    dp.include_router(faq_router);         log.info("✅ router loaded: faq")
-
-    dp.include_router(devops_sync_router); log.info("✅ router loaded: devops_sync")
-    dp.include_router(panic_router);       log.info("✅ router loaded: panic (near last)")
-    dp.include_router(diag_router);        log.info("✅ router loaded: diag (last)")
+    # Регистрируем роутеры в строгом порядке
+    dp.include_router(entrypoints.router); log.info("✅ router loaded: entrypoints")
+    dp.include_router(help.router); log.info("✅ router loaded: help")
+    dp.include_router(cmd_aliases.router); log.info("✅ router loaded: aliases")
+    dp.include_router(onboarding.router); log.info("✅ router loaded: onboarding")
+    dp.include_router(system.router); log.info("✅ router loaded: system")
+    dp.include_router(minicasting.router); log.info("✅ router loaded: minicasting")
+    dp.include_router(leader.router); log.info("✅ router loaded: leader")
+    dp.include_router(training.router); log.info("✅ router loaded: training")
+    dp.include_router(progress.router); log.info("✅ router loaded: progress")
+    dp.include_router(privacy.router); log.info("✅ router loaded: privacy")
+    dp.include_router(settings_mod.router); log.info("✅ router loaded: settings")
+    dp.include_router(extended.router); log.info("✅ router loaded: extended")
+    dp.include_router(casting.router); log.info("✅ router loaded: casting")
+    dp.include_router(apply.router); log.info("✅ router loaded: apply")
+    dp.include_router(faq.router); log.info("✅ router loaded: faq")
+    dp.include_router(devops_sync.router); log.info("✅ router loaded: devops_sync")
+    dp.include_router(panic.router); log.info("✅ router loaded: panic (near last)")
+    dp.include_router(diag.router); log.info("✅ router loaded: diag (last)")
 
     await _guard(_set_commands(bot), "set_my_commands")
 
     token_hash = hashlib.md5(settings.bot_token.encode()).hexdigest()[:8]
     me = await bot.get_me()
+
     log.info("🔑 Token hash: %s", token_hash)
     log.info("🤖 Bot: @%s (ID: %s)", me.username, me.id)
     log.info("🚀 Start polling…")
