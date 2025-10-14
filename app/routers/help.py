@@ -1,36 +1,26 @@
 # app/routers/help.py
 from __future__ import annotations
-
-from aiogram import Router, F
+from aiogram import Router
 from aiogram.filters import Command
 from aiogram.types import Message
 
-from app.keyboards.reply import main_menu_kb, BTN_HELP
+router = Router(name="help")
 
-# основной роутер этого модуля
-help_router = Router(name="help")
-
-async def show_main_menu(m: Message) -> None:
+@router.message(Command("start", "menu"))
+async def show_main_menu(m: Message):
     await m.answer(
-        "Команды и разделы: выбери нужное ⤵️",
-        reply_markup=main_menu_kb()
+        "Команды и разделы: выбери нужное ⤵️\n\n"
+        "🏋️ Тренировка дня\n💬 Помощь / FAQ\n(остальные временно скрыты)"
     )
 
-@help_router.message(Command("start", "menu"))
-async def cmd_start(m: Message):
-    await show_main_menu(m)
-
-@help_router.message(F.text == BTN_HELP)
-async def help_btn(m: Message):
+@router.message(Command("help", "faq"))
+async def help_info(m: Message):
     await m.answer(
-        "Помощь / FAQ\n\n"
+        "💬 Помощь / FAQ\n\n"
         "• /menu — главное меню\n"
-        "• /levels — список тренингов\n"
+        "• /levels — список тренировок\n"
         "• /casting — мини-кастинг\n\n"
-        "Если что-то не работает — напиши сюда же.",
-        reply_markup=main_menu_kb()
+        "Если что-то не работает — просто напиши сюда."
     )
 
-# ── совместимость с импортом из main.py ──
-router = help_router
-__all__ = ["help_router", "router", "show_main_menu"]
+__all__ = ["router", "show_main_menu"]
