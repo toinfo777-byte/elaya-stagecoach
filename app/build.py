@@ -1,2 +1,2 @@
 # app/build.py
-probe-YYMMDD-HHMM = "diag-probe-2025-10-09"
+BUILD_MARK = "diag-probe-2025-10-14"
