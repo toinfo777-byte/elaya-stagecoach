@@ -1,9 +1,10 @@
 # app/main.py
 from __future__ import annotations
+
 import asyncio
 import hashlib
-import logging
 import importlib
+import logging
 import sys
 
 from aiogram import Bot, Dispatcher
@@ -15,8 +16,9 @@ from aiogram.types import BotCommand
 from app.config import settings
 from app.build import BUILD_MARK
 from app.storage.repo import ensure_schema
+from app.middlewares.throttling import ThrottlingMiddleware  # антидребезг
 
-# Импортируем только router из всех стабильных модулей
+# Импортируем только router из стабильных модулей
 from app.routers import (
     entrypoints,
     help,
@@ -62,6 +64,7 @@ async def _guard(coro, what: str):
     try:
         return await coro
     except TelegramBadRequest as e:
+        # редкий кейс от Bot API на удаление вебхука/команд
         if "Logged out" in str(e):
             log.warning("%s: Bot API 'Logged out' — игнорируем", what)
             return
@@ -73,13 +76,20 @@ async def main() -> None:
     ensure_schema()
     log.info("DB schema ensured")
 
-    bot = Bot(token=settings.bot_token, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
+    bot = Bot(
+        token=settings.bot_token,
+        default=DefaultBotProperties(parse_mode=ParseMode.HTML),
+    )
     dp = Dispatcher()
 
-    # Удаляем webhook (если был)
+    # Антидребезг: подавляем двойные клики и спам-сообщения
+    dp.message.middleware(ThrottlingMiddleware(0.6))
+    dp.callback_query.middleware(ThrottlingMiddleware(0.6))
+
+    # Снимаем webhook на всякий случай
     await _guard(bot.delete_webhook(drop_pending_updates=True), "delete_webhook")
 
-    # ── SMOKE CHECK ────────────────────────────────────────────────
+    # ── SMOKE CHECK: у каждого модуля должен быть export `router`
     smoke_modules = [
         "app.routers.entrypoints",
         "app.routers.help",
@@ -110,25 +120,25 @@ async def main() -> None:
     log.info("✅ SMOKE OK: routers exports are valid")
     # ───────────────────────────────────────────────────────────────
 
-    # Регистрируем роутеры в строгом порядке
-    dp.include_router(entrypoints.router); log.info("✅ router loaded: entrypoints")
-    dp.include_router(help.router); log.info("✅ router loaded: help")
-    dp.include_router(cmd_aliases.router); log.info("✅ router loaded: aliases")
-    dp.include_router(onboarding.router); log.info("✅ router loaded: onboarding")
-    dp.include_router(system.router); log.info("✅ router loaded: system")
-    dp.include_router(minicasting.router); log.info("✅ router loaded: minicasting")
-    dp.include_router(leader.router); log.info("✅ router loaded: leader")
-    dp.include_router(training.router); log.info("✅ router loaded: training")
-    dp.include_router(progress.router); log.info("✅ router loaded: progress")
-    dp.include_router(privacy.router); log.info("✅ router loaded: privacy")
-    dp.include_router(settings_mod.router); log.info("✅ router loaded: settings")
-    dp.include_router(extended.router); log.info("✅ router loaded: extended")
-    dp.include_router(casting.router); log.info("✅ router loaded: casting")
-    dp.include_router(apply.router); log.info("✅ router loaded: apply")
-    dp.include_router(faq.router); log.info("✅ router loaded: faq")
-    dp.include_router(devops_sync.router); log.info("✅ router loaded: devops_sync")
-    dp.include_router(panic.router); log.info("✅ router loaded: panic (near last)")
-    dp.include_router(diag.router); log.info("✅ router loaded: diag (last)")
+    # Порядок важен: panic и diag — в самом конце
+    dp.include_router(entrypoints.router);   log.info("✅ router loaded: entrypoints")
+    dp.include_router(help.router);          log.info("✅ router loaded: help")
+    dp.include_router(cmd_aliases.router);   log.info("✅ router loaded: aliases")
+    dp.include_router(onboarding.router);    log.info("✅ router loaded: onboarding")
+    dp.include_router(system.router);        log.info("✅ router loaded: system")
+    dp.include_router(minicasting.router);   log.info("✅ router loaded: minicasting")
+    dp.include_router(leader.router);        log.info("✅ router loaded: leader")
+    dp.include_router(training.router);      log.info("✅ router loaded: training")
+    dp.include_router(progress.router);      log.info("✅ router loaded: progress")
+    dp.include_router(privacy.router);       log.info("✅ router loaded: privacy")
+    dp.include_router(settings_mod.router);  log.info("✅ router loaded: settings")
+    dp.include_router(extended.router);      log.info("✅ router loaded: extended")
+    dp.include_router(casting.router);       log.info("✅ router loaded: casting")
+    dp.include_router(apply.router);         log.info("✅ router loaded: apply")
+    dp.include_router(faq.router);           log.info("✅ router loaded: faq")
+    dp.include_router(devops_sync.router);   log.info("✅ router loaded: devops_sync")
+    dp.include_router(panic.router);         log.info("✅ router loaded: panic (near last)")
+    dp.include_router(diag.router);          log.info("✅ router loaded: diag (last)")
 
     await _guard(_set_commands(bot), "set_my_commands")
 
