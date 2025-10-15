@@ -8,3 +8,4 @@ alembic>=1.13.2
 aiosqlite>=0.20.0
 aiosqlite>=0.19
 PyGithub>=2.3.0
+sentry-sdk
