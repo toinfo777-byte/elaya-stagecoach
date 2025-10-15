@@ -1,14 +1,16 @@
-# .github/workflows/build-and-push-ghcr.yml
 name: Build & Push Docker image to GHCR
 
 on:
   workflow_dispatch:
   push:
-    branches: [develop, main, elaya-core-202510]
+    branches:
+      - develop
+      - main
+      - elaya-core-202510
     paths:
-      - Dockerfile
-      - app/**
-      - .github/workflows/build-and-push-ghcr.yml
+      - 'Dockerfile'
+      - 'app/**'
+      - '.github/workflows/build-and-push-ghcr.yml'
 
 permissions:
   contents: read
@@ -28,21 +30,21 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Log in to GHCR
+      - name: Log in to GitHub Container Registry
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Compute metadata
+      - name: Compute SHORT_SHA and BRANCH_NAME
         run: |
-          echo "SHORT_SHA=${GITHUB_SHA:0:7}" >> "$GITHUB_ENV"
+          echo "SHORT_SHA=${GITHUB_SHA::7}" >> "$GITHUB_ENV"
           echo "BRANCH_NAME=${GITHUB_REF_NAME}" >> "$GITHUB_ENV"
           echo "Built $GITHUB_SHA on $GITHUB_REF_NAME"
 
-      - name: Build & Push
-        uses: docker/build-push-action@v5
+      - name: Build & Push (branch + short-sha)
+        uses: docker/build-push-action@v6
         with:
           context: .
           push: true
@@ -52,7 +54,10 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      - name: Trigger Render deploy (optional)
-        if: ${{ secrets.RENDER_DEPLOY_HOOK }}
+      # Триггер деплоя на Render (только если задан секрет)
+      - name: Trigger Render deploy (develop)
+        env:
+          RENDER_DEPLOY_HOOK: ${{ secrets.RENDER_DEPLOY_HOOK }}
+        if: ${{ env.RENDER_DEPLOY_HOOK != '' }}
         run: |
-          curl -fsSL -X POST "${{ secrets.RENDER_DEPLOY_HOOK }}"
+          curl -fsSL -X POST "$RENDER_DEPLOY_HOOK"
