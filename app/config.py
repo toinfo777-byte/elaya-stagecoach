@@ -1,56 +1,22 @@
 from __future__ import annotations
+import os
+from typing import Optional
 
-import json
-from typing import List, Optional
-
-from pydantic import Field, computed_field
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic import Field
+from pydantic_settings import BaseSettings
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(
-        env_file=".env",
-        env_ignore_empty=True,
-        extra="ignore",
-        case_sensitive=False,
-    )
-
-    # базовые
     bot_token: str = Field(..., alias="BOT_TOKEN")
-    db_url: str = Field("sqlite:////data/db.sqlite", alias="DB_URL")
-    env: str = Field("prod", alias="ENV")
+    log_level: str = Field("INFO", alias="LOG_LEVEL")
+    sentry_dsn: Optional[str] = Field(None, alias="SENTRY_DSN")
+    healthchecks_url: Optional[str] = Field(None, alias="HEALTHCHECKS_URL")
+    healthchecks_interval: int = Field(300, alias="HEALTHCHECKS_INTERVAL")
+    healthchecks_startup_grace: int = Field(10, alias="HEALTHCHECKS_STARTUP_GRACE")
 
-    # админы/уведомления
-    admin_alert_chat_id: Optional[int] = Field(None, alias="ADMIN_ALERT_CHAT_ID")
-    admin_ids_raw: Optional[str] = Field("", alias="ADMIN_IDS")  # строка из ENV
-
-    # опциональные
-    channel_username: Optional[str] = Field(None, alias="CHANNEL_USERNAME")
-    coach_rate_sec: int = Field(2, alias="COACH_RATE_SEC")
-    coach_ttl_min: int = Field(30, alias="COACH_TTL_MIN")
-
-    @computed_field
-    @property
-    def admin_ids(self) -> List[int]:
-        s = (self.admin_ids_raw or "").strip()
-        if not s:
-            return []
-        # JSON: "[1,2,3]"
-        if s.startswith("[") and s.endswith("]"):
-            try:
-                return [int(x) for x in json.loads(s)]
-            except Exception:
-                pass
-        # "1,2,3" / "1 2 3" / "1;2;3"
-        parts = [p for p in s.replace(";", ",").replace(" ", ",").split(",") if p]
-        if parts:
-            return [int(p) for p in parts]
-        # одно значение
-        try:
-            return [int(s)]
-        except Exception:
-            return []
+    class Config:
+        env_file = ".env"
+        env_file_encoding = "utf-8"
 
 
 settings = Settings()
-__all__ = ["Settings", "settings"]
