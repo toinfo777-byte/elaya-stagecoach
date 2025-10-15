@@ -1,6 +1,7 @@
 from __future__ import annotations
 import asyncio
 import logging
+import os  # ← добавлено
 
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
@@ -29,26 +30,25 @@ from app.routers import (
     faq,
     devops_sync,
     diag,
-    panic,  # новый роутер
+    panic,
 )
 
-# ======== SENTRY INTEGRATION =========
-try:
-    if settings.sentry_dsn:
-        import sentry_sdk
-        sentry_sdk.init(
-            dsn=settings.sentry_dsn,
-            enable_tracing=False,
-            traces_sample_rate=0.0,
-            profiles_sample_rate=0.0,
-            send_default_pii=False,
-        )
-        print("SENTRY: initialized ✅")
-    else:
-        print("SENTRY: DSN not provided ⚠️")
-except Exception as e:
-    print(f"SENTRY: init failed ❌ {e}")
-# ====================================
+# ======== OBSERVABILITY / SENTRY (в самом верху, до старта бота) =========
+from app.observability.sentry import init_sentry, capture_test_message
+
+# release удобно прокидывать через GH Actions как SHORT_SHA (ты уже пишешь sha-тег)
+RELEASE = os.getenv("SHORT_SHA") or "local"
+
+init_sentry(
+    dsn=os.getenv("SENTRY_DSN"),
+    env=os.getenv("ENV", "prod"),
+    release=RELEASE,
+)
+
+# В dev можно форснуть тестовое событие, чтобы Sentry увидел «первый эвент»
+if os.getenv("ENV", "prod") != "prod":
+    capture_test_message()
+# ========================================================================
 
 
 async def main() -> None:
@@ -79,7 +79,7 @@ async def main() -> None:
     dp.include_router(apply.router)
     dp.include_router(faq.router)
     dp.include_router(devops_sync.router)
-    dp.include_router(panic.router)  # добавляем паник
+    dp.include_router(panic.router)
     dp.include_router(diag.router)
 
     logging.info(f"=== BUILD {BUILD_MARK} ===")
