@@ -1,11 +1,11 @@
 # app/main.py
 from __future__ import annotations
-
 import asyncio
 import hashlib
-import importlib
 import logging
+import importlib
 import sys
+import os
 
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
@@ -16,9 +16,8 @@ from aiogram.types import BotCommand
 from app.config import settings
 from app.build import BUILD_MARK
 from app.storage.repo import ensure_schema
-from app.middlewares.throttling import ThrottlingMiddleware  # антидребезг
 
-# Импортируем только router из стабильных модулей
+# Импортируем только router из всех стабильных модулей
 from app.routers import (
     entrypoints,
     help,
@@ -38,13 +37,34 @@ from app.routers import (
     devops_sync,
     panic,
     diag,
+    healthcheck,  # ⬅️ новый роутер
 )
 
+# фоновый heartbeat
+from app.health import start as health_start
+
+# лог-левел из настроек (если есть), иначе INFO
+level_name = getattr(settings, "log_level", "INFO")
 logging.basicConfig(
-    level=logging.INFO,
+    level=getattr(logging, str(level_name).upper(), logging.INFO),
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
 )
 log = logging.getLogger("main")
+
+# Опционально: Sentry (если есть SENTRY_DSN в settings или ENV)
+try:
+    sentry_dsn = getattr(settings, "sentry_dsn", None) or os.getenv("SENTRY_DSN")
+    if sentry_dsn:
+        import sentry_sdk
+        from sentry_sdk.integrations.logging import LoggingIntegration
+        sentry_sdk.init(
+            dsn=sentry_dsn,
+            integrations=[LoggingIntegration(level=logging.WARNING, event_level=logging.ERROR)],
+            traces_sample_rate=0.0,
+        )
+        log.info("Sentry enabled")
+except Exception as e:
+    log.warning("Sentry init failed: %r", e)
 
 
 async def _set_commands(bot: Bot) -> None:
@@ -56,6 +76,7 @@ async def _set_commands(bot: Bot) -> None:
             BotCommand(command="progress", description="Мой прогресс"),
             BotCommand(command="help", description="Помощь / FAQ"),
             BotCommand(command="ping", description="Проверка связи"),
+            BotCommand(command="health", description="Диагностика / аптайм"),
         ]
     )
 
@@ -64,7 +85,6 @@ async def _guard(coro, what: str):
     try:
         return await coro
     except TelegramBadRequest as e:
-        # редкий кейс от Bot API на удаление вебхука/команд
         if "Logged out" in str(e):
             log.warning("%s: Bot API 'Logged out' — игнорируем", what)
             return
@@ -76,20 +96,13 @@ async def main() -> None:
     ensure_schema()
     log.info("DB schema ensured")
 
-    bot = Bot(
-        token=settings.bot_token,
-        default=DefaultBotProperties(parse_mode=ParseMode.HTML),
-    )
+    bot = Bot(token=settings.bot_token, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
     dp = Dispatcher()
 
-    # Антидребезг: подавляем двойные клики и спам-сообщения
-    dp.message.middleware(ThrottlingMiddleware(0.6))
-    dp.callback_query.middleware(ThrottlingMiddleware(0.6))
-
-    # Снимаем webhook на всякий случай
+    # Удаляем webhook (если был)
     await _guard(bot.delete_webhook(drop_pending_updates=True), "delete_webhook")
 
-    # ── SMOKE CHECK: у каждого модуля должен быть export `router`
+    # ── SMOKE CHECK ────────────────────────────────────────────────
     smoke_modules = [
         "app.routers.entrypoints",
         "app.routers.help",
@@ -109,6 +122,7 @@ async def main() -> None:
         "app.routers.devops_sync",
         "app.routers.panic",
         "app.routers.diag",
+        "app.routers.healthcheck",  # ⬅️ добавили в smoke
     ]
     for modname in smoke_modules:
         try:
@@ -120,27 +134,32 @@ async def main() -> None:
     log.info("✅ SMOKE OK: routers exports are valid")
     # ───────────────────────────────────────────────────────────────
 
-    # Порядок важен: panic и diag — в самом конце
-    dp.include_router(entrypoints.router);   log.info("✅ router loaded: entrypoints")
-    dp.include_router(help.router);          log.info("✅ router loaded: help")
-    dp.include_router(cmd_aliases.router);   log.info("✅ router loaded: aliases")
-    dp.include_router(onboarding.router);    log.info("✅ router loaded: onboarding")
-    dp.include_router(system.router);        log.info("✅ router loaded: system")
-    dp.include_router(minicasting.router);   log.info("✅ router loaded: minicasting")
-    dp.include_router(leader.router);        log.info("✅ router loaded: leader")
-    dp.include_router(training.router);      log.info("✅ router loaded: training")
-    dp.include_router(progress.router);      log.info("✅ router loaded: progress")
-    dp.include_router(privacy.router);       log.info("✅ router loaded: privacy")
-    dp.include_router(settings_mod.router);  log.info("✅ router loaded: settings")
-    dp.include_router(extended.router);      log.info("✅ router loaded: extended")
-    dp.include_router(casting.router);       log.info("✅ router loaded: casting")
-    dp.include_router(apply.router);         log.info("✅ router loaded: apply")
-    dp.include_router(faq.router);           log.info("✅ router loaded: faq")
-    dp.include_router(devops_sync.router);   log.info("✅ router loaded: devops_sync")
-    dp.include_router(panic.router);         log.info("✅ router loaded: panic (near last)")
-    dp.include_router(diag.router);          log.info("✅ router loaded: diag (last)")
+    # Регистрируем роутеры в строгом порядке
+    dp.include_router(entrypoints.router); log.info("✅ router loaded: entrypoints")
+    dp.include_router(help.router); log.info("✅ router loaded: help")
+    dp.include_router(cmd_aliases.router); log.info("✅ router loaded: aliases")
+    dp.include_router(onboarding.router); log.info("✅ router loaded: onboarding")
+    dp.include_router(system.router); log.info("✅ router loaded: system")
+    dp.include_router(healthcheck.router); log.info("✅ router loaded: healthcheck")  # ⬅️ новый
+    dp.include_router(minicasting.router); log.info("✅ router loaded: minicasting")
+    dp.include_router(leader.router); log.info("✅ router loaded: leader")
+    dp.include_router(training.router); log.info("✅ router loaded: training")
+    dp.include_router(progress.router); log.info("✅ router loaded: progress")
+    dp.include_router(privacy.router); log.info("✅ router loaded: privacy")
+    dp.include_router(settings_mod.router); log.info("✅ router loaded: settings")
+    dp.include_router(extended.router); log.info("✅ router loaded: extended")
+    dp.include_router(casting.router); log.info("✅ router loaded: casting")
+    dp.include_router(apply.router); log.info("✅ router loaded: apply")
+    dp.include_router(faq.router); log.info("✅ router loaded: faq")
+    dp.include_router(devops_sync.router); log.info("✅ router loaded: devops_sync")
+    dp.include_router(panic.router); log.info("✅ router loaded: panic (near last)")
+    dp.include_router(diag.router); log.info("✅ router loaded: diag (last)")
 
     await _guard(_set_commands(bot), "set_my_commands")
+
+    # стартуем фоновый heartbeat (если HEALTHCHECKS_URL задан в ENV)
+    loop = asyncio.get_running_loop()
+    health_start(loop)
 
     token_hash = hashlib.md5(settings.bot_token.encode()).hexdigest()[:8]
     me = await bot.get_me()
