@@ -1,35 +1,37 @@
 from aiogram import Router, F
 from aiogram.types import Message
 import sentry_sdk
+import os
 
 router = Router(name="diag")
 
-# ... твои /ping, /sentry_ping, /boom остаются ...
+ADMINS = {  # TG user_id админов
+    538431234,  # пример
+}
 
-@router.message(F.text.in_({"/sentry_status", "sentry_status"}))
-async def cmd_sentry_status(msg: Message):
-    hub = sentry_sdk.Hub.current
-    client = getattr(hub, "client", None)
-    if not client:
-        await msg.answer("⚠️ Sentry: клиент не инициализирован")
+@router.message(F.text.in_({"/ping", "ping"}))
+async def cmd_ping(msg: Message):
+    await msg.answer("pong 🟢")
+
+@router.message(F.text.in_({"/health", "health"}))
+async def cmd_health(msg: Message):
+    await msg.answer("✅ Bot is alive and running!")
+
+@router.message(F.text.in_({"/sentry_ping", "sentry_ping"}))
+async def cmd_sentry_ping(msg: Message):
+    # богаче контекст: кто/где, сборка, окружение
+    with sentry_sdk.push_scope() as scope:
+        scope.set_user({"id": msg.from_user.id, "username": msg.from_user.username})
+        scope.set_context("chat", {"id": msg.chat.id, "type": msg.chat.type})
+        scope.set_tag("build", os.getenv("SHORT_SHA") or "local")
+        scope.set_tag("env", os.getenv("ENV", "prod"))
+        sentry_sdk.capture_message("✅ sentry: hello from elaya-stagecoach")
+    await msg.answer("✅ Отправил тест-сообщение в Sentry")
+
+@router.message(F.text.in_({"/boom", "boom"}))
+async def cmd_boom(msg: Message):
+    if msg.from_user.id not in ADMINS:
+        await msg.answer("⛔ Команда доступна только администраторам.")
         return
-    opts = getattr(client, "options", {}) or {}
-    dsn = str(opts.get("dsn") or "")
-    env = opts.get("environment")
-    rel = opts.get("release")
-    await msg.answer(
-        "🧭 Sentry статус:\n"
-        f"• initialized: ✅\n"
-        f"• env: {env}\n"
-        f"• release: {rel}\n"
-        f"• dsn set: {'yes' if dsn else 'no'}"
-    )
-
-@router.message(F.text.in_({"/sentry_force", "sentry_force"}))
-async def cmd_sentry_force(msg: Message):
-    try:
-        sentry_sdk.capture_message("🧪 forced test message (manual)")
-        sentry_sdk.flush(timeout=5.0)  # дождаться отправки
-        await msg.answer("✅ Отправил и флэшнул событие в Sentry")
-    except Exception as e:
-        await msg.answer(f"⚠️ Ошибка при отправке/flush: {e}")
+    await msg.answer("💣 Boom! Проверяем Sentry…")
+    _ = 1 / 0  # намеренный крэш
