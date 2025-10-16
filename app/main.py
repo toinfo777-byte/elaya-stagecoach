@@ -34,7 +34,7 @@ async def main() -> None:
     logging.basicConfig(level=getattr(logging, level))
     logging.info(f"Logging level set to: {level}")
 
-    await ensure_schema()
+    ensure_schema()
     logging.info("✅ Schema ensured")
 
     bot = Bot(
