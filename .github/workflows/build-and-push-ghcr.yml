@@ -66,9 +66,8 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      # optional trigger Render redeploy
       - name: Trigger Render deploy
         if: ${{ github.secrets.RENDER_DEPLOY_HOOK != '' }}
         run: |
-          echo "Triggering Render redeploy..."
-          curl -fsSL -X POST "${{ github.secrets.RENDER_DEPLOY_HOOK }}"
+          echo "🔁 Triggering Render redeploy..."
+          curl -fsSL -X POST "${{ github.secrets.RENDER_DEPLOY_HOOK }}" || echo "⚠️ Render hook failed or not set"
