@@ -3,6 +3,7 @@ import asyncio
 import logging
 import os
 import importlib
+import inspect
 
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
@@ -28,21 +29,16 @@ if os.getenv("ENV", "prod") != "prod":
 
 
 def _parse_log_level(value) -> int:
-    """
-    Переводит любые варианты значения в корректный уровень для logging.
-    Допускает: "INFO", "warning", 20, а также кривые строки вида "INFO / WARNING / DEBUG".
-    """
+    """Безопасно парсит уровень логирования."""
     if isinstance(value, int):
         return value
     if value is None:
         return logging.INFO
 
     s = str(value).strip().upper()
-    # если пришло "INFO / WARNING / DEBUG" или подобное — берём первый валидный токен
     for token in s.replace("/", " ").replace(",", " ").split():
         if token in logging._nameToLevel:
             return logging._nameToLevel[token]
-    # если токены не подошли — пробуем целиком
     return logging._nameToLevel.get(s, logging.INFO)
 
 
@@ -63,24 +59,30 @@ def include_router_if_exists(dp: Dispatcher, module_name: str, exported_attr: st
 
 
 async def main() -> None:
-    # --- Логи: парсим уровень безопасно ---
+    # --- Настройка логов ---
     log_level = _parse_log_level(getattr(settings, "log_level", None))
     logging.basicConfig(level=log_level)
     logging.info(f"Logging level set to: {logging.getLevelName(log_level)}")
 
-    await ensure_schema()
+    # --- Инициализация схемы ---
+    if inspect.iscoroutinefunction(ensure_schema):
+        await ensure_schema()
+    else:
+        ensure_schema()
+    logging.info("✅ Schema ensured")
 
+    # --- Настройка бота ---
     bot = Bot(
         token=settings.bot_token,
         default=DefaultBotProperties(parse_mode=ParseMode.HTML),
     )
     dp = Dispatcher()
 
-    # Подключаем роутеры (порядок сохранён). Любой отсутствующий — не валит процесс.
+    # --- Подключаем роутеры ---
     for name in [
         "entrypoints",
         "help",
-        "aliases",        # если нет файла/экспорта — будет предупреждение
+        "aliases",
         "onboarding",
         "system",
         "minicasting",
