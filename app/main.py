@@ -1,7 +1,7 @@
 from __future__ import annotations
 import asyncio
 import logging
-import os  # ← добавлено
+import os
 
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
@@ -38,6 +38,9 @@ from app.observability.sentry import init_sentry, capture_test_message
 
 # release удобно прокидывать через GH Actions как SHORT_SHA (ты уже пишешь sha-тег)
 RELEASE = os.getenv("SHORT_SHA") or "local"
+
+# --- отладочная строка, чтобы убедиться, что блок реально выполняется ---
+print("=== INIT SENTRY BLOCK EXECUTION ===")
 
 init_sentry(
     dsn=os.getenv("SENTRY_DSN"),
