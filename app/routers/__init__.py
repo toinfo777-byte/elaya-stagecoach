@@ -1,11 +1,10 @@
 # app/routers/__init__.py
-# Явно импортируем все подмодули и выставляем их в __all__,
-# чтобы `from app.routers import <name>` всегда работало.
+# Централизованный экспорт всех роутеров.
+# Если какого-то файла нет — ничего страшного, main.py подключает их безопасно.
 
 from . import (
     entrypoints,
     help,
-    aliases,
     onboarding,
     system,
     minicasting,
@@ -13,7 +12,7 @@ from . import (
     training,
     progress,
     privacy,
-    settings as settings_router,
+    settings,
     extended,
     casting,
     apply,
@@ -26,7 +25,6 @@ from . import (
 __all__ = [
     "entrypoints",
     "help",
-    "aliases",
     "onboarding",
     "system",
     "minicasting",
@@ -34,7 +32,7 @@ __all__ = [
     "training",
     "progress",
     "privacy",
-    "settings_router",
+    "settings",
     "extended",
     "casting",
     "apply",
@@ -43,4 +41,3 @@ __all__ = [
     "diag",
     "panic",
 ]
-
