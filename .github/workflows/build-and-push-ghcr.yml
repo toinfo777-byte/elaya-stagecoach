@@ -37,27 +37,40 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Compute SHORT_SHA and BRANCH_NAME
+      - name: Compute tags
+        id: meta
+        shell: bash
         run: |
-          echo "SHORT_SHA=${GITHUB_SHA::7}" >> "$GITHUB_ENV"
-          echo "BRANCH_NAME=${GITHUB_REF_NAME}" >> "$GITHUB_ENV"
-          echo "Built $GITHUB_SHA on $GITHUB_REF_NAME"
+          SHORT_SHA="${GITHUB_SHA::7}"
+          BRANCH="${GITHUB_REF_NAME}"
 
-      - name: Build & Push (branch + short-sha)
+          # Базовые теги: по ветке и по короткому SHA
+          echo "${{ env.IMAGE_NAME }}:${BRANCH}"            >> tags.txt
+          echo "${{ env.IMAGE_NAME }}:sha-${SHORT_SHA}"     >> tags.txt
+
+          # Если это dev-ветка — дополнительно тегируем :develop
+          if [[ "${BRANCH}" == "develop" || "${BRANCH}" == "elaya-core-202510" ]]; then
+            echo "${{ env.IMAGE_NAME }}:develop"           >> tags.txt
+          fi
+
+          echo "TAGS<<EOF" >> $GITHUB_OUTPUT
+          cat tags.txt      >> $GITHUB_OUTPUT
+          echo "EOF"        >> $GITHUB_OUTPUT
+
+          echo "Computed tags:"
+          cat tags.txt
+
+      - name: Build & Push
         uses: docker/build-push-action@v6
         with:
           context: .
           push: true
-          tags: |
-            ${{ env.IMAGE_NAME }}:${{ env.BRANCH_NAME }}
-            ${{ env.IMAGE_NAME }}:sha-${{ env.SHORT_SHA }}
+          tags: ${{ steps.meta.outputs.TAGS }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      # Триггер деплоя на Render (только если задан секрет)
-      - name: Trigger Render deploy (develop)
-        env:
-          RENDER_DEPLOY_HOOK: ${{ secrets.RENDER_DEPLOY_HOOK }}
-        if: ${{ env.RENDER_DEPLOY_HOOK != '' }}
+      # (опционально) триггер деплоя Render, если задан секрет вебхука
+      - name: Trigger Render deploy
+        if: ${{ secrets.RENDER_DEPLOY_HOOK != '' }}
         run: |
-          curl -fsSL -X POST "$RENDER_DEPLOY_HOOK"
+          curl -fsSL -X POST "${{ secrets.RENDER_DEPLOY_HOOK }}"
