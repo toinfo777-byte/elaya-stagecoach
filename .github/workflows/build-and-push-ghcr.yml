@@ -39,23 +39,20 @@ jobs:
 
       - name: Compute tags
         id: meta
-        shell: bash
         run: |
           SHORT_SHA="${GITHUB_SHA::7}"
           BRANCH="${GITHUB_REF_NAME}"
 
-          # Базовые теги: по ветке и по короткому SHA
-          echo "${{ env.IMAGE_NAME }}:${BRANCH}"            >> tags.txt
-          echo "${{ env.IMAGE_NAME }}:sha-${SHORT_SHA}"     >> tags.txt
+          echo "${{ env.IMAGE_NAME }}:${BRANCH}"         >> tags.txt
+          echo "${{ env.IMAGE_NAME }}:sha-${SHORT_SHA}"  >> tags.txt
 
-          # Если это dev-ветка — дополнительно тегируем :develop
           if [[ "${BRANCH}" == "develop" || "${BRANCH}" == "elaya-core-202510" ]]; then
-            echo "${{ env.IMAGE_NAME }}:develop"           >> tags.txt
+            echo "${{ env.IMAGE_NAME }}:develop"        >> tags.txt
           fi
 
           echo "TAGS<<EOF" >> $GITHUB_OUTPUT
-          cat tags.txt      >> $GITHUB_OUTPUT
-          echo "EOF"        >> $GITHUB_OUTPUT
+          cat tags.txt >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
 
           echo "Computed tags:"
           cat tags.txt
@@ -69,8 +66,9 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      # (опционально) триггер деплоя Render, если задан секрет вебхука
+      # optional trigger Render redeploy
       - name: Trigger Render deploy
-        if: ${{ secrets.RENDER_DEPLOY_HOOK != '' }}
+        if: ${{ github.secrets.RENDER_DEPLOY_HOOK != '' }}
         run: |
-          curl -fsSL -X POST "${{ secrets.RENDER_DEPLOY_HOOK }}"
+          echo "Triggering Render redeploy..."
+          curl -fsSL -X POST "${{ github.secrets.RENDER_DEPLOY_HOOK }}"
