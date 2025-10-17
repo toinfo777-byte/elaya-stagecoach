@@ -1,47 +1,48 @@
 from __future__ import annotations
-
 import asyncio
 import logging
 import os
+from typing import Optional
 
 import aiohttp
 
+from .diag_status import mark_cronitor_ok
+
+HEALTH_URL_ENV = "HEALTHCHECKS_URL"
+INTERVAL_ENV = "HEALTHCHECKS_INTERVAL"
+STARTUP_GRACE_ENV = "HEALTHCHECKS_STARTUP_GRACE"
+
+async def _post_ping(session: aiohttp.ClientSession, url: str) -> None:
+    async with session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+        if resp.status < 400:
+            logging.info("Cronitor heartbeat OK (%s)", resp.status)
+            mark_cronitor_ok()
+        else:
+            logging.warning("Cronitor heartbeat BAD (%s)", resp.status)
 
 async def _heartbeat_loop(url: str, interval: int, startup_grace: int) -> None:
-    # даём сервису стартануть
-    await asyncio.sleep(startup_grace)
-
+    await asyncio.sleep(max(0, startup_grace))
     async with aiohttp.ClientSession() as session:
         while True:
             try:
-                async with session.get(url, timeout=10) as resp:
-                    logging.info("Cronitor heartbeat -> %s (status=%s)", url, resp.status)
+                await _post_ping(session, url)
             except Exception as e:
-                logging.warning("Cronitor heartbeat failed: %s", e)
-            await asyncio.sleep(interval)
+                logging.warning("Cronitor ping error: %s", e)
+            await asyncio.sleep(max(5, interval))
 
-
-def start_healthcheck() -> asyncio.Task | None:
+def start_healthcheck() -> Optional[asyncio.Task]:
     """
-    Запускает heartbeat-таску ТОЛЬКО если уже есть running loop.
-    Возвращает Task или None (если URL пустой или цикла ещё нет).
+    Стартуем только когда уже есть running event loop (вызывается из main()).
+    Возвращает Task или None, если URL не задан.
     """
-    url = (os.getenv("HEALTHCHECKS_URL") or "").strip()
+    url = os.getenv(HEALTH_URL_ENV, "").strip()
     if not url:
-        logging.info("Cronitor: URL пустой — пульс отключён.")
+        logging.info("Cronitor URL is empty — skip heartbeat.")
         return None
 
-    interval = int(os.getenv("HEALTHCHECKS_INTERVAL", "300") or 300)
-    startup_grace = int(os.getenv("HEALTHCHECKS_STARTUP_GRACE", "15") or 15)
-
-    try:
-        loop = asyncio.get_running_loop()
-    except RuntimeError:
-        # вызывать только из running loop — поэтому спокойно пропускаем
-        logging.debug("Cronitor: нет running loop — heartbeat пока не запускаем.")
-        return None
-
-    task = loop.create_task(
+    interval = int(os.getenv(INTERVAL_ENV, "300"))
+    startup_grace = int(os.getenv(STARTUP_GRACE_ENV, "5"))
+    task = asyncio.create_task(
         _heartbeat_loop(url, interval, startup_grace),
         name="cronitor-heartbeat",
     )
