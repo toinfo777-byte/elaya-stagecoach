@@ -9,7 +9,8 @@ from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 
-from app.observability import init_observability
+from app.observability import setup_observability
+from app.observability.health import start_healthcheck
 
 # ---------------------------------------------------------------------------
 # Константы окружения
@@ -26,7 +27,6 @@ try:
     from app.storage import ensure_schema as _ensure_schema  # type: ignore
 except Exception:
     _ensure_schema = None  # type: ignore
-
 
 def ensure_schema() -> None:
     if _ensure_schema is None:
@@ -102,10 +102,15 @@ async def main() -> None:
         "faq",
         "devops_sync",
         "panic",
-        "diag",     # содержит /ping, /health, /sentry_ping, /boom, /diag
+        "diag",
     ]
     for name in routers:
         safe_include(f"app.routers.{name}", name)
+
+    # 4) Запускаем heartbeat УЖЕ внутри running loop
+    task = start_healthcheck()
+    if task:
+        logging.info("Observability: heartbeat task started (%s)", task.get_name())
 
     logging.info(f"=== BUILD {RELEASE or 'local'} ===")
     logging.info("🚀 Start polling…")
@@ -114,8 +119,8 @@ async def main() -> None:
 
 if __name__ == "__main__":
     print("=== INIT SENTRY BLOCK EXECUTION ===")
-    # Централизованная инициализация наблюдаемости
-    # Тестовое сообщение в Sentry отправляем для всех сред кроме prod
-    init_observability(env=ENV, release=RELEASE, send_test=(ENV != "prod"))
+    # Синхронная настройка Sentry (можно вызывать до цикла)
+    setup_observability(env=ENV, release=RELEASE, send_test=(ENV != "prod"))
 
+    # А вот всё асинхронное — уже внутри цикла:
     asyncio.run(main())
