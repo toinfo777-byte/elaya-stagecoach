@@ -12,6 +12,7 @@ from aiogram.enums import ParseMode
 
 from app.sentry import init_sentry, capture_test_message
 
+
 # ---------------------------------------------------------------------------
 # Константы окружения
 # ---------------------------------------------------------------------------
@@ -19,12 +20,13 @@ from app.sentry import init_sentry, capture_test_message
 RELEASE = os.getenv("SHORT_SHA", "local").strip() or "local"
 ENV = os.getenv("ENV", "develop").strip() or "develop"
 
+
 # ---------------------------------------------------------------------------
-# Обёртка ensure_schema: не падаем, если модуля нет
+# ensure_schema: безопасная обёртка (синхронная)
 # ---------------------------------------------------------------------------
 
 try:
-    # Если у тебя функция живёт в другом месте — поправь импорт здесь
+    # Если у тебя ensure_schema в другом месте — поправь импорт здесь
     from app.storage import ensure_schema as _ensure_schema  # type: ignore
 except Exception:
     _ensure_schema = None  # type: ignore
@@ -43,20 +45,21 @@ def ensure_schema() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Настройка логирования
+# Логирование (единый формат)
 # ---------------------------------------------------------------------------
 
 def _setup_logging_from_env() -> None:
     raw = (os.getenv("LOG_LEVEL") or "INFO").strip().upper()
-    level = {
-        "INFO": "INFO",
-        "DEBUG": "DEBUG",
-        "WARNING": "WARNING",
-        "ERROR": "ERROR",
-    }.get(raw, "INFO")
+    level_name = {"INFO": "INFO", "DEBUG": "DEBUG", "WARNING": "WARNING", "ERROR": "ERROR"}.get(raw, "INFO")
+    level = getattr(logging, level_name, logging.INFO)
 
-    logging.basicConfig(level=getattr(logging, level))
-    logging.info(f"Logging level set to: {level}")
+    # Базовая настройка
+    logging.basicConfig(
+        level=level,
+        format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
+    )
+    logging.getLogger("aiogram").setLevel(level)  # чтобы не шумел или шумел согласованно
+    logging.info(f"Logging level set to: {level_name}")
 
 
 # ---------------------------------------------------------------------------
@@ -70,7 +73,6 @@ async def main() -> None:
     ensure_schema()
 
     # 2) Бот и диспетчер
-    #    Ожидается, что токен лежит в переменной окружения TELEGRAM_TOKEN или BOT_TOKEN.
     token = os.getenv("TELEGRAM_TOKEN") or os.getenv("BOT_TOKEN")
     if not token:
         raise RuntimeError("Bot token is not set (env var TELEGRAM_TOKEN or BOT_TOKEN)")
@@ -108,13 +110,12 @@ async def main() -> None:
         "faq",
         "devops_sync",
         "panic",
-        "diag",
+        "diag",          # наш новый диагностический роутер
     ]
-
     for name in routers:
         safe_include(f"app.routers.{name}", name)
 
-    logging.info(f"=== BUILD {RELEASE or 'local'} ===")
+    logging.info(f"=== BUILD {RELEASE or 'local'} | ENV {ENV} ===")
     logging.info("🚀 Start polling…")
     await dp.start_polling(bot)
 
