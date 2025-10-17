@@ -1,29 +1,32 @@
+# app/observability/sentry.py
 from __future__ import annotations
-import os
 import logging
+import os
+from typing import Optional
+
 import sentry_sdk
 
-from .diag_status import mark_sentry_ok
+SENTRY_OK: bool = False  # публичный флажок для /diag
 
-def init_sentry(env: str, release: str) -> bool:
-    dsn = os.getenv("SENTRY_DSN", "").strip()
+
+def setup_sentry(*, dsn: str, env: str, release: str) -> bool:
+    global SENTRY_OK
     if not dsn:
-        logging.info("Sentry DSN is empty — skip init.")
+        SENTRY_OK = False
         return False
 
     sentry_sdk.init(
         dsn=dsn,
         environment=env,
-        release=release,
-        traces_sample_rate=0.0,  # без performance на этом этапе
-        send_default_pii=False,
+        release=release or "local",
+        traces_sample_rate=float(os.getenv("SENTRY_TRACES", "0.0") or 0.0),
     )
-    logging.info("Sentry initialized for env=%s, release=%s", env, release)
+    SENTRY_OK = True
     return True
 
-def capture_test_message() -> None:
+
+def capture_test_message(msg: str = "Sentry test message from Elaya bot") -> None:
     try:
-        sentry_sdk.capture_message("✅ Sentry test message from Elaya bot")
-        mark_sentry_ok()
+        sentry_sdk.capture_message(msg)
     except Exception as e:
-        logging.warning("Sentry test capture failed: %s", e)
+        logging.warning("Sentry test message failed: %s", e)
