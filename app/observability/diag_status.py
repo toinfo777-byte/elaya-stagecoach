@@ -1,29 +1,17 @@
+# app/observability/diag_status.py
 from __future__ import annotations
-from dataclasses import dataclass
-from time import time
+import os
+from .sentry import SENTRY_OK
+from .health import CRONITOR_OK, LAST_PING_AT
 
-@dataclass
-class ObserveState:
-    sentry_ok: bool = False
-    cronitor_ok: bool = False
-    last_cronitor_ts: float | None = None
 
-STATE = ObserveState()
-
-def mark_sentry_ok() -> None:
-    STATE.sentry_ok = True
-
-def mark_cronitor_ok() -> None:
-    STATE.cronitor_ok = True
-    STATE.last_cronitor_ts = time()
-
-def get_observe_status(env: str, release: str) -> dict:
+def get_observe_status() -> dict:
     return {
-        "env": env,
-        "release": release,
-        "sentry": "ok" if STATE.sentry_ok else "no_events",
-        "cronitor": "ok" if STATE.cronitor_ok else "no_pulse",
-        "render": "ok",
-        "bot": "alive",
-        "last_cronitor_ts": STATE.last_cronitor_ts,
+        "env": os.getenv("ENV", "develop"),
+        "release": os.getenv("SHORT_SHA", "local"),
+        "sentry": "ok" if SENTRY_OK else "no_events",
+        "cronitor": "ok" if CRONITOR_OK else "no_pulse",
+        "render": "ok",   # если сервис жив — мы здесь
+        "bot": "alive",   # доходит до хэндлера /diag
+        "last_heartbeat_monotonic": LAST_PING_AT,
     }
