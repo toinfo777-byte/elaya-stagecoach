@@ -1,4 +1,3 @@
-# app/main.py
 from __future__ import annotations
 
 import asyncio
@@ -10,7 +9,7 @@ from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 
-from app.sentry import init_sentry, capture_test_message
+from app.observability import init_observability
 
 # ---------------------------------------------------------------------------
 # Константы окружения
@@ -24,31 +23,25 @@ ENV = os.getenv("ENV", "develop").strip() or "develop"
 # ---------------------------------------------------------------------------
 
 try:
-    # Если у тебя функция живёт в другом месте — поправь импорт здесь
     from app.storage import ensure_schema as _ensure_schema  # type: ignore
 except Exception:
     _ensure_schema = None  # type: ignore
 
 
 def ensure_schema() -> None:
-    """
-    Гарантирует наличие схемы/миграций. Не асинхронная.
-    Отсутствие функции не считается ошибкой.
-    """
     if _ensure_schema is None:
         logging.info("ℹ️  ensure_schema: no-op (module not found)")
         return
     _ensure_schema()
     logging.info("✅ Schema ensured")
 
-
 # ---------------------------------------------------------------------------
-# Настройка логирования
+# Логирование
 # ---------------------------------------------------------------------------
 
 def _setup_logging_from_env() -> None:
     raw = (os.getenv("LOG_LEVEL") or "INFO").strip().upper()
-    level_name = {
+    level = {
         "INFO": "INFO",
         "DEBUG": "DEBUG",
         "WARNING": "WARNING",
@@ -56,11 +49,10 @@ def _setup_logging_from_env() -> None:
     }.get(raw, "INFO")
 
     logging.basicConfig(
-        level=getattr(logging, level_name),
+        level=getattr(logging, level),
         format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
     )
-    logging.info(f"Logging level set to: {level_name}")
-
+    logging.info(f"Logging level set to: {level}")
 
 # ---------------------------------------------------------------------------
 # Точка входа
@@ -83,7 +75,7 @@ async def main() -> None:
     )
     dp = Dispatcher()
 
-    # 3) Подключаем роутеры мягко: если модуля нет — просто предупреждаем
+    # 3) Роутеры
     def safe_include(module_name: str, name: str) -> None:
         try:
             module = import_module(module_name)
@@ -95,7 +87,7 @@ async def main() -> None:
     routers = [
         "entrypoints",
         "help",
-        "aliases",       # может отсутствовать — это окей
+        "aliases",
         "onboarding",
         "system",
         "minicasting",
@@ -110,17 +102,10 @@ async def main() -> None:
         "faq",
         "devops_sync",
         "panic",
-        "diag",
+        "diag",     # содержит /ping, /health, /sentry_ping, /boom, /diag
     ]
     for name in routers:
         safe_include(f"app.routers.{name}", name)
-
-    # 4) Фоновый healthcheck (Cronitor), не мешаем запуску бота
-    try:
-        from app.observability.health import start_healthcheck
-        asyncio.create_task(start_healthcheck())
-    except Exception as e:
-        logging.warning(f"⚠️ Healthcheck init skipped: {e}")
 
     logging.info(f"=== BUILD {RELEASE or 'local'} ===")
     logging.info("🚀 Start polling…")
@@ -129,10 +114,8 @@ async def main() -> None:
 
 if __name__ == "__main__":
     print("=== INIT SENTRY BLOCK EXECUTION ===")
-    sentry_ready = init_sentry(env=ENV, release=RELEASE)
-
-    # Шлём тест только вне prod и только если настроен DSN
-    if sentry_ready and ENV != "prod":
-        capture_test_message()
+    # Централизованная инициализация наблюдаемости
+    # Тестовое сообщение в Sentry отправляем для всех сред кроме prod
+    init_observability(env=ENV, release=RELEASE, send_test=(ENV != "prod"))
 
     asyncio.run(main())
