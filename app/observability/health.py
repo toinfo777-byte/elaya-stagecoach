@@ -1,49 +1,67 @@
-# app/observability/health.py
 from __future__ import annotations
 
-import os
 import asyncio
 import logging
+import os
+from contextlib import asynccontextmanager
 
 import aiohttp
 
-# URL пинга Cronitor/Healthchecks — возьмём из окружения
-CRONITOR_URL = (os.getenv("HEALTHCHECKS_URL") or "").strip()
-# Интервал между пингами (сек) — по умолчанию 300
-PING_INTERVAL = int((os.getenv("HEALTHCHECK_INTERVAL") or "300").strip() or 300)
+from .diag_status import mark_cronitor_ok
 
 
-async def _ping_once() -> None:
+@asynccontextmanager
+async def _session():
+    timeout = aiohttp.ClientTimeout(total=15)
+    async with aiohttp.ClientSession(timeout=timeout) as s:
+        yield s
+
+
+async def _beat(url: str) -> bool:
+    try:
+        async with _session() as s:
+            # Cronitor heartbeat — достаточно GET
+            async with s.get(url) as resp:
+                ok = 200 <= resp.status < 300
+                if not ok:
+                    logging.warning("Cronitor heartbeat HTTP %s", resp.status)
+                return ok
+    except Exception as e:
+        logging.warning("Cronitor heartbeat failed: %s", e)
+        return False
+
+
+async def _heartbeat_loop(url: str, interval: int, startup_grace: int) -> None:
+    if startup_grace > 0:
+        await asyncio.sleep(startup_grace)
+
+    while True:
+        ok = await _beat(url)
+        mark_cronitor_ok(ok)
+        await asyncio.sleep(max(30, interval))  # страхуемся от слишком малого интервала
+
+
+def start_healthcheck() -> asyncio.Task | None:
     """
-    Один пинг в Cronitor. Никаких исключений наружу — только логируем.
+    Стартует фоновый пульс Cronitor, если настроены переменные окружения.
+    Возвращает Task, либо None.
     """
-    if not CRONITOR_URL:
-        logging.warning("⚠️ Cronitor URL is not configured (HEALTHCHECKS_URL is empty).")
-        return
+    url = (os.getenv("HEALTHCHECKS_URL") or "").strip()
+    if not url:
+        logging.info("Cronitor: URL not set — heartbeat disabled")
+        mark_cronitor_ok(False)
+        return None
 
     try:
-        async with aiohttp.ClientSession() as session:
-            async with session.get(CRONITOR_URL, timeout=10) as resp:
-                if resp.status == 200:
-                    logging.info("💓 Cronitor heartbeat sent successfully.")
-                else:
-                    logging.warning(f"⚠️ Cronitor heartbeat failed: HTTP {resp.status}")
-    except asyncio.TimeoutError:
-        logging.warning("⚠️ Cronitor heartbeat timeout.")
-    except Exception as e:
-        logging.warning(f"⚠️ Cronitor heartbeat error: {e}")
+        interval = int(os.getenv("HEALTHCHECKS_INTERVAL", "300"))
+    except ValueError:
+        interval = 300
 
+    try:
+        startup_grace = int(os.getenv("HEALTHCHECKS_STARTUP_GRACE", "5"))
+    except ValueError:
+        startup_grace = 5
 
-async def start_healthcheck() -> None:
-    """
-    Бесконечная задача: пингуем CRONITOR_URL каждые PING_INTERVAL секунд.
-    Если URL не задан — тихо отключаемся.
-    """
-    if not CRONITOR_URL:
-        logging.info("🩶 Healthcheck disabled (HEALTHCHECKS_URL is not set).")
-        return
-
-    logging.info(f"🩺 Healthcheck started: interval={PING_INTERVAL}s")
-    while True:
-        await _ping_once()
-        await asyncio.sleep(PING_INTERVAL)
+    logging.info("Cronitor: heartbeat every %ss (startup_grace=%s)", interval, startup_grace)
+    task = asyncio.create_task(_heartbeat_loop(url, interval, startup_grace), name="cronitor-heartbeat")
+    return task
