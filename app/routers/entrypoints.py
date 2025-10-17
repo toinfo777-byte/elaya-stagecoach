@@ -1,24 +1,29 @@
 # app/routers/entrypoints.py
-from __future__ import annotations
-
-from aiogram import Router, F
-from aiogram.types import Message, CallbackQuery
-
-from app.routers.help import show_main_menu
+from aiogram import Router, types
+from aiogram.filters import CommandStart, Command
+from aiogram.fsm.context import FSMContext
 
 router = Router(name="entrypoints")
 
+@router.message(CommandStart())
+async def start(m: types.Message, state: FSMContext):
+    await show_main_menu(m)
 
-@router.message(F.text.in_({"/start", "start"}))
-async def cmd_start(msg: Message):
-    await show_main_menu(msg)
+@router.message(Command("menu"))
+async def menu(m: types.Message):
+    await show_main_menu(m)
 
+# ⬇️ ВАЖНО: этот обработчик только для НЕ-команд
+@router.message(~Command())
+async def any_text_fallback(m: types.Message):
+    await show_main_menu(m)
 
-@router.message(F.text.in_({"/menu", "menu"}))
-async def cmd_menu(msg: Message):
-    await show_main_menu(msg)
-
-
-@router.callback_query(F.data == "go:menu")
-async def go_menu(cb: CallbackQuery):
-    await show_main_menu(cb)
+async def show_main_menu(m: types.Message):
+    await m.answer(
+        "Команды и разделы: выбери нужное 🧭\n\n"
+        "🏋️ Тренировка дня — ежедневная рутина 5–15 мин.\n"
+        "📈 Мой прогресс — стрик и эпизоды за 7 дней.\n"
+        "💥 Мини-кастинг · 🛰️ Путь лидера\n"
+        "🆘 Помощь / FAQ · ⚙️ Настройки\n"
+        "📜 Политика · ⭐ Расширенная версия"
+    )
