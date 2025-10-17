@@ -1,3 +1,4 @@
+# app/main.py
 from __future__ import annotations
 
 import asyncio
@@ -9,7 +10,8 @@ from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 
-from app.observability import setup_observability
+# ✅ правильные импорты наблюдаемости
+from app.observability import init_sentry, capture_test_message
 from app.observability.health import start_healthcheck
 
 # ---------------------------------------------------------------------------
@@ -28,6 +30,7 @@ try:
 except Exception:
     _ensure_schema = None  # type: ignore
 
+
 def ensure_schema() -> None:
     if _ensure_schema is None:
         logging.info("ℹ️  ensure_schema: no-op (module not found)")
@@ -35,24 +38,21 @@ def ensure_schema() -> None:
     _ensure_schema()
     logging.info("✅ Schema ensured")
 
+
 # ---------------------------------------------------------------------------
 # Логирование
 # ---------------------------------------------------------------------------
 
 def _setup_logging_from_env() -> None:
     raw = (os.getenv("LOG_LEVEL") or "INFO").strip().upper()
-    level = {
-        "INFO": "INFO",
-        "DEBUG": "DEBUG",
-        "WARNING": "WARNING",
-        "ERROR": "ERROR",
-    }.get(raw, "INFO")
+    level = {"INFO": "INFO", "DEBUG": "DEBUG", "WARNING": "WARNING", "ERROR": "ERROR"}.get(raw, "INFO")
 
     logging.basicConfig(
         level=getattr(logging, level),
         format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
     )
     logging.info(f"Logging level set to: {level}")
+
 
 # ---------------------------------------------------------------------------
 # Точка входа
@@ -69,10 +69,7 @@ async def main() -> None:
     if not token:
         raise RuntimeError("Bot token is not set (env var TELEGRAM_TOKEN or BOT_TOKEN)")
 
-    bot = Bot(
-        token=token,
-        default=DefaultBotProperties(parse_mode=ParseMode.HTML),
-    )
+    bot = Bot(token=token, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
     dp = Dispatcher()
 
     # 3) Роутеры
@@ -119,8 +116,10 @@ async def main() -> None:
 
 if __name__ == "__main__":
     print("=== INIT SENTRY BLOCK EXECUTION ===")
-    # Синхронная настройка Sentry (можно вызывать до цикла)
-    setup_observability(env=ENV, release=RELEASE, send_test=(ENV != "prod"))
+    # Sentry можно инициализировать синхронно до старта цикла
+    sentry_ready = init_sentry(env=ENV, release=RELEASE)
+    if sentry_ready and ENV != "prod":
+        capture_test_message()
 
-    # А вот всё асинхронное — уже внутри цикла:
+    # Всё асинхронное — внутри цикла
     asyncio.run(main())
