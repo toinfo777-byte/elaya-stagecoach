@@ -1,59 +1,61 @@
 # app/routers/control.py
-from aiogram import Router, types
+from __future__ import annotations
+
+import os
+import time
+
+from aiogram import Router
 from aiogram.filters import Command
-import os, time
+from aiogram.types import Message
+from aiogram import Bot
+
+from app.control.notifier import notify_admins
 
 router = Router(name="control")
 
-BOOT_TS = time.time()
+BUILD = os.getenv("SHORT_SHA", "local").strip() or "local"
+ENV = os.getenv("ENV", "develop").strip() or "develop"
+START_TS = time.time()
 
-def _build_status() -> str:
-    build = os.getenv("SHORT_SHA", "local") or "local"
-    env = os.getenv("ENV", "develop") or "develop"
-    uptime = int(time.time() - BOOT_TS)
-    mins, secs = divmod(uptime, 60)
-    hours, mins = divmod(mins, 60)
-    return (
-        f"🧩 Статус\n"
-        f"• BUILD: <code>{build}</code>\n"
-        f"• ENV: <b>{env}</b>\n"
-        f"• Uptime: {hours:02d}:{mins:02d}:{secs:02d}\n"
-    )
 
-@router.message(Command("status"))
-async def cmd_status(m: types.Message):
-    await m.answer(_build_status())
+def _uptime() -> str:
+    s = int(time.time() - START_TS)
+    d, s = divmod(s, 86400)
+    h, s = divmod(s, 3600)
+    m, s = divmod(s, 60)
+    parts = []
+    if d: parts.append(f"{d}d")
+    if h: parts.append(f"{h}h")
+    if m: parts.append(f"{m}m")
+    parts.append(f"{s}s")
+    return " ".join(parts)
+
 
 @router.message(Command("version"))
-async def cmd_version(m: types.Message):
-    build = os.getenv("SHORT_SHA", "local") or "local"
-    await m.answer(f"🔖 Версия: <code>{build}</code>")
+async def cmd_version(m: Message):
+    await m.answer(f"🧩 <b>Build</b>: <code>{BUILD}</code>\nENV: <b>{ENV}</b>")
+
+
+@router.message(Command("status"))
+async def cmd_status(m: Message):
+    await m.answer(
+        "🛠 <b>Status</b>\n"
+        f"• Build: <code>{BUILD}</code>\n"
+        f"• ENV: <b>{ENV}</b>\n"
+        f"• Uptime: <code>{_uptime()}</code>"
+    )
+
 
 @router.message(Command("reload"))
-async def cmd_reload(m: types.Message):
-    # тут мягкая перезагрузка настроек, если нужно; пока — заглушка
-    await m.answer("♻️ Конфигурация перечитана (soft reload).")
+async def cmd_reload(m: Message):
+    await m.answer("♻️ Перезапуск… (процесс завершится, Render поднимет его заново)")
+    # мягко не будем — просто выходим; Render перезапустит
+    os._exit(0)
+
 
 @router.message(Command("notify_admins"))
-async def cmd_notify_admins(m: types.Message):
-    text = m.text.partition(" ")[2].strip() or "Тестовый ручной алерт."
-    ids_env = (
-        os.getenv("ADMIN_ALERT_CHAT_ID")    # одиночный ID
-        or os.getenv("ADMIN_IDS", "")       # список через запятую
-    )
-    chat_ids = []
-    for token in ids_env.split(","):
-        token = token.strip()
-        if token.isdigit():
-            chat_ids.append(int(token))
-    if not chat_ids:
-        await m.answer("⚠️ Нет получателей: задайте ADMIN_ALERT_CHAT_ID или ADMIN_IDS.")
-        return
-    ok, fail = 0, 0
-    for cid in chat_ids:
-        try:
-            await m.bot.send_message(cid, f"🚨 ADMIN ALERT\n\n{text}")
-            ok += 1
-        except Exception:
-            fail += 1
-    await m.answer(f"✅ Отправлено: {ok}, ❌ ошибок: {fail}")
+async def cmd_notify(m: Message, bot: Bot):
+    # всё после пробела — текст уведомления
+    text = (m.text or "").partition(" ")[2].strip() or "Manual admin notify"
+    ok = await notify_admins(bot, f"📣 {text}")
+    await m.answer("✅ Уведомление отправлено" if ok else "⚠️ ADMIN_ALERT_CHAT_ID не задан")
