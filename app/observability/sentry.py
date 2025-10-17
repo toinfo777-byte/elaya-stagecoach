@@ -1,41 +1,34 @@
 from __future__ import annotations
+
 import logging
 import os
-from typing import Optional
 
 import sentry_sdk
-
-SENTRY_OK: bool = False   # станет True, когда успешно инициализируемся/пошлём событие
 
 
 def setup_sentry(*, env: str, release: str) -> bool:
     """
-    Инициализация Sentry по DSN из окружения.
-    Возвращает True, если SDK включён.
+    Инициализирует Sentry, если задан DSN.
+    Возвращает True, если Sentry включён.
     """
-    dsn: Optional[str] = os.getenv("SENTRY_DSN") or os.getenv("SENTRY_DSN_URL")
+    dsn = (os.getenv("SENTRY_DSN") or "").strip()
     if not dsn:
-        logging.info("Sentry: DSN not set — SDK disabled")
+        logging.info("Sentry: DSN пустой — мониторинг отключён.")
         return False
+
+    traces = float(os.getenv("SENTRY_TRACES", "0") or 0)
+    profiles = float(os.getenv("SENTRY_PROFILES", "0") or 0)
 
     sentry_sdk.init(
         dsn=dsn,
         environment=env,
         release=release,
-        traces_sample_rate=float(os.getenv("SENTRY_TRACES", "0")),  # можно включить позже
-        enable_db_queries=False,
+        traces_sample_rate=traces,
+        profiles_sample_rate=profiles,
     )
-    logging.info("Sentry: SDK initialized (env=%s, release=%s)", env, release)
-    global SENTRY_OK
-    SENTRY_OK = True
+    logging.info("Sentry: инициализировано (env=%s, release=%s)", env, release)
     return True
 
 
 def capture_test_message() -> None:
-    """Безопасная тест-посылка, чтобы пометить SENTRY_OK."""
-    try:
-        sentry_sdk.capture_message("Sentry test message from Elaya bot")
-        global SENTRY_OK
-        SENTRY_OK = True
-    except Exception as e:
-        logging.warning("Sentry test send failed: %s", e)
+    sentry_sdk.capture_message("Sentry test message from Elaya bot")
