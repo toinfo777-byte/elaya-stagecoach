@@ -1,82 +1,51 @@
 from __future__ import annotations
-
-import logging
-
+import asyncio, os, html
 from aiogram import Router, F
+from aiogram.filters import Command
 from aiogram.types import Message
-
-from app.control import PROCESS_STARTED_AT_MONO, ENV, RELEASE
-from app.control.utils import (
-    format_uptime,
-    task_by_name,
-    sentry_configured,
-    cronitor_configured,
-    admin_chat_ids,
-)
-
-# Если есть интеграция с observability.sentry — используем мягко
-try:
-    from app.observability.sentry import capture_test_message  # type: ignore
-except Exception:  # pragma: no cover - нет модуля/функции
-    capture_test_message = None  # type: ignore
+from app.control.admin import require_admin, NotAdminError
+from app.control.utils import status_block
+from app.control.notifier import notify_admins
 
 router = Router(name="control")
 
+# /status — показать базовое состояние
+@router.message(Command("status"))
+async def cmd_status(m: Message):
+    await m.answer(f"📊 <b>Status</b>\n{status_block()}")
 
-# /status — сводка состояния
-@router.message(F.text.in_({"/status", "status"}))
-async def cmd_status(msg: Message) -> None:
-    heartbeat = task_by_name("cronitor-heartbeat")
-    uptime = format_uptime(PROCESS_STARTED_AT_MONO)
+# /reload — мягкий рестарт процесса (Render сам поднимет заново)
+@router.message(Command("reload"))
+async def cmd_reload(m: Message):
+    try:
+        require_admin(m.from_user.id if m.from_user else None)
+    except NotAdminError:
+        return await m.answer("⛔ Команда только для админов.")
+    await m.answer("♻️ Перезапускаюсь…")
+    # даём Telegram отправить ответ, затем завершаем процесс
+    async def _exit_later():
+        await asyncio.sleep(0.7)
+        raise SystemExit(0)
+    asyncio.create_task(_exit_later())
 
-    sentry_ok = "🟢" if sentry_configured() else "⚪"
-    cronitor_ok = "🟢" if cronitor_configured() else "⚪"
-    hb_state = "🟢 running" if heartbeat and not heartbeat.done() else "⚪ idle"
+# /notify_admins <текст> — ручная рассылка уведомления
+@router.message(Command("notify_admins"))
+async def cmd_notify_admins(m: Message):
+    try:
+        require_admin(m.from_user.id if m.from_user else None)
+    except NotAdminError:
+        return await m.answer("⛔ Команда только для админов.")
 
-    text = (
-        "📟 <b>Bot status</b>\n"
-        f"• Build: <code>{RELEASE}</code>\n"
-        f"• Env: <code>{ENV}</code>\n"
-        f"• Uptime: <code>{uptime}</code>\n"
-        f"• Sentry: {sentry_ok}\n"
-        f"• Cronitor: {cronitor_ok}\n"
-        f"• Heartbeat task: <code>{hb_state}</code>\n"
-    )
-    await msg.answer(text)
+    # текст после команды
+    raw = (m.text or "").split(maxsplit=1)
+    payload = raw[1].strip() if len(raw) > 1 else ""
+    if not payload:
+        payload = "🔔 Ручное уведомление от администратора."
 
+    # дополним статусом сборки/окружения
+    body = f"{html.escape(payload)}\n\n—\n{status_block()}"
 
-# /reload — мягкая «перезагрузка» настроек (пока: ping Sentry + лог)
-@router.message(F.text.in_({"/reload", "reload"}))
-async def cmd_reload(msg: Message) -> None:
-    logging.getLogger("control").info("reload requested via /reload")
-
-    # Тестовый «пин» в Sentry, если он есть
-    if capture_test_message:
-        try:
-            capture_test_message("🔁 control: soft reload requested")
-        except Exception as e:
-            logging.warning("Sentry capture_test_message failed: %s", e)
-
-    await msg.answer("🔁 Мягкая перезагрузка выполнена (конфиг перечитан из ENV, если применимо).")
-
-
-# /notify_admins — пробная рассылка администраторам
-@router.message(F.text.in_({"/notify_admins", "notify_admins"}))
-async def cmd_notify_admins(msg: Message) -> None:
-    ids = admin_chat_ids()
-    if not ids:
-        await msg.answer("ℹ️ ADMIN_CHAT_IDS не задан — отправить некуда.")
-        return
-
-    sent = 0
-    for chat_id in ids:
-        try:
-            await msg.bot.send_message(
-                chat_id,
-                f"📣 Admin notify: событие от <code>{RELEASE}</code> ({ENV})",
-            )
-            sent += 1
-        except Exception as e:
-            logging.warning("notify_admins: failed to send to %s: %s", chat_id, e)
-
-    await msg.answer(f"📬 Отправлено администраторам: {sent}/{len(ids)}")
+    delivered = await notify_admins(m.bot, body)
+    if delivered == 0:
+        return await m.answer("⚠️ Некому отправлять: проверь переменные ADMIN_IDS / ADMIN_ALERT_CHAT_ID.")
+    await m.answer(f"✅ Уведомление отправлено ({delivered})")
