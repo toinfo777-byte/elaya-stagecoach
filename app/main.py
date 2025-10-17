@@ -43,12 +43,26 @@ async def main() -> None:
     bot = Bot(token=token, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
     dp = Dispatcher()
 
-    # Подключаем роутеры
-    routers = [
-        "entrypoints", "help", "aliases", "onboarding", "system",
-        "minicasting", "leader", "training", "progress", "privacy",
-        "settings", "extended", "casting", "apply", "faq",
-        "devops_sync", "panic", "diag",   # diag содержит /version и диагностические команды
+        routers = [
+        "entrypoints",
+        "help",
+        "aliases",
+        "onboarding",
+        "system",
+        "minicasting",
+        "leader",
+        "training",
+        "progress",
+        "privacy",
+        "settings",
+        "extended",
+        "casting",
+        "apply",
+        "faq",
+        "devops_sync",
+        "panic",
+        "diag",
+        "control",  # ← добавили модуль управляемости
     ]
     for name in routers:
         try:
