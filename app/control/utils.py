@@ -1,29 +1,20 @@
+# app/control/utils.py
 from __future__ import annotations
-import os, time
 
-START_TS = time.time()
+import os
+import time
+from datetime import timedelta
 
-def uptime_text() -> str:
-    sec = int(time.time() - START_TS)
-    d, rem = divmod(sec, 86400)
-    h, rem = divmod(rem, 3600)
-    m, _ = divmod(rem, 60)
-    parts = []
-    if d: parts.append(f"{d}d")
-    if h: parts.append(f"{h}h")
-    parts.append(f"{m}m")
-    return " ".join(parts)
+PROCESS_STARTED_AT = time.monotonic()
 
-def build_mark() -> str:
-    sha = (os.getenv("SHORT_SHA") or "local").strip() or "local"
-    return sha[:7]
+def uptime_str() -> str:
+    td = timedelta(seconds=int(time.monotonic() - PROCESS_STARTED_AT))
+    # h:mm:ss
+    total = int(td.total_seconds())
+    h, m = divmod(total, 3600)
+    m, s = divmod(m, 60)
+    return f"{h:d}h {m:02d}m {s:02d}s"
 
-def env_name() -> str:
-    return (os.getenv("ENV") or "develop").strip() or "develop"
-
-def status_block() -> str:
-    return (
-        f"• ENV: <b>{env_name()}</b>\n"
-        f"• BUILD: <code>{build_mark()}</code>\n"
-        f"• Uptime: {uptime_text()}"
-    )
+def env_or(name: str, default: str = "—") -> str:
+    v = (os.getenv(name) or "").strip()
+    return v or default
