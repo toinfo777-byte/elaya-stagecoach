@@ -1,100 +1,77 @@
-# tools/sync_status.py
-from __future__ import annotations
-import os, base64, datetime
+import os, json, re, datetime, sys
 from pathlib import Path
-from github import Github
 
-try:
-    from zoneinfo import ZoneInfo
-except Exception:
-    ZoneInfo = None  # для Python < 3.9
+DOC = Path("docs/Elaya_Current_Status_Q4_2025.md")
+LOG = Path("tools/sync_status.log")
 
-REPO_NAME  = os.getenv("GITHUB_REPO", "toinfo777-byte/elaya-stagecoach")
-STATUS_DIR = os.getenv("STATUS_DIR", "docs/elaya_status")
-BRANCH     = os.getenv("GITHUB_BRANCH", "develop")
-STAMP_PREFIX = "🕰️ Последнее обновление штаба: "
+def load_event():
+    # 1) repository_dispatch с client_payload
+    event_path = os.getenv("GH_EVENT_PATH")
+    if event_path and Path(event_path).exists():
+        with open(event_path, "r", encoding="utf-8") as f:
+            ev = json.load(f)
+        # repo_dispatch
+        if ev.get("action") is None and "client_payload" in ev.get("payload", {}):
+            pl = ev["payload"]["client_payload"]
+            return pl.get("block"), pl.get("content")
+        # workflow_dispatch
+        ip = ev.get("inputs", {})
+        if ip:
+            return ip.get("block") or os.getenv("SYNC_BLOCK"), ip.get("content") or os.getenv("SYNC_CONTENT")
+    # запасной вариант
+    return os.getenv("SYNC_BLOCK"), os.getenv("SYNC_CONTENT")
 
-FILES = [
-    "README.md",
-    "Elaya_Current_Status_Q4_2025.md",
-    "Elaya_Roadmap_I_Основание_света.md",
-]
+def ensure_doc():
+    if not DOC.exists():
+        DOC.parent.mkdir(parents=True, exist_ok=True)
+        DOC.write_text("# Элайя — Текущий статус (Q4 2025)\n\n", encoding="utf-8")
 
+def replace_block(md: str, block_name: str, new_md: str) -> str:
+    """
+    Блоки помечаем маркерами:
+    <!-- BLOCK:Блок 3 — Управляемость -->
+    ... контент ...
+    <!-- END BLOCK -->
+    """
+    block_name = block_name.strip()
+    pat = re.compile(
+        rf"(<!--\s*BLOCK:{re.escape(block_name)}\s*-->)(.*?)(<!--\s*END\s+BLOCK\s*-->)",
+        re.S | re.I
+    )
+    if pat.search(md):
+        return pat.sub(rf"\1\n{new_md}\n\3", md)
+    else:
+        # нет блока — добавим в конец
+        chunk = f"\n\n<!-- BLOCK:{block_name} -->\n{new_md}\n<!-- END BLOCK -->\n"
+        return md + chunk
 
-def _now_str() -> str:
-    tz = ZoneInfo("Europe/Berlin") if ZoneInfo else None
-    return datetime.datetime.now(tz=tz).strftime("%Y-%m-%d %H:%M")
-
-
-def _ensure_stamp_anchor(text: str) -> str:
-    if "<!--STAMP-->" not in text:
-        if text and not text.endswith("\n"):
-            text += "\n"
-        text += f"{STAMP_PREFIX}<!--STAMP-->\n"
-    return text
-
-
-def _update_stamp(text: str) -> str:
-    text = _ensure_stamp_anchor(text)
-    return text.replace("<!--STAMP-->", _now_str())
-
-
-def _read_local(path: Path) -> str:
-    return path.read_text(encoding="utf-8")
-
-
-def _create_or_update(repo, path: str, new_text: str, commit_message: str) -> bool:
-    """True — был создан или обновлён файл, False — без изменений"""
-    try:
-        current = repo.get_contents(path, ref=BRANCH)
-        current_text = base64.b64decode(current.content).decode("utf-8")
-        if current_text != new_text:
-            repo.update_file(
-                path=path,
-                message=commit_message,
-                content=new_text,
-                sha=current.sha,
-                branch=BRANCH,
-            )
-            return True
-        return False
-    except Exception:
-        repo.create_file(
-            path=path,
-            message=commit_message.replace("update:", "new:"),
-            content=new_text,
-            branch=BRANCH,
-        )
-        return True
-
+def log(msg: str):
+    LOG.parent.mkdir(parents=True, exist_ok=True)
+    with open(LOG, "a", encoding="utf-8") as f:
+        f.write(f"{datetime.datetime.utcnow().isoformat()}Z {msg}\n")
 
 def main():
-    token = os.environ.get("GITHUB_TOKEN")
-    if not token:
-        raise RuntimeError("❌ GITHUB_TOKEN не найден в окружении")
+    block, content = load_event()
+    ensure_doc()
+    if not content:
+        log("no content provided; skip")
+        print("No content provided. Nothing to do.")
+        return
 
-    gh = Github(token)
-    repo = gh.get_repo(REPO_NAME)
+    # если блок не указан — пишем в раздел «Изменения»
+    if not block:
+        block = "Изменения"
 
-    made_commits = False
-    for name in FILES:
-        local_path = Path(STATUS_DIR) / name
-        if not local_path.exists():
-            raise FileNotFoundError(f"Локальный файл не найден: {local_path}")
+    md = DOC.read_text(encoding="utf-8")
+    new_md = replace_block(md, block, content.strip())
+    DOC.write_text(new_md, encoding="utf-8")
 
-        new_text = _read_local(local_path)
-        if name == "README.md":
-            new_text = _update_stamp(new_text)
-
-        repo_path = f"{STATUS_DIR}/{name}"
-        commit_message = f"update: штаб Элайи — синхронизация {datetime.date.today()}"
-        changed = _create_or_update(repo, repo_path, new_text, commit_message)
-        made_commits = made_commits or changed
-
-    print("✅ Синхронизация завершена — изменения зафиксированы."
-          if made_commits else
-          "ℹ️ Изменений нет — коммиты не создавались.")
-
+    log(f"updated: block='{block}' len={len(content)}")
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception as e:
+        log(f"ERROR: {e}")
+        print(f"ERROR: {e}", file=sys.stderr)
+        sys.exit(1)
