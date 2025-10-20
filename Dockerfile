@@ -10,11 +10,18 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 
+# === метаданные билда (передаются build-args из Actions)
+ARG BUILD_MARK=local
+ARG SHORT_SHA=local
+ARG IMAGE_TAG=ghcr.io/unknown/elaya-stagecoach:develop
+ENV BUILD_MARK=${BUILD_MARK} \
+    SHORT_SHA=${SHORT_SHA} \
+    IMAGE_TAG=${IMAGE_TAG}
+
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
-
 ENV PYTHONPATH=/app
 
 CMD ["python", "-m", "app.main"]
