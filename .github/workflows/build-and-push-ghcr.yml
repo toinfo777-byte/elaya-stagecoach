@@ -67,3 +67,23 @@ jobs:
           else
             echo "⚠️ No RENDER_DEPLOY_HOOK secret set, skipping."
           fi
+
+      - name: Dispatch status_sync
+        if: ${{ success() }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          API="${{ github.api_url }}/repos/${{ github.repository }}/dispatches"
+          PAYLOAD=$(jq -n \
+            --arg t "status_sync" \
+            --arg bm "${{ env.BUILD_MARK }}" \
+            --arg sha "${{ env.SHORT_SHA }}" \
+            --arg img "${{ env.IMAGE_TAG }}" \
+            --arg envv "develop" \
+            --arg blk "Build" \
+            --arg cnt "" \
+            '{event_type:$t, client_payload:{BUILD_MARK:$bm, SHORT_SHA:$sha, IMAGE_TAG:$img, ENV:$envv, block:$blk, content:$cnt}}')
+          curl -fsS -X POST "$API" \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            -d "$PAYLOAD"
