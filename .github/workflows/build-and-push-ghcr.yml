@@ -39,14 +39,6 @@ jobs:
           echo "BUILD_MARK=deploy-${{ github.run_id }}-$(date -u +'%Y%m%dT%H%M%SZ')" >> $GITHUB_ENV
           echo "IMAGE_TAG=ghcr.io/${{ github.repository_owner }}/elaya-stagecoach:develop" >> $GITHUB_ENV
 
-      - name: Save build env
-        run: |
-          echo "SHORT_SHA=${{ env.SHORT_SHA }}" > .env.build
-          echo "BUILD_MARK=${{ env.BUILD_MARK }}" >> .env.build
-          echo "IMAGE_TAG=${{ env.IMAGE_TAG }}" >> .env.build
-          echo "ENV=develop" >> .env.build
-        shell: bash
-
       - name: Build & Push
         uses: docker/build-push-action@v6
         with:
@@ -56,6 +48,10 @@ jobs:
           tags: |
             ghcr.io/${{ github.repository_owner }}/elaya-stagecoach:develop
             ghcr.io/${{ github.repository_owner }}/elaya-stagecoach:${{ github.sha }}
+          build-args: |
+            BUILD_MARK=${{ env.BUILD_MARK }}
+            SHORT_SHA=${{ env.SHORT_SHA }}
+            IMAGE_TAG=${{ env.IMAGE_TAG }}
           labels: |
             org.opencontainers.image.revision=${{ env.SHORT_SHA }}
             org.opencontainers.image.version=${{ env.BUILD_MARK }}
