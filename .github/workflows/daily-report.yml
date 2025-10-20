@@ -1,0 +1,54 @@
+name: Daily Elaya Report
+
+on:
+  schedule:
+    # 09:00 Europe/Moscow == 06:00 UTC
+    - cron: "0 6 * * *"
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout develop
+        uses: actions/checkout@v4
+        with:
+          ref: develop
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install deps
+        run: |
+          python -m pip install --upgrade pip
+
+      - name: Generate report
+        env:
+          RUN_URL: "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+        run: python tools/daily_report.py
+
+      - name: Commit report
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: "report: daily status [skip ci]"
+          branch: develop
+          file_pattern: docs/elaya_status/*.md
+
+      - name: Notify Telegram (report ready)
+        env:
+          TG_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          TG_CHAT:  ${{ secrets.ADMIN_ALERT_CHAT_ID }}
+          RUN_URL:  ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          TODAY="$(date -u +'%Y-%m-%d')"
+          FILE="docs/elaya_status/Elaya_Status_${TODAY}.md"
+          TEXT="🗓 Ежедневный отчёт Элайи готов\nФайл: ${FILE}\nCI: ${RUN_URL}"
+          curl -sS -X POST "https://api.telegram.org/bot${TG_TOKEN}/sendMessage" \
+            -d chat_id="${TG_CHAT}" \
+            -d text="$TEXT" \
+            -d disable_web_page_preview=true >/dev/null
