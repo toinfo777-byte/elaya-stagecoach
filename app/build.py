@@ -1,6 +1,11 @@
+# app/build.py
 from __future__ import annotations
 import os
 from dataclasses import dataclass
+
+def _get(k: str, default: str = "local") -> str:
+    v = (os.getenv(k) or "").strip()
+    return v if v else default
 
 @dataclass(frozen=True)
 class BuildInfo:
@@ -9,13 +14,16 @@ class BuildInfo:
     image_tag: str
     env: str
 
-def _env(name: str, default: str = "unknown") -> str:
-    v = (os.getenv(name) or default).strip()
-    return v or default
+    @property
+    def sha7(self) -> str:
+        return (self.git_sha or "")[:7]
 
-BUILD = BuildInfo(
-    build_mark=_env("BUILD_MARK", "local"),
-    git_sha=_env("SHORT_SHA", "local"),
-    image_tag=_env("IMAGE_TAG", "ghcr.io/unknown/elaya-stagecoach:develop"),
-    env=_env("ENV", "develop"),
-)
+def _read() -> BuildInfo:
+    return BuildInfo(
+        build_mark=_get("BUILD_MARK"),
+        git_sha=_get("SHORT_SHA", _get("GITHUB_SHA", "local")),
+        image_tag=_get("IMAGE_TAG", "ghcr.io/unknown/elaya-stagecoach:develop"),
+        env=_get("ENV", "develop"),
+    )
+
+BUILD = _read()
