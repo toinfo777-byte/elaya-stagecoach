@@ -17,9 +17,13 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  IMAGE_NAME: ghcr.io/${{ github.repository_owner }}/elaya-stagecoach
+  # базовые переменные
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository_owner }}/elaya-stagecoach
   TAG_SHA: sha-${{ github.sha }}
   TAG_REF: ${{ github.ref_name }}
+  # подтягиваем хук из любого из двух возможных секретов
+  RENDER_DEPLOY_HOOK_URL: ${{ secrets.RENDER_DEPLOY_HOOK_URL || secrets.RENDER_DEPLOY_HOOK || '' }}
 
 jobs:
   build:
@@ -28,7 +32,6 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # Иногда DockerHub (buildx/buildkit) дает 5xx. Оборачиваем в ретраи.
       - name: Set up Docker Buildx (with retry)
         uses: nick-fields/retry@v3
         with:
@@ -40,11 +43,7 @@ jobs:
             echo "Setting up buildx..."
             gh api --method GET rate_limit >/dev/null 2>&1 || true
             echo "::endgroup::"
-            echo "::group::setup action"
-            echo "Running docker/setup-buildx-action"
-            echo "::endgroup::"
             echo "{}" > /tmp/dummy.json
-        continue-on-error: false
 
       - name: Really setup Buildx
         uses: docker/setup-buildx-action@v3
@@ -54,7 +53,7 @@ jobs:
       - name: Login to GHCR
         uses: docker/login-action@v3
         with:
-          registry: ghcr.io
+          registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
@@ -62,7 +61,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ${{ env.IMAGE_NAME }}
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
             type=raw,value=${{ env.TAG_SHA }}
             type=raw,value=${{ env.TAG_REF }}
@@ -80,13 +79,9 @@ jobs:
           cache-to: type=gha,mode=max
           provenance: false
 
-      # Тригерим Render deploy hook (если задан)
-      - name: Trigger Render Deploy Hook (retry)
-        if: ${{ secrets.RENDER_DEPLOY_HOOK_URL != '' }}
-        uses: nick-fields/retry@v3
-        with:
-          timeout_minutes: 2
-          max_attempts: 5
-          retry_on: error
-          command: |
-            curl -fsSL "${{ secrets.RENDER_DEPLOY_HOOK_URL }}"
+      # Тригерим Render deploy hook (опционально, только из develop)
+      - name: Trigger Render deploy (optional)
+        if: ${{ env.RENDER_DEPLOY_HOOK_URL != '' && github.ref == 'refs/heads/develop' }}
+        run: |
+          echo "Triggering Render via $RENDER_DEPLOY_HOOK_URL"
+          curl -fsS -X POST "$RENDER_DEPLOY_HOOK_URL"
