@@ -24,4 +24,10 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY . .
 ENV PYTHONPATH=/app
 
+# === запись метаданных в финальный .env (читается ботом при старте)
+RUN echo "BUILD_MARK=${BUILD_MARK}" >> /app/.env \
+ && echo "SHORT_SHA=${SHORT_SHA}" >> /app/.env \
+ && echo "IMAGE_TAG=${IMAGE_TAG}" >> /app/.env \
+ && echo "ENV=develop" >> /app/.env
+
 CMD ["python", "-m", "app.main"]
