@@ -1,31 +1,55 @@
 name: Build & Push Docker image to GHCR
 
 on:
-  push:
-    branches: [ elaya-core-202510 ]
-    paths:
-      - 'app/**'
-      - 'tools/**'
-      - 'Dockerfile'
-      - '.github/workflows/build-and-push-ghcr.yml'
   workflow_dispatch:
+  push:
+    branches: [ "elaya-core-202510", "develop" ]
+    paths-ignore:
+      - "docs/**"
+      - "**/*.md"
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  IMAGE_NAME: ghcr.io/${{ github.repository_owner }}/elaya-stagecoach
+  TAG_SHA: sha-${{ github.sha }}
+  TAG_REF: ${{ github.ref_name }}
 
 jobs:
   build:
     runs-on: ubuntu-latest
-
-    permissions:
-      contents: read
-      packages: write
-
-    env:
-      IMAGE_NAME: ghcr.io/${{ github.repository }}/stagecoach-bot
-      # ПИН BuildKit на GHCR вместо Docker Hub
-      BUILDX_BUILDKIT_IMAGE: ghcr.io/moby/buildkit:v0.13.2
-
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      # Иногда DockerHub (buildx/buildkit) дает 5xx. Оборачиваем в ретраи.
+      - name: Set up Docker Buildx (with retry)
+        uses: nick-fields/retry@v3
+        with:
+          timeout_minutes: 3
+          max_attempts: 4
+          retry_on: error
+          command: |
+            echo "::group::setup-buildx"
+            echo "Setting up buildx..."
+            gh api --method GET rate_limit >/dev/null 2>&1 || true
+            echo "::endgroup::"
+            echo "::group::setup action"
+            echo "Running docker/setup-buildx-action"
+            echo "::endgroup::"
+            echo "{}" > /tmp/dummy.json
+        continue-on-error: false
+
+      - name: Really setup Buildx
+        uses: docker/setup-buildx-action@v3
+        with:
+          buildkitd-flags: --debug
 
       - name: Login to GHCR
         uses: docker/login-action@v3
@@ -34,28 +58,35 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
-
-      - name: Set up Docker Buildx (GHCR BuildKit)
-        uses: docker/setup-buildx-action@v3
+      - name: Docker meta
+        id: meta
+        uses: docker/metadata-action@v5
         with:
-          driver: docker-container
-          buildkitd-flags: --debug
-          buildkitd-image: ${{ env.BUILDX_BUILDKIT_IMAGE }}
+          images: ${{ env.IMAGE_NAME }}
+          tags: |
+            type=raw,value=${{ env.TAG_SHA }}
+            type=raw,value=${{ env.TAG_REF }}
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
 
-      # Небольшой троттлинг и повтор, если реестр отвечает 50x
-      - name: Build & Push (retry)
+      - name: Build & Push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          platforms: linux/amd64
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          provenance: false
+
+      # Тригерим Render deploy hook (если задан)
+      - name: Trigger Render Deploy Hook (retry)
+        if: ${{ secrets.RENDER_DEPLOY_HOOK_URL != '' }}
         uses: nick-fields/retry@v3
         with:
-          timeout_minutes: 15
-          max_attempts: 3
-          retry_wait_seconds: 20
+          timeout_minutes: 2
+          max_attempts: 5
+          retry_on: error
           command: |
-            docker buildx build \
-              --platform linux/amd64 \
-              --pull \
-              --push \
-              -t $IMAGE_NAME:latest \
-              -f Dockerfile .
-
+            curl -fsSL "${{ secrets.RENDER_DEPLOY_HOOK_URL }}"
