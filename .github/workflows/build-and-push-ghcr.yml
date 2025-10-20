@@ -51,7 +51,7 @@ jobs:
           build-args: |
             BUILD_MARK=${{ env.BUILD_MARK }}
             SHORT_SHA=${{ env.SHORT_SHA }}
-            IMAGE_TAG=${{ env.IMAGE_TAG }}
+            IMAGE_TAG=ghcr.io/${{ github.repository_owner }}/elaya-stagecoach:develop
           labels: |
             org.opencontainers.image.revision=${{ env.SHORT_SHA }}
             org.opencontainers.image.version=${{ env.BUILD_MARK }}
