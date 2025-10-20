@@ -46,13 +46,15 @@ jobs:
           cache-to: type=gha,mode=max
           provenance: false
 
-      # Важно: условие с secrets на уровне шага
+      # Разделённая логика вызова Render deploy hook
       - name: Trigger Render deploy
-        if: ${{ success() && secrets.RENDER_DEPLOY_HOOK != '' }}
+        if: ${{ success() }}
         env:
           RENDER_DEPLOY_HOOK: ${{ secrets.RENDER_DEPLOY_HOOK }}
         run: |
-          echo "Waiting for tag propagation..."
-          sleep 10
-          echo "Triggering Render deploy via hook"
-          curl -fsS -X POST "$RENDER_DEPLOY_HOOK"
+          if [ -n "$RENDER_DEPLOY_HOOK" ]; then
+            echo "Triggering Render via hook..."
+            curl -fsS -X POST "$RENDER_DEPLOY_HOOK"
+          else
+            echo "⚠️ No RENDER_DEPLOY_HOOK secret set, skipping."
+          fi
