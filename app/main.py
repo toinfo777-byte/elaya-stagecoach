@@ -9,6 +9,10 @@ from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 
+from dotenv import load_dotenv
+# === Загрузка встроенного .env из образа (впечатанного при сборке) ===
+load_dotenv(dotenv_path="/app/.env", override=True)
+
 from app.observability import setup_observability
 from app.observability.health import start_heartbeat_if_configured
 
