@@ -1,24 +1,33 @@
+# tools/sync_status.py
 import os, json, re, datetime, sys
 from pathlib import Path
 
 DOC = Path("docs/Elaya_Current_Status_Q4_2025.md")
 LOG = Path("tools/sync_status.log")
 
+BUILD_MARK = os.getenv("BUILD_MARK", "").strip()
+GIT_SHA = (os.getenv("SHORT_SHA", "") or os.getenv("GITHUB_SHA", "")).strip()
+ENV = os.getenv("ENV", "develop").strip()
+IMAGE_TAG = os.getenv("IMAGE_TAG", "").strip()
+
 def load_event():
-    # 1) repository_dispatch с client_payload
+    """Поддержка repository_dispatch и workflow_dispatch."""
     event_path = os.getenv("GH_EVENT_PATH")
     if event_path and Path(event_path).exists():
         with open(event_path, "r", encoding="utf-8") as f:
             ev = json.load(f)
-        # repo_dispatch
-        if ev.get("action") is None and "client_payload" in ev.get("payload", {}):
-            pl = ev["payload"]["client_payload"]
+
+        # repository_dispatch → client_payload
+        pl = ev.get("client_payload") or ev.get("payload", {}).get("client_payload")
+        if pl:
             return pl.get("block"), pl.get("content")
-        # workflow_dispatch
-        ip = ev.get("inputs", {})
+
+        # workflow_dispatch → inputs
+        ip = ev.get("inputs") or {}
         if ip:
             return ip.get("block") or os.getenv("SYNC_BLOCK"), ip.get("content") or os.getenv("SYNC_CONTENT")
-    # запасной вариант
+
+    # запасной вариант из env
     return os.getenv("SYNC_BLOCK"), os.getenv("SYNC_CONTENT")
 
 def ensure_doc():
@@ -29,7 +38,7 @@ def ensure_doc():
 def replace_block(md: str, block_name: str, new_md: str) -> str:
     """
     Блоки помечаем маркерами:
-    <!-- BLOCK:Блок 3 — Управляемость -->
+    <!-- BLOCK:Имя -->
     ... контент ...
     <!-- END BLOCK -->
     """
@@ -41,9 +50,22 @@ def replace_block(md: str, block_name: str, new_md: str) -> str:
     if pat.search(md):
         return pat.sub(rf"\1\n{new_md}\n\3", md)
     else:
-        # нет блока — добавим в конец
         chunk = f"\n\n<!-- BLOCK:{block_name} -->\n{new_md}\n<!-- END BLOCK -->\n"
         return md + chunk
+
+def build_block_md() -> str:
+    """Готовый Build-блок, если пришли метки билда из Actions."""
+    if not (BUILD_MARK or GIT_SHA or IMAGE_TAG):
+        return ""
+    sha7 = (GIT_SHA or "")[:7]
+    now = datetime.datetime.utcnow().isoformat(timespec="seconds") + "Z"
+    return (
+        f"BUILD_MARK: `{BUILD_MARK or 'local'}`  \n"
+        f"GIT_SHA: `{sha7 or 'local'}`  \n"
+        f"ENV: `{ENV}`  \n"
+        f"IMAGE: `{IMAGE_TAG or 'ghcr.io/unknown/elaya-stagecoach:develop'}`  \n"
+        f"Updated: {now}"
+    )
 
 def log(msg: str):
     LOG.parent.mkdir(parents=True, exist_ok=True)
@@ -53,12 +75,17 @@ def log(msg: str):
 def main():
     block, content = load_event()
     ensure_doc()
-    if not content:
+
+    # если пришли только метки билда — формируем стандартный Build-блок
+    if (not content or not content.strip()) and (BUILD_MARK or GIT_SHA or IMAGE_TAG):
+        block = block or "Build"
+        content = build_block_md()
+
+    if not content or not content.strip():
         log("no content provided; skip")
         print("No content provided. Nothing to do.")
         return
 
-    # если блок не указан — пишем в раздел «Изменения»
     if not block:
         block = "Изменения"
 
