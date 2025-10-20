@@ -1,76 +1,61 @@
-name: "Build & Push Docker image to GHCR"
+name: Build & Push Docker image to GHCR
 
 on:
-  workflow_dispatch:
   push:
-    branches:
-      - develop
-      - main
-      - elaya-core-202510
+    branches: [ elaya-core-202510 ]
     paths:
-      - 'Dockerfile'
       - 'app/**'
+      - 'tools/**'
+      - 'Dockerfile'
       - '.github/workflows/build-and-push-ghcr.yml'
-
-permissions:
-  contents: read
-  packages: write
-
-env:
-  IMAGE_NAME: ghcr.io/toinfo777-byte/elaya-stagecoach
+  workflow_dispatch:
 
 jobs:
   build:
     runs-on: ubuntu-latest
 
+    permissions:
+      contents: read
+      packages: write
+
+    env:
+      IMAGE_NAME: ghcr.io/${{ github.repository }}/stagecoach-bot
+      # ПИН BuildKit на GHCR вместо Docker Hub
+      BUILDX_BUILDKIT_IMAGE: ghcr.io/moby/buildkit:v0.13.2
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Log in to GitHub Container Registry
+      - name: Login to GHCR
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Compute tags
-        id: meta
-        run: |
-          SHORT_SHA="${GITHUB_SHA::7}"
-          BRANCH="${GITHUB_REF_NAME}"
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
 
-          echo "${{ env.IMAGE_NAME }}:${BRANCH}"         >> tags.txt
-          echo "${{ env.IMAGE_NAME }}:sha-${SHORT_SHA}"  >> tags.txt
-
-          if [[ "${BRANCH}" == "develop" || "${BRANCH}" == "elaya-core-202510" ]]; then
-            echo "${{ env.IMAGE_NAME }}:develop"        >> tags.txt
-          fi
-
-          echo "TAGS<<EOF" >> $GITHUB_OUTPUT
-          cat tags.txt >> $GITHUB_OUTPUT
-          echo "EOF" >> $GITHUB_OUTPUT
-
-          echo "Computed tags:"
-          cat tags.txt
-
-      - name: Build & Push
-        uses: docker/build-push-action@v6
+      - name: Set up Docker Buildx (GHCR BuildKit)
+        uses: docker/setup-buildx-action@v3
         with:
-          context: .
-          push: true
-          tags: ${{ steps.meta.outputs.TAGS }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          driver: docker-container
+          buildkitd-flags: --debug
+          buildkitd-image: ${{ env.BUILDX_BUILDKIT_IMAGE }}
 
-            # optional trigger Render redeploy
-      - name: Trigger Render deploy
-        env:
-          RENDER_DEPLOY_HOOK: ${{ secrets.RENDER_DEPLOY_HOOK }}
-        if: ${{ env.RENDER_DEPLOY_HOOK != '' }}
-        run: |
-          echo "Triggering Render redeploy..."
-          curl -fsSL -X POST "$RENDER_DEPLOY_HOOK"
+      # Небольшой троттлинг и повтор, если реестр отвечает 50x
+      - name: Build & Push (retry)
+        uses: nick-fields/retry@v3
+        with:
+          timeout_minutes: 15
+          max_attempts: 3
+          retry_wait_seconds: 20
+          command: |
+            docker buildx build \
+              --platform linux/amd64 \
+              --pull \
+              --push \
+              -t $IMAGE_NAME:latest \
+              -f Dockerfile .
+
