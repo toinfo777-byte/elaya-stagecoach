@@ -9,10 +9,9 @@ from aiogram import Router
 from aiogram.filters import Command
 from aiogram.types import Message
 
-from app.control.admin import AdminOnly, is_admin
-from app.control.utils import uptime_str, env_or
+from app.control.admin import AdminOnly
 from app.control.notifier import notify_admins
-from app.control.github_sync import send_status_sync  # <-- для /sync
+from app.control.github_sync import send_status_sync
 from app.build import BUILD
 
 router = Router(name="control")
@@ -29,13 +28,10 @@ def _uptime_local() -> str:
     m, s = divmod(r, 60)
     return f"{h:02d}:{m:02d}:{s:02d}"
 
-# ---- Public commands --------------------------------------------------------
-
 @router.message(Command("status"))
 async def cmd_status(message: Message) -> None:
     sentry_state = "on" if os.getenv("SENTRY_DSN") else "off"
     cronitor_state = "on" if (os.getenv("CRONITOR_PING_URL") or os.getenv("HEALTHCHECKS_URL")) else "off"
-
     text = (
         "🧭 <b>Status</b>\n"
         f"• ENV: <code>{ENV}</code>\n"
@@ -56,7 +52,41 @@ async def cmd_version(message: Message) -> None:
         f"🌿 <b>ENV:</b> <code>{ENV}</code>"
     )
 
-# ---- Admin-only commands ----------------------------------------------------
+@router.message(Command("diag"), AdminOnly())
+async def cmd_diag(message: Message) -> None:
+    """Быстрый отчёт о живости сервисов + тест-ивент Sentry и пинг Cronitor/HC один раз."""
+    # Sentry probe
+    if os.getenv("SENTRY_DSN"):
+        try:
+            import sentry_sdk
+            sentry_sdk.capture_message("Elaya /diag probe")
+            s = "sent"
+        except Exception as e:
+            s = f"fail ({e})"
+    else:
+        s = "off"
+
+    # Cronitor/HC single ping
+    url = (os.getenv("CRONITOR_PING_URL") or os.getenv("HEALTHCHECKS_URL") or "").strip()
+    if url:
+        import aiohttp, asyncio
+        try:
+            async with aiohttp.ClientSession() as sess:
+                async with sess.get(url, timeout=10) as r:
+                    await r.text()
+            c = "ok"
+        except Exception as e:
+            c = f"fail ({e})"
+    else:
+        c = "off"
+
+    text = (
+        "🧪 <b>Diag</b>\n"
+        f"• ENV: <code>{ENV}</code>  • BUILD: <code>{BUILD_MARK}</code>  • SHA: <code>{BUILD_SHA[:12]}</code>\n"
+        f"• Sentry probe: <code>{s}</code>\n"
+        f"• Cronitor/HC ping: <code>{c}</code>\n"
+    )
+    await message.answer(text)
 
 @router.message(Command("reload"), AdminOnly())
 async def cmd_reload(message: Message) -> None:
@@ -66,48 +96,27 @@ async def cmd_reload(message: Message) -> None:
         sys.exit(0)
     asyncio.create_task(_bye())
 
-@router.message(Command("notify_admins"), AdminOnly())
-async def cmd_notify_admins(message: Message) -> None:
-    payload = (message.text or "").split(maxsplit=1)
-    txt = payload[1] if len(payload) > 1 else "(без текста)"
-    prefix = f"🚨 [{ENV}] [{BUILD_MARK}]"
-    count = await notify_admins(message.bot, f"{prefix} {txt}")
-    await message.answer(f"✅ Ушло: {count} (TG) + зеркала (Sentry/Cronitor)")
-
 @router.message(Command("sync"), AdminOnly())
 async def cmd_sync(message: Message) -> None:
-    """
-    Формат: первая строка — имя блока, затем пустая строка и markdown-контент.
-    Можно прислать текст в caption или реплаем.
-    """
     raw_cmd_tail = (message.text or "").split(None, 1)
     if len(raw_cmd_tail) == 1 and (message.caption or message.reply_to_message):
         raw = message.caption or (message.reply_to_message.text or "")
     else:
         raw = raw_cmd_tail[1] if len(raw_cmd_tail) > 1 else ""
-
     if not raw.strip():
         return await message.reply(
-            "Формат:\n`/sync Блок N — Название\\n\\n<markdown>`\n"
-            "Первая строка — имя блока, затем пустая строка и содержимое.",
+            "Формат:\n`/sync Блок N — Название\\n\\n<markdown>`",
             parse_mode="Markdown"
         )
-
     lines = raw.splitlines()
     block = lines[0].strip()
     content = "\n".join(
         lines[2:] if len(lines) > 1 and lines[1].strip() == "" else lines[1:]
     ).strip()
-
     if not block or not content:
         return await message.reply("Нужно указать имя блока и markdown-контент.")
-
     try:
         await send_status_sync(block, content)
     except Exception as e:
         return await message.reply(f"❌ Не получилось отправить в GitHub: {e}")
-
-    await message.reply(
-        f"✅ Отправлено в GitHub: `{block}`. Ждём workflow.",
-        parse_mode="Markdown"
-    )
+    await message.reply(f"✅ Отправлено в GitHub: `{block}`. Ждём workflow.", parse_mode="Markdown")
