@@ -1,25 +1,15 @@
 from __future__ import annotations
-
-import logging
 import os
+from .sentry import init_sentry
+from .health import boot_health
 
-import sentry_sdk
-
-
-def setup_observability(env: str, release: str, send_test: bool = True) -> None:
+def setup_observability(*, env: str, release: str, send_test: bool = False) -> None:
     """
-    Инициализация Sentry. Невалидный DSN не роняет процесс — просто предупреждаем.
+    Единая точка инициализации наблюдаемости.
+    - Sentry (если задан DSN)
+    - Health (лог метки старта)
     """
-    try:
-        dsn = os.getenv("SENTRY_DSN")
-        if not dsn:
-            logging.warning("⚠️ SENTRY_DSN not set — skipping Sentry init")
-            return
-
-        sentry_sdk.init(dsn=dsn, environment=env, release=release)
-        logging.info("✅ Sentry initialized (env=%s, release=%s)", env, release)
-
-        if send_test:
-            sentry_sdk.capture_message("Sentry test message from Elaya bot")
-    except Exception as e:
-        logging.warning("⚠️ Sentry init failed: %s", e)
+    dsn = os.getenv("SENTRY_DSN", "").strip()
+    if dsn:
+        init_sentry(env=env, release=release, send_test=send_test)
+    boot_health(env=env, release=release)
