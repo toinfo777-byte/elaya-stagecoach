@@ -4,13 +4,14 @@ import asyncio
 import os
 import sys
 import time
+from datetime import datetime
+from pathlib import Path
 
 from aiogram import Router
 from aiogram.filters import Command
-from aiogram.types import Message
+from aiogram.types import Message, FSInputFile
 
 from app.control.admin import AdminOnly
-from app.control.notifier import notify_admins
 from app.control.github_sync import send_status_sync
 from app.build import BUILD
 
@@ -52,9 +53,34 @@ async def cmd_version(message: Message) -> None:
         f"🌿 <b>ENV:</b> <code>{ENV}</code>"
     )
 
+@router.message(Command("report"), AdminOnly())
+async def cmd_report(message: Message) -> None:
+    """
+    Отправляет краткую сводку и, если доступен, прикрепляет свежий отчёт
+    из docs/elaya_status/Elaya_Status_YYYY-MM-DD.md
+    """
+    today = datetime.utcnow().date().isoformat()
+    rel_path = f"docs/elaya_status/Elaya_Status_{today}.md"
+    abs_path = Path("/app") / rel_path  # в контейнере проект в /app
+
+    summary = (
+        "🗓 <b>Ежедневный отчёт</b>\n"
+        f"• ENV: <code>{ENV}</code>\n"
+        f"• BUILD: <code>{BUILD_MARK}</code>\n"
+        f"• SHA: <code>{BUILD_SHA[:12]}</code>\n"
+        f"• IMAGE: <code>{IMAGE_TAG}</code>\n"
+        f"• Uptime: <code>{_uptime_local()}</code>\n"
+        f"• File: <code>{rel_path}</code>\n"
+    )
+
+    if abs_path.is_file():
+        doc = FSInputFile(str(abs_path))
+        await message.answer_document(document=doc, caption=summary)
+    else:
+        await message.answer(summary + "\nФайл не найден в контейнере — отправлена только сводка.")
+
 @router.message(Command("diag"), AdminOnly())
 async def cmd_diag(message: Message) -> None:
-    """Быстрый отчёт о живости сервисов + тест-ивент Sentry и пинг Cronitor/HC один раз."""
     # Sentry probe
     if os.getenv("SENTRY_DSN"):
         try:
@@ -69,7 +95,7 @@ async def cmd_diag(message: Message) -> None:
     # Cronitor/HC single ping
     url = (os.getenv("CRONITOR_PING_URL") or os.getenv("HEALTHCHECKS_URL") or "").strip()
     if url:
-        import aiohttp, asyncio
+        import aiohttp
         try:
             async with aiohttp.ClientSession() as sess:
                 async with sess.get(url, timeout=10) as r:
