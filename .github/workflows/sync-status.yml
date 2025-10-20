@@ -1,0 +1,101 @@
+name: Sync Elaya Status
+
+on:
+  # ручной запуск из UI, если надо
+  workflow_dispatch:
+    inputs:
+      block:
+        description: "Имя блока для обновления (например, 'Блок 3 — Управляемость')"
+        required: false
+      content:
+        description: "Markdown-патч/вставка"
+        required: false
+  # запуск из бота/интеграций
+  repository_dispatch:
+    types: [status_sync]
+  # если кто-то правит руками в docs — создаём PR в main
+  push:
+    branches: [develop]
+    paths:
+      - "docs/**.md"
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: develop
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install deps (PDF optional)
+        run: |
+          python -m pip install --upgrade pip
+          pip install markdown-it-py==3.0.0
+          # для PDF (по желанию) – Pandoc:
+          sudo apt-get update && sudo apt-get install -y pandoc
+
+      - name: Apply update via tools/sync_status.py
+        env:
+          GH_EVENT_PATH: ${{ github.event_path }}
+          SYNC_BLOCK: ${{ github.event.inputs.block }}
+          SYNC_CONTENT: ${{ github.event.inputs.content }}
+        run: |
+          python tools/sync_status.py
+
+      - name: Commit changes (to develop)
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: "sync: update Elaya status [skip ci]"
+          branch: develop
+          file_pattern: docs/*.md tools/sync_status.log
+
+      - name: Build PDF (optional)
+        if: always()
+        run: |
+          pandoc docs/Elaya_Current_Status_Q4_2025.md -o docs/Elaya_Current_Status_Q4_2025.pdf || true
+
+      - name: Upload artifact (pdf)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Elaya_Status_PDF
+          path: docs/Elaya_Current_Status_Q4_2025.pdf
+
+  pr-to-main:
+    needs: [sync]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: develop
+      - name: Create PR to main
+        uses: peter-evans/create-pull-request@v6
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          base: main
+          branch: develop
+          title: "chore: sync status → main"
+          body: "Автосинхронизация штабного статуса."
+          labels: auto-merge
+
+  auto-merge:
+    needs: [pr-to-main]
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+      contents: write
+    steps:
+      - name: Enable automerge for PRs with label
+        uses: peter-evans/enable-pull-request-automerge@v3
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          merge-method: squash
+          pull-request-number: ${{ steps.pr-to-main.outputs.pull-request-number }}
+        continue-on-error: true
