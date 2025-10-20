@@ -33,6 +33,12 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Compute build meta
+        run: |
+          echo "SHORT_SHA=${GITHUB_SHA::7}" >> $GITHUB_ENV
+          echo "BUILD_MARK=deploy-${{ github.run_id }}-$(date -u +'%Y%m%dT%H%M%SZ')" >> $GITHUB_ENV
+          echo "IMAGE_TAG=ghcr.io/${{ github.repository_owner }}/elaya-stagecoach:develop" >> $GITHUB_ENV
+
       - name: Build & Push
         uses: docker/build-push-action@v6
         with:
@@ -42,11 +48,14 @@ jobs:
           tags: |
             ghcr.io/${{ github.repository_owner }}/elaya-stagecoach:develop
             ghcr.io/${{ github.repository_owner }}/elaya-stagecoach:${{ github.sha }}
+          labels: |
+            org.opencontainers.image.revision=${{ env.SHORT_SHA }}
+            org.opencontainers.image.version=${{ env.BUILD_MARK }}
+            org.opencontainers.image.source=${{ github.repository }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
           provenance: false
 
-      # Разделённая логика вызова Render deploy hook
       - name: Trigger Render deploy
         if: ${{ success() }}
         env:
