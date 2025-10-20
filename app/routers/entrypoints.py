@@ -1,29 +1,28 @@
 # app/routers/entrypoints.py
-from aiogram import Router, types
+from aiogram import Router, types, F
 from aiogram.filters import CommandStart, Command
-from aiogram.fsm.context import FSMContext
 
-router = Router(name="entrypoints")
+router = Router()
 
+# /start → показать главное меню
 @router.message(CommandStart())
-async def start(m: types.Message, state: FSMContext):
-    await show_main_menu(m)
-
-@router.message(Command("menu"))
-async def menu(m: types.Message):
-    await show_main_menu(m)
-
-# ⬇️ ВАЖНО: этот обработчик только для НЕ-команд
-@router.message(~Command())
-async def any_text_fallback(m: types.Message):
-    await show_main_menu(m)
-
-async def show_main_menu(m: types.Message):
-    await m.answer(
-        "Команды и разделы: выбери нужное 🧭\n\n"
+async def cmd_start(msg: types.Message):
+    await msg.answer(
+        "Команды и разделы: выбери нужное 🧭\n"
         "🏋️ Тренировка дня — ежедневная рутина 5–15 мин.\n"
         "📈 Мой прогресс — стрик и эпизоды за 7 дней.\n"
-        "💥 Мини-кастинг · 🛰️ Путь лидера\n"
-        "🆘 Помощь / FAQ · ⚙️ Настройки\n"
-        "📜 Политика · ⭐ Расширенная версия"
+        "🎯 Мини-кастинг · 💥 Путь лидера\n"
+        "❓ Помощь / FAQ · ⚙️ Настройки\n"
+        "🧭 Политика · ⭐ Расширенная версия"
     )
+
+# Явные команды, если хочешь здесь же продублировать меню по /menu
+@router.message(Command("menu"))
+async def cmd_menu(msg: types.Message):
+    await cmd_start(msg)
+
+# Фоллбек на любой текст: без фильтра ~Command()
+# (не используем ~Command() вообще)
+@router.message(F.text)
+async def any_text(msg: types.Message):
+    await cmd_start(msg)
