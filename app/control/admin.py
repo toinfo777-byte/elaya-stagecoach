@@ -1,52 +1,28 @@
+# app/control/admin.py
 from __future__ import annotations
+
 import os
+from typing import Iterable, Set
 
-def _parse_int(s: str) -> int | None:
-    s = (s or "").strip()
-    if not s or not s.lstrip("-").isdigit():
-        return None
-    try:
-        return int(s)
-    except Exception:
-        return None
+from aiogram.filters import BaseFilter
+from aiogram.types import Message
 
-def _parse_ids_csv(raw: str | None) -> set[int]:
+def _parse_ids(raw: str | None) -> Set[int]:
     if not raw:
         return set()
-    ids: set[int] = set()
-    for piece in raw.split(","):
-        v = _parse_int(piece)
-        if v is not None:
-            ids.add(v)
-    return ids
+    parts: Iterable[str] = (p.strip() for p in raw.replace(";", ",").split(","))
+    return {int(p) for p in parts if p}
 
-# Разрешённые админы (кто может вызывать команды управления)
-_ADMIN_IDS: set[int] = _parse_ids_csv(os.getenv("ADMIN_IDS"))
-
-# Куда слать алерты (дополнительно к админам)
-_ALERT_CHAT_ID = _parse_int(os.getenv("ADMIN_ALERT_CHAT_ID"))
-
-def admin_ids() -> set[int]:
-    """Множество id пользователей-админов."""
-    # если ADMIN_IDS не задан, но есть ALERT_CHAT_ID (личка) — считаем его тоже админом
-    ids = set(_ADMIN_IDS)
-    if _ALERT_CHAT_ID is not None:
-        ids.add(_ALERT_CHAT_ID)
-    return ids
-
-def alert_targets() -> set[int]:
-    """Куда рассылать уведомления (/notify_admins)."""
-    targets = set(_ADMIN_IDS)
-    if _ALERT_CHAT_ID is not None:
-        targets.add(_ALERT_CHAT_ID)
-    return targets
+ADMIN_ALERT_CHAT_ID = os.getenv("ADMIN_ALERT_CHAT_ID")
+ADMIN_IDS: Set[int] = _parse_ids(os.getenv("ADMIN_IDS"))
 
 def is_admin(user_id: int | None) -> bool:
-    return bool(user_id is not None and user_id in admin_ids())
+    if user_id is None:
+        return False
+    if ADMIN_ALERT_CHAT_ID and int(ADMIN_ALERT_CHAT_ID) == user_id:
+        return True
+    return user_id in ADMIN_IDS
 
-class NotAdminError(PermissionError):
-    pass
-
-def require_admin(user_id: int | None) -> None:
-    if not is_admin(user_id):
-        raise NotAdminError("not-allowed")
+class AdminOnly(BaseFilter):
+    async def __call__(self, message: Message) -> bool:
+        return is_admin(message.from_user.id if message.from_user else None)
