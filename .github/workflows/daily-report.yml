@@ -8,10 +8,13 @@ on:
 
 permissions:
   contents: write
+  pull-requests: write
 
 jobs:
   report:
     runs-on: ubuntu-latest
+    outputs:
+      changed: ${{ steps.commit.outputs.changes_detected }}
     steps:
       - name: Checkout develop
         uses: actions/checkout@v4
@@ -24,8 +27,7 @@ jobs:
           python-version: "3.11"
 
       - name: Install deps
-        run: |
-          python -m pip install --upgrade pip
+        run: python -m pip install --upgrade pip
 
       - name: Generate report
         env:
@@ -33,6 +35,7 @@ jobs:
         run: python tools/daily_report.py
 
       - name: Commit report
+        id: commit
         uses: stefanzweifel/git-auto-commit-action@v5
         with:
           commit_message: "report: daily status [skip ci]"
@@ -40,6 +43,7 @@ jobs:
           file_pattern: docs/elaya_status/*.md
 
       - name: Notify Telegram (report ready)
+        if: ${{ steps.commit.outputs.changes_detected == 'true' }}
         env:
           TG_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           TG_CHAT:  ${{ secrets.ADMIN_ALERT_CHAT_ID }}
@@ -52,3 +56,33 @@ jobs:
             -d chat_id="${TG_CHAT}" \
             -d text="$TEXT" \
             -d disable_web_page_preview=true >/dev/null
+
+  pr-to-main:
+    needs: report
+    if: ${{ needs.report.outputs.changed == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: develop
+
+      - name: Create PR → main
+        id: cpr
+        uses: peter-evans/create-pull-request@v6
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          base: main
+          branch: develop
+          title: "chore(report): daily status → main"
+          body: "Автоматический ежедневный отчёт. Автослияние включено."
+          labels: |
+            auto-merge
+            daily-report
+
+      - name: Enable automerge (squash)
+        if: ${{ steps.cpr.outputs.pull-request-number }}
+        uses: peter-evans/enable-pull-request-automerge@v3
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          pull-request-number: ${{ steps.cpr.outputs.pull-request-number }}
+          merge-method: squash
