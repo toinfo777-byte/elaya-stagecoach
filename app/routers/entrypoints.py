@@ -10,7 +10,7 @@ from app.routers.help import show_main_menu, show_privacy, show_settings
 from app.routers.training import show_training_levels
 from app.routers.progress import show_progress
 
-router = Router(name="entrypoints")  # <-- main.py ждёт r_entrypoints.router
+router = Router(name="entrypoints")  # основной роутер модуля
 
 # Срабатывает из любого состояния
 @router.message(StateFilter("*"), F.text.in_({"💬 Помощь", "Меню", "🏠 Меню", "🏠 В меню"}))
@@ -49,3 +49,7 @@ async def ep_privacy(msg: Message, state: FSMContext):
 async def ep_settings(msg: Message, state: FSMContext):
     await state.clear()
     await show_settings(msg)
+
+# --- ВАЖНО: экспорт под именем, которое ждёт main.py ---
+go_router = router
+__all__ = ["go_router"]
