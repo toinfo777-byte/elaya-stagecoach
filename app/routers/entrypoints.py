@@ -1,12 +1,12 @@
 # app/routers/entrypoints.py
 from __future__ import annotations
-from aiogram import Router, F
-from aiogram.types import CallbackQuery
-from app.routers.help import show_main_menu
+from aiogram import Router
 
-go_router = Router(name="entrypoints")
+# Подключаем готовые роутеры здесь
+from .control import router as control_router  # /status, /report, /diag, ...
 
-@go_router.callback_query(F.data == "go:menu")
-async def go_menu(cb: CallbackQuery):
-    await cb.answer()
-    await show_main_menu(cb.message)
+# Единая точка входа для всех роутеров бота
+router = Router(name="entrypoints")
+router.include_router(control_router)
+
+__all__ = ["router"]
