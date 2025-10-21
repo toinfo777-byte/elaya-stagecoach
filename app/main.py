@@ -11,13 +11,13 @@ from aiogram.types import BotCommand
 from app.config import settings
 from app.storage.repo import ensure_schema
 
-# === Подключаем ТОЛЬКО новые роутеры из этого патча ===
-from app.routers.entrypoints import router as go_router   # единый вход / меню / алиасы
-from app.routers.help import help_router                  # /help + меню/политика/настройки
-from app.routers.training import tr_router                # тренировки
-from app.routers.minicasting import mc_router             # мини-кастинг
-from app.routers.leader import leader_router              # путь лидера
-from app.routers.progress import progress_router          # прогресс
+# === Роутеры: тянем общий router и даём ожидаемые имена ===
+from app.routers.entrypoints import router as go_router      # единый вход / меню / алиасы
+from app.routers.help import router as help_router           # /help + меню/политика/настройки
+from app.routers.training import router as tr_router         # тренировки
+from app.routers.minicasting import router as mc_router      # мини-кастинг
+from app.routers.leader import router as leader_router       # путь лидера
+from app.routers.progress import router as progress_router   # прогресс
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("main")
