@@ -1,10 +1,12 @@
 name: Daily status report
 
 on:
-  workflow_dispatch:
   schedule:
     # 06:00 UTC = 09:00 MSK
     - cron: "0 6 * * *"
+  workflow_dispatch: {}            # запуск из UI (Actions → Run workflow)
+  repository_dispatch:             # запасной ручной запуск через API
+    types: [daily-report]
 
 permissions:
   contents: write
@@ -13,9 +15,12 @@ permissions:
 jobs:
   report:
     runs-on: ubuntu-latest
+
     steps:
-      - name: Checkout
+      - name: Checkout develop
         uses: actions/checkout@v4
+        with:
+          ref: develop
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -24,39 +29,50 @@ jobs:
 
       - name: Install deps
         run: |
-          python -m pip install --upgrade pip
-          pip install pyyaml
+          python -m pip install -U pip
+          pip install markdown-it-py==3.0.0 pyyaml
 
       - name: Build markdown
+        env:
+          TZ: Europe/Moscow
         run: |
           mkdir -p docs/elaya_status
-          TS="$(date -u +'%Y-%m-%d %H:%M:%SZ')"
-          DATE="$(date -u +'%Y%m%d')"
-          FILE="docs/elaya_status/Elaya_Status_${DATE}.md"
-          cat > "${FILE}" <<'MD'
-          # Ежедневный отчёт
-          - Time (UTC): ${TS}
-          - Branch: $GITHUB_REF_NAME
-          - Commit: $GITHUB_SHA
-          - Runner: $GITHUB_RUN_ID
+          # твой генератор отчёта
+          python tools/daily_report.py
+          # вычислим имя итогового файла и сохраним в ENV
+          TODAY="$(date -u +'%Y-%m-%d')"
+          echo "OUT=docs/elaya_status/Elaya_Status_${TODAY}.md" >> $GITHUB_ENV
+          ls -la docs/elaya_status || true
 
-          ## Пульс
-          - ENV: develop
-          - Source: GitHub Actions
-          - Notes: Автогенерация.
-          MD
-          sed -i "s|\${TS}|${TS}|g" "${FILE}"
-          echo "OUT_FILE=${FILE}" >> $GITHUB_ENV
+      - name: Commit md to develop
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: "chore(report): daily Elaya status [skip ci]"
+          branch: develop
+          file_pattern: docs/elaya_status/*.md
 
-      - name: Commit & push
+      # (Опционально) PDF
+      - name: Install pandoc
         run: |
-          git config user.name "elaya-bot"
-          git config user.email "actions@users.noreply.github.com"
-          git add "${{ env.OUT_FILE }}"
-          git commit -m "Daily: $(basename "${{ env.OUT_FILE }}")" || echo "Nothing to commit"
-          git push
+          sudo apt-get update
+          sudo apt-get install -y pandoc
 
-      - name: Send Telegram notify
+      - name: Build PDF
+        shell: bash
+        run: |
+          TODAY="$(date -u +'%Y-%m-%d')"
+          IN="docs/elaya_status/Elaya_Status_${TODAY}.md"
+          OUT="docs/elaya_status/Elaya_Status_${TODAY}.pdf"
+          [ -f "$IN" ] && pandoc "$IN" -o "$OUT" || exit 0
+
+      - name: Upload PDF artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Daily_Status_PDF
+          path: docs/elaya_status/*.pdf
+
+      - name: Notify Telegram
         env:
           TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
           TG_CHAT_ID: ${{ secrets.TG_REPORT_CHAT_ID }}
@@ -65,11 +81,11 @@ jobs:
             echo "No TG secrets, skip"
             exit 0
           fi
-          FILE_URL="https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/main/${{ env.OUT_FILE }}"
+          FILE_URL="https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/develop/${{ env.OUT }}"
           TEXT=$(cat <<EOF
 🧾 Ежедневный отчёт
 • ENV: develop
-• Branch: ${GITHUB_REF_NAME}
+• Branch: develop
 • SHA: ${GITHUB_SHA::7}
 • File: ${FILE_URL}
 EOF
@@ -77,5 +93,4 @@ EOF
           curl -sS -X POST "https://api.telegram.org/bot${TG_BOT_TOKEN}/sendMessage" \
             -d "chat_id=${TG_CHAT_ID}" \
             --data-urlencode "text=${TEXT}" \
-            -d "disable_web_page_preview=true" \
-            -d "parse_mode=HTML"
+            -d "disable_web_page_preview=true"
