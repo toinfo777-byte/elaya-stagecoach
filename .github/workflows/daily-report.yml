@@ -1,36 +1,52 @@
 name: Daily status report
 
 on:
+  # 06:00 UTC = 09:00 MSK
   schedule:
-    # 06:00 UTC = 09:00 MSK
     - cron: "0 6 * * *"
+  # ручной запуск
   workflow_dispatch:
+  # автозапуск после успешной сборки образа
+  workflow_run:
+    workflows:
+      - Build & Push Docker image to GHCR
+    branches:
+      - main
+    types:
+      - completed
 
 permissions:
-  contents: write       # нужно, чтобы пушить файл
+  contents: write        # нужно коммитить md в docs/
   packages: read
 
 jobs:
   report:
+    # если пришли по workflow_run — выполняем только когда прошлый workflow завершился УСПЕШНО
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout main
+      - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
         with:
-          ref: main
-          fetch-depth: 0
+          python-version: "3.11"
+
+      - name: Install deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install pyyaml
 
       - name: Build markdown
-        id: build
         run: |
-          set -e
           mkdir -p docs/elaya_status
           TS="$(date -u +'%Y-%m-%d %H:%M:%SZ')"
           DATE="$(date -u +'%Y%m%d')"
-          OUT="docs/elaya_status/Elaya_Status_${DATE}.md"
+          FILE="docs/elaya_status/Elaya_Status_${DATE}.md"
 
-          cat > "${OUT}" <<'MD'
+          cat > "${FILE}" <<'MD'
           # Ежедневный отчёт
           - Time (UTC): ${TS}
           - Branch: $GITHUB_REF_NAME
@@ -43,55 +59,42 @@ jobs:
           - Notes: Автогенерация.
           MD
 
-          # подставим реальное время
-          sed -i "s|\${TS}|${TS}|g" "${OUT}"
+          # Подставим реальные значения
+          sed -i "s|\${TS}|${TS}|g" "${FILE}"
 
-          echo "OUT=${OUT}" >> "$GITHUB_OUTPUT"
+          echo "OUT_FILE=${FILE}" >> $GITHUB_ENV
 
-      - name: Commit report file
-        uses: stefanzweifel/git-auto-commit-action@v5
-        with:
-          commit_message: "chore(report): daily status [skip ci]"
-          branch: main
-          file_pattern: docs/elaya_status/*.md
-
-      # --- (опционально) PDF из md ---
-      - name: Install pandoc
+      - name: Commit & push
         run: |
-          sudo apt-get update
-          sudo apt-get install -y pandoc
-
-      - name: Build PDF
-        run: |
-          TODAY="$(date -u +'%Y%m%d')"
-          IN="docs/elaya_status/Elaya_Status_${TODAY}.md"
-          OUT="docs/elaya_status/Elaya_Status_${TODAY}.pdf"
-          [ -f "$IN" ] && pandoc "$IN" -o "$OUT" || exit 0
-
-      - name: Upload PDF artifact
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: Daily_Status_PDF
-          path: docs/elaya_status/*.pdf
-      # --- конец PDF блока ---
+          git config user.name "elaya-bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add "${{ env.OUT_FILE }}"
+          git commit -m "Daily: $(basename "${{ env.OUT_FILE }}") [skip ci]" || echo "Nothing to commit"
+          git push
 
       - name: Send Telegram notify
         env:
           TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
-          TG_CHAT_ID:   ${{ secrets.TG_REPORT_CHAT_ID }}
-          OUT:          ${{ steps.build.outputs.OUT }}
+          TG_CHAT_ID: ${{ secrets.TG_REPORT_CHAT_ID }}
         run: |
-          # если секретов нет — тихо пропустим
-          [ -z "$TG_BOT_TOKEN" ] && exit 0
-          [ -z "$TG_CHAT_ID" ] && exit 0
+          if [ -z "$TG_BOT_TOKEN" ] || [ -z "$TG_CHAT_ID" ]; then
+            echo "No TG secrets, skip"
+            exit 0
+          fi
 
-          FILE_URL="https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/main/${OUT}"
+          FILE_URL="https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/main/${{ env.OUT_FILE }}"
           SHORT_SHA="${GITHUB_SHA::7}"
 
-          TEXT="🧾 Ежедневный отчёт\n• ENV: develop\n• Branch: ${GITHUB_REF_NAME}\n• SHA: ${SHORT_SHA}\n• File: ${FILE_URL}"
+          TEXT=$(cat <<EOF
+🧾 Ежедневный отчёт
+• ENV: develop
+• Branch: ${GITHUB_REF_NAME}
+• SHA: ${SHORT_SHA}
+• File: ${FILE_URL}
+EOF
+)
           curl -sS -X POST "https://api.telegram.org/bot${TG_BOT_TOKEN}/sendMessage" \
             -d "chat_id=${TG_CHAT_ID}" \
             --data-urlencode "text=${TEXT}" \
             -d "disable_web_page_preview=true" \
-            -d "parse_mode=HTML" >/dev/null
+            -d "parse_mode=HTML"
