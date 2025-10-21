@@ -1,10 +1,10 @@
 name: Daily status report
 
 on:
+  workflow_dispatch:
   schedule:
     # 06:00 UTC = 09:00 MSK
     - cron: "0 6 * * *"
-  workflow_dispatch: {}
 
 permissions:
   contents: write
@@ -13,7 +13,6 @@ permissions:
 jobs:
   report:
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -34,7 +33,6 @@ jobs:
           TS="$(date -u +'%Y-%m-%d %H:%M:%SZ')"
           DATE="$(date -u +'%Y%m%d')"
           FILE="docs/elaya_status/Elaya_Status_${DATE}.md"
-
           cat > "${FILE}" <<'MD'
           # Ежедневный отчёт
           - Time (UTC): ${TS}
@@ -47,7 +45,6 @@ jobs:
           - Source: GitHub Actions
           - Notes: Автогенерация.
           MD
-
           sed -i "s|\${TS}|${TS}|g" "${FILE}"
           echo "OUT_FILE=${FILE}" >> $GITHUB_ENV
 
