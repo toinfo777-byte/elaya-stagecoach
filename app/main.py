@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import importlib
 
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
@@ -11,16 +12,33 @@ from aiogram.types import BotCommand
 from app.config import settings
 from app.storage.repo import ensure_schema
 
-# === Роутеры: тянем общий router и даём ожидаемые имена ===
-from app.routers.entrypoints import router as go_router      # единый вход / меню / алиасы
-from app.routers.help import router as help_router           # /help + меню/политика/настройки
-from app.routers.training import router as tr_router         # тренировки
-from app.routers.minicasting import router as mc_router      # мини-кастинг
-from app.routers.leader import router as leader_router       # путь лидера
-from app.routers.progress import router as progress_router   # прогресс
-
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("main")
+
+
+def _get_router(module_path: str, candidates: list[str]):
+    """
+    Импортирует модуль и возвращает первый найденный атрибут-роутер
+    по списку возможных имён. Бросает понятный ImportError, если ничего не найдено.
+    """
+    mod = importlib.import_module(module_path)
+    for name in candidates:
+        r = getattr(mod, name, None)
+        if r is not None:
+            return r
+    raise ImportError(
+        f"{module_path} must export one of {candidates}. "
+        f"Found: {', '.join([k for k in dir(mod) if not k.startswith('_')])}"
+    )
+
+
+# === Роутеры (подхватываем по разным вариантам имён) ===
+go_router       = _get_router("app.routers.entrypoints", ["go_router", "router"])
+help_router     = _get_router("app.routers.help",        ["help_router", "router"])
+tr_router       = _get_router("app.routers.training",    ["tr_router", "router"])
+mc_router       = _get_router("app.routers.minicasting", ["mc_router", "router", "routers"])
+leader_router   = _get_router("app.routers.leader",      ["leader_router", "router"])
+progress_router = _get_router("app.routers.progress",    ["progress_router", "router"])
 
 
 async def _set_commands(bot: Bot) -> None:
