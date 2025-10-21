@@ -4,10 +4,10 @@ on:
   schedule:
     # 06:00 UTC = 09:00 MSK
     - cron: "0 6 * * *"
-  workflow_dispatch:
+  workflow_dispatch: {}
 
 permissions:
-  contents: write   # нужно коммитить md в docs/
+  contents: write
   packages: read
 
 jobs:
@@ -48,9 +48,7 @@ jobs:
           - Notes: Автогенерация.
           MD
 
-          # Подставим реальные значения
           sed -i "s|\${TS}|${TS}|g" "${FILE}"
-
           echo "OUT_FILE=${FILE}" >> $GITHUB_ENV
 
       - name: Commit & push
