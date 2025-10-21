@@ -37,12 +37,21 @@ jobs:
         run: |
           echo "SHORT_SHA=${GITHUB_SHA::7}" >> $GITHUB_ENV
           echo "BUILD_MARK=deploy-${{ github.run_id }}-$(date -u +'%Y%m%dT%H%M%SZ')" >> $GITHUB_ENV
-          if [ "${GITHUB_REF_NAME}" = "staging" ]; then
-            echo "DEP_TAG=staging" >> $GITHUB_ENV
+
+          echo "💡 GITHUB_REF_NAME=$GITHUB_REF_NAME"
+
+          if [ "$GITHUB_REF_NAME" = "staging" ]; then
+            DEP_TAG=staging
           else
-            echo "DEP_TAG=develop" >> $GITHUB_ENV
+            DEP_TAG=develop
           fi
+          echo "DEP_TAG=$DEP_TAG" >> $GITHUB_ENV
+
+          # Задаём итоговый тег образа, часть слева можно подставить из контекста GitHub
           echo "IMAGE_TAG=ghcr.io/${{ github.repository_owner }}/elaya-stagecoach:${DEP_TAG}" >> $GITHUB_ENV
+
+          echo "IMAGE_TAG set to $(grep ^IMAGE_TAG= $GITHUB_ENV | cut -d= -f2)"
+          echo "BUILD_MARK=$BUILD_MARK SHORT_SHA=$SHORT_SHA DEP_TAG=$DEP_TAG"
 
       - name: Build & Push
         uses: docker/build-push-action@v6
@@ -65,7 +74,6 @@ jobs:
           cache-to: type=gha,mode=max
           provenance: false
 
-      # develop hook
       - name: Trigger Render deploy (develop)
         if: ${{ success() && github.ref_name == 'develop' }}
         env:
@@ -75,10 +83,9 @@ jobs:
             echo "Triggering Render (develop)…"
             curl -fsS -X POST "$RENDER_DEPLOY_HOOK"
           else
-            echo "⚠️ No RENDER_DEPLOY_HOOK secret set, skipping."
+            echo "⚠️ No RENDER_DEPLOY_HOOK, skipping."
           fi
 
-      # staging hook
       - name: Trigger Render deploy (staging)
         if: ${{ success() && github.ref_name == 'staging' }}
         env:
@@ -88,7 +95,7 @@ jobs:
             echo "Triggering Render (staging)…"
             curl -fsS -X POST "$RENDER_STAGING_HOOK"
           else
-            echo "⚠️ No RENDER_STAGING_HOOK secret set, skipping."
+            echo "⚠️ No RENDER_STAGING_HOOK, skipping."
           fi
 
       - name: Dispatch status_sync
