@@ -2,17 +2,73 @@ name: Deploy to Staging (Render)
 
 on:
   push:
-    branches: [ "develop" ]   # триггер — пуш в ветку develop
+    branches: ["staging"]
+    paths-ignore:
+      - "docs/**"
+      - "**/*.md"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  packages: write
 
 jobs:
-  deploy:
+  build:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Trigger Render Staging Deploy
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Compute meta (staging)
         run: |
-          curl -fsSL -X POST "$RENDER_STAGING_HOOK_URL"
+          echo "SHORT_SHA=${GITHUB_SHA::7}" >> $GITHUB_ENV
+          echo "BUILD_MARK=staging-${{ github.run_id }}-$(date -u +'%Y%m%dT%H%M%SZ')" >> $GITHUB_ENV
+          echo "IMAGE_TAG=ghcr.io/${{ github.repository_owner }}/elaya-stagecoach:staging" >> $GITHUB_ENV
+          echo "ENV=staging" >> $GITHUB_ENV
+
+      - name: Build & Push (staging tag)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          platforms: linux/amd64
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/elaya-stagecoach:staging
+            ghcr.io/${{ github.repository_owner }}/elaya-stagecoach:${{ github.sha }}-stg
+          build-args: |
+            BUILD_MARK=${{ env.BUILD_MARK }}
+            SHORT_SHA=${{ env.SHORT_SHA }}
+            IMAGE_TAG=${{ env.IMAGE_TAG }}
+          labels: |
+            org.opencontainers.image.revision=${{ env.SHORT_SHA }}
+            org.opencontainers.image.version=${{ env.BUILD_MARK }}
+
+      - name: Trigger Render STAGING
         env:
-          RENDER_STAGING_HOOK_URL: ${{ secrets.RENDER_STAGING_HOOK_URL }}
+          RENDER_STAGING_HOOK: ${{ secrets.RENDER_STAGING_HOOK }}
+        run: |
+          if [ -n "$RENDER_STAGING_HOOK" ]; then
+            curl -fsS -X POST "$RENDER_STAGING_HOOK"
+          else
+            echo "No RENDER_STAGING_HOOK secret set, skipping."
+          fi
+
+      - name: Dispatch status_sync (staging)
+        run: |
+          curl -fsS -X POST \
+            -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+            -H "Accept: application/vnd.github+json" \
+            "${{ github.api_url }}/repos/${{ github.repository }}/dispatches" \
+            -d "$(jq -n --arg t "status_sync" \
+                         --arg bm "${{ env.BUILD_MARK }}" \
+                         --arg sha "${{ env.SHORT_SHA }}" \
+                         --arg img "${{ env.IMAGE_TAG }}" \
+                         --arg envv "staging" \
+                         '{event_type:$t,client_payload:{BUILD_MARK:$bm,SHORT_SHA:$sha,IMAGE_TAG:$img,ENV:$envv}}')"
