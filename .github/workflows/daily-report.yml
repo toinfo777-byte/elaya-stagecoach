@@ -2,18 +2,13 @@ name: Daily status report
 
 on:
   schedule:
-    # 09:00 MSK == 06:00 UTC
+    # 06:00 UTC = 09:00 MSK
     - cron: "0 6 * * *"
   workflow_dispatch:
-  repository_dispatch:
-    types: [daily_report]
 
 permissions:
-  contents: write
-
-concurrency:
-  group: daily-report
-  cancel-in-progress: false
+  contents: write   # нужно коммитить md в docs/
+  packages: read
 
 jobs:
   report:
@@ -22,10 +17,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-        with:
-          ref: main
 
-      - name: Setup Python
+      - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
@@ -33,63 +26,61 @@ jobs:
       - name: Install deps
         run: |
           python -m pip install --upgrade pip
-          pip install python-dotenv==1.0.1
+          pip install pyyaml
 
-      - name: Compute meta
-        id: meta
+      - name: Build markdown
         run: |
-          TS_UTC="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
-          TODAY="$(date -u +'%Y-%m-%d')"
-          echo "ts_utc=${TS_UTC}" >> $GITHUB_OUTPUT
-          echo "today=${TODAY}" >> $GITHUB_OUTPUT
+          mkdir -p docs/elaya_status
+          TS="$(date -u +'%Y-%m-%d %H:%M:%SZ')"
+          DATE="$(date -u +'%Y%m%d')"
+          FILE="docs/elaya_status/Elaya_Status_${DATE}.md"
 
-      - name: Generate report md
+          cat > "${FILE}" <<'MD'
+          # Ежедневный отчёт
+          - Time (UTC): ${TS}
+          - Branch: $GITHUB_REF_NAME
+          - Commit: $GITHUB_SHA
+          - Runner: $GITHUB_RUN_ID
+
+          ## Пульс
+          - ENV: develop
+          - Source: GitHub Actions
+          - Notes: Автогенерация.
+          MD
+
+          # Подставим реальные значения
+          sed -i "s|\${TS}|${TS}|g" "${FILE}"
+
+          echo "OUT_FILE=${FILE}" >> $GITHUB_ENV
+
+      - name: Commit & push
+        run: |
+          git config user.name "elaya-bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add "${{ env.OUT_FILE }}"
+          git commit -m "Daily: $(basename "${{ env.OUT_FILE }}")" || echo "Nothing to commit"
+          git push
+
+      - name: Send Telegram notify
         env:
-          ENV: develop
-          REPO: ${{ github.repository }}
-          SHA:  ${{ github.sha }}
-          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-          IMAGE_TAG: ghcr.io/${{ github.repository_owner }}/elaya-stagecoach:develop
-          BUILD_MARK: daily-${{ steps.meta.outputs.today }}
-          CRON_TS: ${{ steps.meta.outputs.ts_utc }}
+          TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
+          TG_CHAT_ID: ${{ secrets.TG_REPORT_CHAT_ID }}
         run: |
-          python tools/daily_report.py
-
-      - name: Commit report
-        uses: stefanzweifel/git-auto-commit-action@v5
-        with:
-          commit_message: "report(daily): ${{ steps.meta.outputs.today }} [skip ci]"
-          branch: main
-          file_pattern: docs/elaya_status/*.md
-
-      - name: Notify Telegram (success)
-        if: ${{ success() }}
-        env:
-          TG_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
-          TG_CHAT:  ${{ secrets.ADMIN_ALERT_CHAT_ID }}
-          FILEPATH: docs/elaya_status/Elaya_Status_${{ steps.meta.outputs.today }}.md
-          RUN_URL:  ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-        run: |
-          TEXT="🧾 Ежедневный отчёт готов\n${FILEPATH}\n\nCI: ${RUN_URL}"
-          curl -sS -X POST "https://api.telegram.org/bot${TG_TOKEN}/sendMessage" \
-            -d chat_id="${TG_CHAT}" -d text="$TEXT" -d disable_web_page_preview=true >/dev/null
-
-      - name: Notify Telegram (failure)
-        if: ${{ failure() }}
-        env:
-          TG_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
-          TG_CHAT:  ${{ secrets.ADMIN_ALERT_CHAT_ID }}
-          RUN_URL:  ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-        run: |
-          TEXT="❌ Ежедневный отчёт не собрался\nCI: ${RUN_URL}"
-          curl -sS -X POST "https://api.telegram.org/bot${TG_TOKEN}/sendMessage" \
-            -d chat_id="${TG_CHAT}" -d text="$TEXT" -d disable_web_page_preview=true >/dev/null
-
-      - name: Ping Cronitor
-        if: ${{ always() }}
-        env:
-          CRONITOR_PING_URL: ${{ secrets.CRONITOR_DAILY_PING_URL }}
-        run: |
-          if [ -n "$CRONITOR_PING_URL" ]; then
-            curl -fsS "$CRONITOR_PING_URL" || true
+          if [ -z "$TG_BOT_TOKEN" ] || [ -z "$TG_CHAT_ID" ]; then
+            echo "No TG secrets, skip"
+            exit 0
           fi
+          FILE_URL="https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/main/${{ env.OUT_FILE }}"
+          TEXT=$(cat <<EOF
+🧾 Ежедневный отчёт
+• ENV: develop
+• Branch: ${GITHUB_REF_NAME}
+• SHA: ${GITHUB_SHA::7}
+• File: ${FILE_URL}
+EOF
+)
+          curl -sS -X POST "https://api.telegram.org/bot${TG_BOT_TOKEN}/sendMessage" \
+            -d "chat_id=${TG_CHAT_ID}" \
+            --data-urlencode "text=${TEXT}" \
+            -d "disable_web_page_preview=true" \
+            -d "parse_mode=HTML"
