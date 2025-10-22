@@ -24,7 +24,7 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update -yq
-          sudo apt-get install -yq wkhtmltopdf
+          sudo apt-get install -yq pandoc wkhtmltopdf
           pip install pypandoc
 
       - name: Build markdown
@@ -47,13 +47,17 @@ jobs:
       - name: Build PDF
         run: |
           python - <<'PY'
-          import pypandoc, datetime, os
+          import pypandoc, os, datetime
           d = datetime.datetime.utcnow().strftime("%Y%m%d")
           md = f"docs/elaya_status/Elaya_Status_{d}.md"
           pdf = md.replace(".md", ".pdf")
-          pypandoc.convert_text(open(md).read(), "pdf", format="md",
-                                outputfile=pdf, extra_args=['--standalone'])
-          print("✅ PDF создан:", pdf)
+          import pypandoc
+          try:
+              pypandoc.convert_file(md, "pdf", outputfile=pdf, extra_args=["--standalone"])
+              print("✅ PDF успешно создан:", pdf)
+          except Exception as e:
+              print("❌ Ошибка при генерации PDF:", e)
+              raise
           PY
 
       - name: Commit & push
