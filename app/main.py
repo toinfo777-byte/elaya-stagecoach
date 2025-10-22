@@ -1,4 +1,6 @@
+# app/main.py
 from __future__ import annotations
+
 import asyncio
 import hashlib
 import logging
@@ -134,9 +136,12 @@ async def main() -> None:
 
     # diag — только если включён HTTP
     if settings.http_enabled:
-        from app.routers import diag  # импортируем только при необходимости
-        dp.include_router(diag.router)
-        log.info("✅ router loaded: diag (last, HTTP_ENABLED=true)")
+        try:
+            from app.routers import diag  # импортируем только при необходимости
+            dp.include_router(diag.router)
+            log.info("✅ router loaded: diag (last, HTTP_ENABLED=true)")
+        except ModuleNotFoundError as e:
+            log.warning("HTTP_ENABLED=true, но нет зависимостей для diag: %r", e)
     else:
         log.info("ℹ️ HTTP_DISABLED: diag router is skipped")
 
