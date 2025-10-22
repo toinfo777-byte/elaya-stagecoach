@@ -52,3 +52,25 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      # Опционально: дёргаем Render Deploy Hook, если задан
+      - name: Trigger Render deploy
+        if: ${{ success() && secrets.RENDER_DEPLOY_HOOK != '' }}
+        env:
+          RENDER_DEPLOY_HOOK: ${{ secrets.RENDER_DEPLOY_HOOK }}
+        run: |
+          echo "Waiting for tag propagation..."
+          sleep 10
+          echo "Triggering Render deploy via hook"
+          curl -fsS -X POST "$RENDER_DEPLOY_HOOK"
+
+      # После успешного деплоя — кидаем repository_dispatch,
+      # чтобы в main сработал Post-deploy status report
+      - name: Dispatch post-deploy status_report
+        if: ${{ success() }}
+        run: |
+          curl -fsS -X POST \
+            -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+            -H "Accept: application/vnd.github+json" \
+            "${{ github.api_url }}/repos/${{ github.repository }}/dispatches" \
+            -d '{"event_type":"status_report","client_payload":{"source":"render_deploy","env":"develop"}}'
