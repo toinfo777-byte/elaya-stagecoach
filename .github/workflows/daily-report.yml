@@ -13,71 +13,45 @@ jobs:
   daily:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout repo
-        uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.11" }
 
       - name: Generate daily Markdown (inline)
         run: |
           python - <<'PY'
           import os, datetime, pathlib
-          repo = os.environ.get("GITHUB_REPOSITORY","")
-          sha  = os.environ.get("GITHUB_SHA","")[:7]
-          now  = datetime.datetime.utcnow()
-          date = now.strftime("%Y%m%d")
-          ts   = now.strftime("%Y-%m-%d %H:%M:%SZ")
-          out  = pathlib.Path("docs/elaya_status"); out.mkdir(parents=True, exist_ok=True)
-          f    = out / f"Elaya_Status_{date}.md"
-          md = [
-            f"# Elaya Status — {date}",
-            "",
-            f"- Repo: `{repo}`",
-            f"- SHA: `{sha}`",
-            f"- Generated (UTC): {ts}",
-            "",
-            "Daily scheduled summary.",
-            "",
-          ]
-          f.write_text("\n".join(md), encoding="utf-8")
-          print(f"Wrote {f}")
+          repo=os.environ.get("GITHUB_REPOSITORY",""); sha=os.environ.get("GITHUB_SHA","")[:7]
+          now=datetime.datetime.utcnow(); date=now.strftime("%Y%m%d"); ts=now.strftime("%Y-%m-%d %H:%M:%SZ")
+          out=pathlib.Path("docs/elaya_status"); out.mkdir(parents=True, exist_ok=True)
+          f=out/f"Elaya_Status_{date}.md"
+          content=["# Elaya Status — "+date,"",f"- Repo: `{repo}`",f"- SHA: `{sha}`",f"- Generated (UTC): {ts}","","Daily scheduled summary.",""]
+          f.write_text("\n".join(content), encoding="utf-8"); print("Wrote", f)
           PY
 
-      - name: Commit report
+      - name: Commit & push (no-fail)
         run: |
           git config user.name  "elaya-bot"
           git config user.email "bot@users.noreply.github.com"
-          git add docs/elaya_status/Elaya_Status_*.md
-          git commit -m "chore(report): daily status $(date -u +%Y-%m-%dT%H:%M:%SZ)" || echo "Nothing to commit"
-          git push
+          git add docs/elaya_status/Elaya_Status_*.md || true
+          git commit -m "chore(report): daily $(date -u +%FT%TZ)" || true
+          git push || true
 
-      # DIAG: те же проверки
-      - name: Telegram getMe (smoke)
-        env:
-          TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
-        run: |
-          curl -sS "https://api.telegram.org/bot${TG_BOT_TOKEN}/getMe" | tee /tmp/getme.json
-
-      - name: Telegram getChat (status group)
+      - name: Telegram smoke (no-fail, print)
         env:
           TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
           TG_STATUS_CHAT_ID: ${{ secrets.TG_STATUS_CHAT_ID }}
         run: |
+          set -x
+          curl -sS "https://api.telegram.org/bot${TG_BOT_TOKEN}/getMe" | tee /tmp/getme.json || true
           curl -sS -X POST "https://api.telegram.org/bot${TG_BOT_TOKEN}/getChat" \
-            -d "chat_id=${TG_STATUS_CHAT_ID}" | tee /tmp/getchat.json
-
-      - name: Telegram smoke message (scheduled)
-        env:
-          TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
-          TG_STATUS_CHAT_ID: ${{ secrets.TG_STATUS_CHAT_ID }}
-        run: |
+            -d "chat_id=${TG_STATUS_CHAT_ID}" | tee /tmp/getchat.json || true
           SHORT_SHA="${GITHUB_SHA::7}"
-          MSG="⏰ Daily ran · repo=${GITHUB_REPOSITORY} · sha=${SHORT_SHA} · run=${GITHUB_RUN_NUMBER}"
-          curl -sS -X POST "https://api.telegram.org/bot${TG_BOT_TOKEN}/sendMessage" \
+          HTTP_CODE=$(curl -sS -o /tmp/send_body.json -w "%{http_code}" -X POST \
+            "https://api.telegram.org/bot${TG_BOT_TOKEN}/sendMessage" \
             -d "chat_id=${TG_STATUS_CHAT_ID}" \
-            -d "text=${MSG}" \
+            -d "text=⏰ Daily ok · ${GITHUB_REPOSITORY} · ${SHORT_SHA}" \
             -d "disable_web_page_preview=true" \
-            -d "parse_mode=HTML" | tee /tmp/send_to_group.json
+            -d "parse_mode=HTML" || true)
+          echo "HTTP_CODE=${HTTP_CODE}"
+          cat /tmp/send_body.json || true
