@@ -1,19 +1,21 @@
 name: Daily status report
 
 on:
-  schedule:
-    - cron: "0 6 * * *"   # 06:00 UTC = 09:00 MSK
   workflow_dispatch:
+  schedule:
+    # 09:00 MSK == 06:00 UTC
+    - cron: "0 6 * * *"
+    # 21:30 MSK == 18:30 UTC
+    - cron: "30 18 * * *"
 
 permissions:
   contents: write
-  packages: read
 
 jobs:
-  report:
+  daily:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
+      - name: Checkout repo
         uses: actions/checkout@v4
 
       - name: Set up Python
@@ -21,62 +23,26 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Install dependencies
+      - name: Install deps for tooling
         run: |
-          sudo apt-get update -yq
-          sudo apt-get install -yq pandoc wkhtmltopdf
-          pip install pypandoc
+          python -m pip install --upgrade pip
+          pip install pyyaml python-telegram-bot==13.15
 
-      - name: Build markdown
+      - name: Generate daily Markdown
+        env:
+          TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
+          TG_STATUS_CHAT_ID: ${{ secrets.TG_STATUS_CHAT_ID }}
+          STATUS_URL: ${{ secrets.STATUS_URL }}  # опционально, под план A
         run: |
-          mkdir -p docs/elaya_status
-          DATE=$(date -u +%Y%m%d)
-          TS=$(date -u +"%Y-%m-%d %H:%M:%SZ")
-          MD=docs/elaya_status/Elaya_Status_${DATE}.md
-          echo "# Ежедневный отчёт" > "$MD"
-          echo "- Time (UTC): ${TS}" >> "$MD"
-          echo "- Branch: ${GITHUB_REF_NAME}" >> "$MD"
-          echo "- Commit: ${GITHUB_SHA}" >> "$MD"
-          echo "- Runner: ${GITHUB_RUN_ID}" >> "$MD"
-          echo "" >> "$MD"
-          echo "## Пульс" >> "$MD"
-          echo "- ENV: develop" >> "$MD"
-          echo "- Source: GitHub Actions" >> "$MD"
-          echo "- Notes: Автогенерация." >> "$MD"
+          python tools/daily_report.py
 
-      - name: Build PDF (safe mode)
+      - name: Commit report to docs/elaya_status
         run: |
-          DATE=$(date -u +%Y%m%d)
-          MD=docs/elaya_status/Elaya_Status_${DATE}.md
-          PDF=${MD%.md}.pdf
-          echo "🛠 Пытаемся собрать PDF через pypandoc..."
-          python - <<'PY'
-          import pypandoc, datetime, os, sys
-          d = datetime.datetime.utcnow().strftime("%Y%m%d")
-          md = f"docs/elaya_status/Elaya_Status_{d}.md"
-          pdf = md.replace(".md", ".pdf")
-          try:
-              pypandoc.convert_file(md, "pdf", outputfile=pdf, extra_args=["--pdf-engine=wkhtmltopdf", "--standalone"])
-              print("✅ PDF создан:", pdf)
-          except Exception as e:
-              print("⚠️ Ошибка через pypandoc, пробуем через pandoc CLI:", e)
-              os.system(f"pandoc {md} -o {pdf} --pdf-engine=wkhtmltopdf")
-          if not os.path.exists(pdf):
-              print("❌ PDF не создан!")
-              sys.exit(1)
-          PY
+          git config user.name  "elaya-bot"
+          git config user.email "bot@users.noreply.github.com"
+          git add docs/elaya_status/Elaya_Status_*.md
+          git commit -m "chore(report): daily status" || echo "Nothing to commit"
 
-      - name: Commit & push
+      - name: Push
         run: |
-          DATE=$(date -u +%Y%m%d)
-          git config user.name "elaya-bot"
-          git config user.email "actions@users.noreply.github.com"
-          git add docs/elaya_status/Elaya_Status_${DATE}.*
-          git commit -m "Daily report ${DATE}" || echo "No changes"
           git push
-
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: elaya-daily
-          path: docs/elaya_status
