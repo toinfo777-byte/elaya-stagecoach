@@ -53,19 +53,22 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      # Опционально: дёргаем Render Deploy Hook, если задан
+      # Опционально: дёргаем Render deploy hook, если задан в секретах
       - name: Trigger Render deploy
-        if: ${{ success() && secrets.RENDER_DEPLOY_HOOK != '' }}
+        if: ${{ success() }}
         env:
           RENDER_DEPLOY_HOOK: ${{ secrets.RENDER_DEPLOY_HOOK }}
         run: |
-          echo "Waiting for tag propagation..."
-          sleep 10
-          echo "Triggering Render deploy via hook"
-          curl -fsS -X POST "$RENDER_DEPLOY_HOOK"
+          if [ -n "$RENDER_DEPLOY_HOOK" ]; then
+            echo "Waiting for tag propagation..."
+            sleep 10
+            echo "Triggering Render deploy via hook"
+            curl -fsS -X POST "$RENDER_DEPLOY_HOOK"
+          else
+            echo "Skipping Render deploy — no hook provided."
+          fi
 
-      # После успешного деплоя — кидаем repository_dispatch,
-      # чтобы в main сработал Post-deploy status report
+      # После успешного деплоя шлём repository_dispatch для отчёта в main
       - name: Dispatch post-deploy status_report
         if: ${{ success() }}
         run: |
