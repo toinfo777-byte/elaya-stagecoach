@@ -1,0 +1,33 @@
+name: TG smoke
+
+on:
+  workflow_dispatch: {}
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - name: getMe
+        env: { TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }} }
+        run: |
+          curl -sS "https://api.telegram.org/bot${TG_BOT_TOKEN}/getMe" | tee /tmp/getme.json || true
+      - name: getChat
+        env:
+          TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
+          TG_STATUS_CHAT_ID: ${{ secrets.TG_STATUS_CHAT_ID }}
+        run: |
+          curl -sS -X POST "https://api.telegram.org/bot${TG_BOT_TOKEN}/getChat" \
+            -d "chat_id=${TG_STATUS_CHAT_ID}" | tee /tmp/getchat.json || true
+      - name: sendMessage
+        env:
+          TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
+          TG_STATUS_CHAT_ID: ${{ secrets.TG_STATUS_CHAT_ID }}
+        run: |
+          HTTP_CODE=$(curl -sS -o /tmp/send_body.json -w "%{http_code}" -X POST \
+            "https://api.telegram.org/bot${TG_BOT_TOKEN}/sendMessage" \
+            -d "chat_id=${TG_STATUS_CHAT_ID}" \
+            -d "text=TG smoke $(date -u +%T)" \
+            -d "disable_web_page_preview=true" \
+            -d "parse_mode=HTML" || true)
+          echo "HTTP_CODE=${HTTP_CODE}"
+          cat /tmp/send_body.json || true
