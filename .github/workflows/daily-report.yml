@@ -21,20 +21,49 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Update apt
-        run: 'sudo apt-get update -yq'
-
-      - name: Install pandoc and LaTeX minimal
-        run: 'sudo apt-get install -yq pandoc texlive-latex-recommended texlive-latex-extra'
+      - name: Install dependencies
+        run: |
+          sudo apt-get update -yq
+          sudo apt-get install -yq wkhtmltopdf
+          pip install pypandoc
 
       - name: Build markdown
-        run: 'mkdir -p docs/elaya_status && DATE=$(date -u +%Y%m%d) && TS=$(date -u +"%Y-%m-%d %H:%M:%SZ") && MD=docs/elaya_status/Elaya_Status_${DATE}.md && printf "%s\n" "# Ежедневный отчёт" "- Time (UTC): ${TS}" "- Branch: ${GITHUB_REF_NAME}" "- Commit: ${GITHUB_SHA}" "- Runner: ${GITHUB_RUN_ID}" "" "## Пульс" "- ENV: develop" "- Source: GitHub Actions" "- Notes: Автогенерация." > "$MD"'
+        run: |
+          mkdir -p docs/elaya_status
+          DATE=$(date -u +%Y%m%d)
+          TS=$(date -u +"%Y-%m-%d %H:%M:%SZ")
+          MD=docs/elaya_status/Elaya_Status_${DATE}.md
+          echo "# Ежедневный отчёт" > "$MD"
+          echo "- Time (UTC): ${TS}" >> "$MD"
+          echo "- Branch: ${GITHUB_REF_NAME}" >> "$MD"
+          echo "- Commit: ${GITHUB_SHA}" >> "$MD"
+          echo "- Runner: ${GITHUB_RUN_ID}" >> "$MD"
+          echo "" >> "$MD"
+          echo "## Пульс" >> "$MD"
+          echo "- ENV: develop" >> "$MD"
+          echo "- Source: GitHub Actions" >> "$MD"
+          echo "- Notes: Автогенерация." >> "$MD"
 
       - name: Build PDF
-        run: 'DATE=$(date -u +%Y%m%d) && MD=docs/elaya_status/Elaya_Status_${DATE}.md && PDF=${MD%.md}.pdf && pandoc "$MD" -o "$PDF" -V geometry:margin=2cm --pdf-engine=xelatex'
+        run: |
+          python - <<'PY'
+          import pypandoc, datetime, os
+          d = datetime.datetime.utcnow().strftime("%Y%m%d")
+          md = f"docs/elaya_status/Elaya_Status_{d}.md"
+          pdf = md.replace(".md", ".pdf")
+          pypandoc.convert_text(open(md).read(), "pdf", format="md",
+                                outputfile=pdf, extra_args=['--standalone'])
+          print("✅ PDF создан:", pdf)
+          PY
 
       - name: Commit & push
-        run: 'DATE=$(date -u +%Y%m%d) && MD=docs/elaya_status/Elaya_Status_${DATE}.md && PDF=${MD%.md}.pdf && git config user.name "elaya-bot" && git config user.email "actions@users.noreply.github.com" && git add "$MD" "$PDF" && git commit -m "Daily report ${DATE}" || echo "No changes" && git push'
+        run: |
+          DATE=$(date -u +%Y%m%d)
+          git config user.name "elaya-bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add docs/elaya_status/Elaya_Status_${DATE}.*
+          git commit -m "Daily report ${DATE}" || echo "No changes"
+          git push
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
