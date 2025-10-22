@@ -44,20 +44,26 @@ jobs:
           echo "- Source: GitHub Actions" >> "$MD"
           echo "- Notes: Автогенерация." >> "$MD"
 
-      - name: Build PDF
+      - name: Build PDF (safe mode)
         run: |
+          DATE=$(date -u +%Y%m%d)
+          MD=docs/elaya_status/Elaya_Status_${DATE}.md
+          PDF=${MD%.md}.pdf
+          echo "🛠 Пытаемся собрать PDF через pypandoc..."
           python - <<'PY'
-          import pypandoc, os, datetime
+          import pypandoc, datetime, os, sys
           d = datetime.datetime.utcnow().strftime("%Y%m%d")
           md = f"docs/elaya_status/Elaya_Status_{d}.md"
           pdf = md.replace(".md", ".pdf")
-          import pypandoc
           try:
-              pypandoc.convert_file(md, "pdf", outputfile=pdf, extra_args=["--standalone"])
-              print("✅ PDF успешно создан:", pdf)
+              pypandoc.convert_file(md, "pdf", outputfile=pdf, extra_args=["--pdf-engine=wkhtmltopdf", "--standalone"])
+              print("✅ PDF создан:", pdf)
           except Exception as e:
-              print("❌ Ошибка при генерации PDF:", e)
-              raise
+              print("⚠️ Ошибка через pypandoc, пробуем через pandoc CLI:", e)
+              os.system(f"pandoc {md} -o {pdf} --pdf-engine=wkhtmltopdf")
+          if not os.path.exists(pdf):
+              print("❌ PDF не создан!")
+              sys.exit(1)
           PY
 
       - name: Commit & push
