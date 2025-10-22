@@ -4,7 +4,9 @@ import asyncio
 import hashlib
 import logging
 import importlib
+import os
 import sys
+import time
 
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
@@ -44,6 +46,39 @@ logging.basicConfig(
 )
 log = logging.getLogger("main")
 
+# ── Runtime telemetry ─────────────────────────────────────────────
+_START_TS = time.time()
+
+def _seed_runtime_env() -> None:
+    """
+    Переменные, которые будет читать /status_json.
+    Часть можно переопределить через окружение Render.
+    """
+    os.environ.setdefault("ENV", getattr(settings, "env", "develop"))
+    os.environ.setdefault("BUILD_MARK", BUILD_MARK)
+    # короткий sha можно положить из настроек или из BUILD_MARK (если там есть)
+    git_sha = os.getenv("GIT_SHA")
+    if not git_sha:
+        # пробуем вынуть из BUILD_MARK вида deploy-abc1234
+        part = BUILD_MARK.split("-")[-1] if "-" in BUILD_MARK else ""
+        os.environ["GIT_SHA"] = (part[:7] if part else "")  # может быть пустым — это ок
+    # образ: можно смикшировать из настроек, либо оставить дефолт
+    os.environ.setdefault("IMAGE", os.getenv("IMAGE", "ghcr.io/owner/repo:develop"))
+    # стартовые флаги: пусть будут «зелёными», конкретику даст код cronitor/sentry
+    os.environ.setdefault("SENTRY_OK", "1")
+    os.environ.setdefault("CRONITOR_OK", "1")
+    os.environ["UPTIME_SEC"] = "0"
+
+async def _tick_uptime_env() -> None:
+    """Периодически обновляем аптайм для /status_json."""
+    while True:
+        try:
+            os.environ["UPTIME_SEC"] = str(int(time.time() - _START_TS))
+        except Exception as e:
+            log.warning("uptime tick failed: %r", e)
+        await asyncio.sleep(30)
+# ─────────────────────────────────────────────────────────────────
+
 
 async def _set_commands(bot: Bot) -> None:
     await bot.set_my_commands(
@@ -70,6 +105,8 @@ async def _guard(coro, what: str):
 
 async def main() -> None:
     log.info("=== BUILD %s ===", BUILD_MARK)
+    _seed_runtime_env()
+
     ensure_schema()
     log.info("DB schema ensured")
 
@@ -138,6 +175,9 @@ async def main() -> None:
     log.info("🔑 Token hash: %s", token_hash)
     log.info("🤖 Bot: @%s (ID: %s)", me.username, me.id)
     log.info("🚀 Start polling…")
+
+    # Тикаем аптайм параллельно
+    asyncio.create_task(_tick_uptime_env())
 
     await dp.start_polling(bot, allowed_updates=["message", "callback_query"])
 
