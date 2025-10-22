@@ -23,25 +23,46 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Install deps for tooling
+      - name: Generate daily Markdown (inline)
         run: |
-          python -m pip install --upgrade pip
-          pip install pyyaml python-telegram-bot==13.15
+          python - <<'PY'
+          import os, datetime, pathlib
+          repo = os.environ.get("GITHUB_REPOSITORY","")
+          sha  = os.environ.get("GITHUB_SHA","")[:7]
+          now  = datetime.datetime.utcnow()
+          date = now.strftime("%Y%m%d")
+          ts   = now.strftime("%Y-%m-%d %H:%M:%SZ")
+          out  = pathlib.Path("docs/elaya_status"); out.mkdir(parents=True, exist_ok=True)
+          f    = out / f"Elaya_Status_{date}.md"
+          md = [
+            f"# Elaya Status — {date}",
+            "",
+            f"- Repo: `{repo}`",
+            f"- SHA: `{sha}`",
+            f"- Generated (UTC): {ts}",
+            "",
+            "Daily scheduled summary.",
+            "",
+          ]
+          f.write_text("\n".join(md), encoding="utf-8")
+          print(f"Wrote {f}")
+          PY
 
-      - name: Generate daily Markdown
-        env:
-          TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
-          TG_STATUS_CHAT_ID: ${{ secrets.TG_STATUS_CHAT_ID }}
-          STATUS_URL: ${{ secrets.STATUS_URL }}  # опционально, под план A
+      - name: Commit report to docs/elaya_status
         run: |
-          python tools/daily_report.py
+          git config user.name  "elaya-bot"
+          git config user.email "bot@users.noreply.github.com"
+          git add docs/elaya_status/Elaya_Status_*.md
+          git commit -m "chore(report): daily status $(date -u +%Y-%m-%dT%H:%M:%SZ)" || echo "Nothing to commit"
 
-      # 🔹 SMOKE: быстрый пинг в Telegram, чтобы подтвердить связку токен/чат
+      - name: Push
+        run: git push
+
+      # 🔹 SMOKE: проверяем связку TG_BOT_TOKEN → TG_STATUS_CHAT_ID
       - name: Telegram getMe (smoke)
         env:
           TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
         run: |
-          echo "Calling getMe..."
           curl -fsS "https://api.telegram.org/bot${TG_BOT_TOKEN}/getMe" || true
 
       - name: Telegram smoke message (scheduled)
@@ -49,20 +70,10 @@ jobs:
           TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
           TG_STATUS_CHAT_ID: ${{ secrets.TG_STATUS_CHAT_ID }}
         run: |
-          MSG="⏰ Daily workflow ran · ${GITHUB_WORKFLOW} · run=${GITHUB_RUN_NUMBER} · sha=${GITHUB_SHA::7}"
+          SHORT_SHA="${GITHUB_SHA::7}"
+          MSG="⏰ Daily ran · repo=${GITHUB_REPOSITORY} · sha=${SHORT_SHA} · run=${GITHUB_RUN_NUMBER}"
           curl -fsS -X POST "https://api.telegram.org/bot${TG_BOT_TOKEN}/sendMessage" \
             -d "chat_id=${TG_STATUS_CHAT_ID}" \
             -d "text=${MSG}" \
             -d "disable_web_page_preview=true" \
             -d "parse_mode=HTML" || true
-
-      - name: Commit report to docs/elaya_status
-        run: |
-          git config user.name  "elaya-bot"
-          git config user.email "bot@users.noreply.github.com"
-          git add docs/elaya_status/Elaya_Status_*.md
-          git commit -m "chore(report): daily status" || echo "Nothing to commit"
-
-      - name: Push
-        run: |
-          git push
