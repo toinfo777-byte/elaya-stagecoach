@@ -38,7 +38,7 @@ jobs:
             f"- SHA: `{sha}`",
             f"- Generated (UTC): {ts}",
             "",
-            "Post-deploy summary (repository_dispatch/workflow_dispatch).",
+            "Post-deploy summary.",
             "",
           ]
           if f.exists():
@@ -50,62 +50,50 @@ jobs:
           print(f"Wrote {f}")
           PY
 
-      - name: Commit & push report
+      - name: Commit & push report (no-fail)
         run: |
+          set -x
           git config user.name  "elaya-bot"
           git config user.email "actions@users.noreply.github.com"
-          git add docs/elaya_status/Elaya_Status_*.md
-          git commit -m "chore(report): post-deploy status $(date -u +%Y-%m-%dT%H:%M:%SZ)" || echo "Nothing to commit"
-          git push
+          git add docs/elaya_status/Elaya_Status_*.md || true
+          git commit -m "chore(report): post-deploy $(date -u +%FT%TZ)" || true
+          git push || true
 
-      # ---------- Telegram DIAG ----------
-      - name: Telegram getMe (print username/id)
+      # -------- Telegram DIAG (печатаем ответы, но job не валим) --------
+      - name: Telegram getMe
         env:
           TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
         run: |
-          echo "== getMe =="
-          curl -sS "https://api.telegram.org/bot${TG_BOT_TOKEN}/getMe" | tee /tmp/getme.json
+          set -x
+          curl -sS "https://api.telegram.org/bot${TG_BOT_TOKEN}/getMe" | tee /tmp/getme.json || true
           echo
 
-      - name: Telegram getChat (check bot sees the group)
+      - name: Telegram getChat (status group)
         env:
           TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
           TG_STATUS_CHAT_ID: ${{ secrets.TG_STATUS_CHAT_ID }}
         run: |
-          echo "== getChat ${TG_STATUS_CHAT_ID} =="
+          set -x
           curl -sS -X POST "https://api.telegram.org/bot${TG_BOT_TOKEN}/getChat" \
-            -d "chat_id=${TG_STATUS_CHAT_ID}" | tee /tmp/getchat.json
+            -d "chat_id=${TG_STATUS_CHAT_ID}" | tee /tmp/getchat.json || true
           echo
 
-      - name: Telegram sendMessage to group (print response)
+      - name: Telegram sendMessage (status group)
         env:
           TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
           TG_STATUS_CHAT_ID: ${{ secrets.TG_STATUS_CHAT_ID }}
         run: |
-          echo "== sendMessage to status chat =="
+          set -x
           SHORT_SHA="${GITHUB_SHA::7}"
-          MSG="🟢 Post-deploy ok · repo=${GITHUB_REPOSITORY} · sha=${SHORT_SHA}"
-          curl -sS -X POST "https://api.telegram.org/bot${TG_BOT_TOKEN}/sendMessage" \
+          MSG="🟢 Post-deploy · ${GITHUB_REPOSITORY} · ${SHORT_SHA}"
+          # печатаем код и тело ответа, но не фейлим job
+          HTTP_CODE=$(curl -sS -o /tmp/send_body.json -w "%{http_code}" -X POST \
+            "https://api.telegram.org/bot${TG_BOT_TOKEN}/sendMessage" \
             -d "chat_id=${TG_STATUS_CHAT_ID}" \
             -d "text=${MSG}" \
             -d "disable_web_page_preview=true" \
-            -d "parse_mode=HTML" | tee /tmp/send_to_group.json
+            -d "parse_mode=HTML" || true)
+          echo "HTTP_CODE=${HTTP_CODE}"
+          cat /tmp/send_body.json || true
           echo
-
-      # опционально: fallback в личку (если есть секрет TG_REPORT_CHAT_ID)
-      - name: Telegram fallback DM (optional)
-        if: ${{ secrets.TG_REPORT_CHAT_ID != '' }}
-        env:
-          TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
-          TG_REPORT_CHAT_ID: ${{ secrets.TG_REPORT_CHAT_ID }}
-        run: |
-          echo "== fallback DM to TG_REPORT_CHAT_ID =="
-          SHORT_SHA="${GITHUB_SHA::7}"
-          MSG="🔁 Fallback DM: repo=${GITHUB_REPOSITORY} · sha=${SHORT_SHA}"
-          curl -sS -X POST "https://api.telegram.org/bot${TG_BOT_TOKEN}/sendMessage" \
-            -d "chat_id=${TG_REPORT_CHAT_ID}" \
-            -d "text=${MSG}" \
-            -d "disable_web_page_preview=true" \
-            -d "parse_mode=HTML" | tee /tmp/send_dm.json
-          echo
-      # -----------------------------------
+      # ------------------------------------------------------------------
