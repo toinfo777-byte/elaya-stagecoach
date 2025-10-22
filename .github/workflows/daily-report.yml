@@ -2,7 +2,7 @@ name: Daily status report
 
 on:
   schedule:
-    - cron: "0 6 * * *"      # 06:00 UTC = 09:00 MSK
+    - cron: "0 6 * * *"   # 06:00 UTC = 09:00 MSK
   workflow_dispatch:
 
 permissions:
@@ -12,7 +12,6 @@ permissions:
 jobs:
   report:
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -22,94 +21,23 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Install dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y pandoc texlive-latex-recommended texlive-fonts-recommended texlive-latex-extra
+      - name: apt update
+        run: sudo apt-get update
+
+      - name: Install pandoc + LaTeX
+        run: sudo apt-get install -y pandoc texlive-latex-recommended texlive-fonts-recommended texlive-latex-extra
 
       - name: Build markdown
-        id: build_md
-        run: |
-          mkdir -p docs/elaya_status
-          TS="$(date -u +'%Y-%m-%d %H:%M:%SZ')"
-          DATE="$(date -u +'%Y%m%d')"
-          MD_FILE="docs/elaya_status/Elaya_Status_${DATE}.md"
-          echo "MD_FILE=${MD_FILE}" >> $GITHUB_OUTPUT
-          echo "DATE=${DATE}" >> $GITHUB_OUTPUT
-
-          cat > "${MD_FILE}" <<'EOF'
-# Ежедневный отчёт
-- Time (UTC): {{TS}}
-- Branch: {{BR}}
-- Commit: {{SHA}}
-- Runner: {{RUN}}
-
-## Пульс
-- ENV: develop
-- Source: GitHub Actions
-- Notes: Автогенерация.
-EOF
-          # подставим значения (чтобы не рвать YAML многострочником)
-          sed -i "s/{{TS}}/${TS}/; s/{{BR}}/${GITHUB_REF_NAME}/; s/{{SHA}}/${GITHUB_SHA}/; s/{{RUN}}/${GITHUB_RUN_ID}/" "${MD_FILE}"
+        run: mkdir -p docs/elaya_status && DATE=$(date -u +%Y%m%d) && TS=$(date -u +'%Y-%m-%d %H:%M:%SZ') && MD=docs/elaya_status/Elaya_Status_${DATE}.md && printf '%s\n' '# Ежедневный отчёт' "- Time (UTC): ${TS}" "- Branch: ${GITHUB_REF_NAME}" "- Commit: ${GITHUB_SHA}" "- Runner: ${GITHUB_RUN_ID}" '' '## Пульс' '- ENV: develop' '- Source: GitHub Actions' '- Notes: Автогенерация.' > "$MD"
 
       - name: Build PDF
-        id: build_pdf
-        run: |
-          MD_FILE="${{ steps.build_md.outputs.MD_FILE }}"
-          PDF_FILE="${MD_FILE%.md}.pdf"
-          echo "PDF_FILE=${PDF_FILE}" >> $GITHUB_OUTPUT
-          pandoc "$MD_FILE" -o "$PDF_FILE" \
-            -V geometry:margin=2cm \
-            -V mainfont="DejaVu Serif" \
-            --from gfm --pdf-engine=xelatex
+        run: DATE=$(date -u +%Y%m%d) && MD=docs/elaya_status/Elaya_Status_${DATE}.md && PDF=${MD%.md}.pdf && pandoc "$MD" -o "$PDF" -V geometry:margin=2cm -V mainfont="DejaVu Serif" --from gfm --pdf-engine=xelatex
 
-      - name: Commit & push results
-        run: |
-          git config user.name "elaya-bot"
-          git config user.email "actions@users.noreply.github.com"
-          git add "${{ steps.build_md.outputs.MD_FILE }}" "${{ steps.build_pdf.outputs.PDF_FILE }}"
-          git commit -m "Daily report ${{ steps.build_md.outputs.DATE }}" || echo "No changes"
-          git push
+      - name: Commit & push
+        run: DATE=$(date -u +%Y%m%d) && MD=docs/elaya_status/Elaya_Status_${DATE}.md && PDF=${MD%.md}.pdf && git config user.name "elaya-bot" && git config user.email "actions@users.noreply.github.com" && git add "$MD" "$PDF" && git commit -m "Daily report ${DATE}" || echo "No changes" && git push
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: elaya-daily-${{ steps.build_md.outputs.DATE }}
-          path: |
-            ${{ steps.build_md.outputs.MD_FILE }}
-            ${{ steps.build_pdf.outputs.PDF_FILE }}
-
-      - name: Send Telegram notify
-        env:
-          TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
-          TG_CHAT_ID: ${{ secrets.TG_REPORT_CHAT_ID }}
-        run: |
-          if [ -z "$TG_BOT_TOKEN" ] || [ -z "$TG_CHAT_ID" ]; then
-            echo "No TG secrets set, skipping..."
-            exit 0
-          fi
-
-          FILE_MD="${{ steps.build_md.outputs.MD_FILE }}"
-          FILE_PDF="${{ steps.build_pdf.outputs.PDF_FILE }}"
-          URL_MD="https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/main/${FILE_MD}"
-          URL_PDF="https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/main/${FILE_PDF}"
-
-          TEXT=$(cat <<'EOM'
-🧾 Ежедневный отчёт
-• ENV: develop
-• Branch: {{BR}}
-• SHA: {{SHA}}
-• [MD]({{MD}})
-• [PDF]({{PDF}})
-EOM
-)
-          TEXT="${TEXT//\{\{BR\}\}/${GITHUB_REF_NAME}}"
-          TEXT="${TEXT//\{\{SHA\}\}/${GITHUB_SHA::7}}"
-          TEXT="${TEXT//\{\{MD\}\}/${URL_MD}}"
-          TEXT="${TEXT//\{\{PDF\}\}/${URL_PDF}}"
-
-          curl -sS -X POST "https://api.telegram.org/bot${TG_BOT_TOKEN}/sendMessage" \
-            -d "chat_id=${TG_CHAT_ID}" \
-            --data-urlencode "text=${TEXT}" \
-            -d "parse_mode=Markdown" \
-            -d "disable_web_page_preview=true"
+          name: elaya-daily
+          path: docs/elaya_status
