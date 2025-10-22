@@ -21,17 +21,17 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: apt update
-        run: 'sudo apt-get update'
+      - name: Update apt
+        run: 'sudo apt-get update -yq'
 
-      - name: Install pandoc + LaTeX
-        run: 'sudo apt-get install -y pandoc texlive-latex-recommended texlive-fonts-recommended texlive-latex-extra'
+      - name: Install pandoc and LaTeX minimal
+        run: 'sudo apt-get install -yq pandoc texlive-latex-recommended texlive-latex-extra'
 
       - name: Build markdown
         run: 'mkdir -p docs/elaya_status && DATE=$(date -u +%Y%m%d) && TS=$(date -u +"%Y-%m-%d %H:%M:%SZ") && MD=docs/elaya_status/Elaya_Status_${DATE}.md && printf "%s\n" "# Ежедневный отчёт" "- Time (UTC): ${TS}" "- Branch: ${GITHUB_REF_NAME}" "- Commit: ${GITHUB_SHA}" "- Runner: ${GITHUB_RUN_ID}" "" "## Пульс" "- ENV: develop" "- Source: GitHub Actions" "- Notes: Автогенерация." > "$MD"'
 
       - name: Build PDF
-        run: 'DATE=$(date -u +%Y%m%d) && MD=docs/elaya_status/Elaya_Status_${DATE}.md && PDF=${MD%.md}.pdf && pandoc "$MD" -o "$PDF" -V geometry:margin=2cm -V mainfont="DejaVu Serif" --from gfm --pdf-engine=xelatex'
+        run: 'DATE=$(date -u +%Y%m%d) && MD=docs/elaya_status/Elaya_Status_${DATE}.md && PDF=${MD%.md}.pdf && pandoc "$MD" -o "$PDF" -V geometry:margin=2cm --pdf-engine=xelatex'
 
       - name: Commit & push
         run: 'DATE=$(date -u +%Y%m%d) && MD=docs/elaya_status/Elaya_Status_${DATE}.md && PDF=${MD%.md}.pdf && git config user.name "elaya-bot" && git config user.email "actions@users.noreply.github.com" && git add "$MD" "$PDF" && git commit -m "Daily report ${DATE}" || echo "No changes" && git push'
