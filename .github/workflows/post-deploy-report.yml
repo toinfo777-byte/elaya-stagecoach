@@ -3,6 +3,7 @@ name: Post-deploy status report
 on:
   repository_dispatch:
     types: [status_report]
+  workflow_dispatch: {}   # ← теперь можно запускать вручную из Actions
 
 permissions:
   contents: write
