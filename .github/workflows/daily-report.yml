@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: write   # коммитим файлы в docs/
   packages: read
 
 jobs:
@@ -23,14 +23,21 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Build markdown
+      - name: Install deps (for future use)
         run: |
+          python -m pip install --upgrade pip
+          pip install pyyaml
+
+      - name: Build markdown
+        id: mkmd
+        run: |
+          set -e
           mkdir -p docs/elaya_status
           TS="$(date -u +'%Y-%m-%d %H:%M:%SZ')"
           DATE="$(date -u +'%Y%m%d')"
-          FILE="docs/elaya_status/Elaya_Status_${DATE}.md"
+          MD_FILE="docs/elaya_status/Elaya_Status_${DATE}.md"
 
-          cat > "${FILE}" <<'MD'
+          cat > "${MD_FILE}" <<'MD'
           # Ежедневный отчёт
           - Time (UTC): ${TS}
           - Branch: $GITHUB_REF_NAME
@@ -43,30 +50,70 @@ jobs:
           - Notes: Автогенерация.
           MD
 
-          sed -i "s|\${TS}|${TS}|g" "${FILE}"
-          echo "OUT_FILE=${FILE}" >> $GITHUB_ENV
+          # Подставим реальные значения
+          sed -i "s|\${TS}|${TS}|g" "${MD_FILE}"
+
+          echo "MD_FILE=${MD_FILE}" >> $GITHUB_OUTPUT
+          echo "DATE=${DATE}" >> $GITHUB_OUTPUT
+
+      - name: Install Pandoc + TeX
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y pandoc texlive-latex-recommended texlive-fonts-recommended texlive-latex-extra
+
+      - name: Build PDF
+        id: pdf
+        run: |
+          set -e
+          MD_FILE="${{ steps.mkmd.outputs.MD_FILE }}"
+          PDF_FILE="${MD_FILE%.md}.pdf"
+          # Конверт в PDF через pandoc
+          pandoc "$MD_FILE" -o "$PDF_FILE" \
+            -V geometry:margin=2cm \
+            -V mainfont="DejaVu Serif" \
+            --from gfm --pdf-engine=xelatex
+          echo "PDF_FILE=${PDF_FILE}" >> $GITHUB_OUTPUT
 
       - name: Commit & push
         run: |
           git config user.name "elaya-bot"
           git config user.email "actions@users.noreply.github.com"
-          git add "${{ env.OUT_FILE }}"
-          git commit -m "Daily: $(basename "${{ env.OUT_FILE }}")" || echo "Nothing to commit"
+          git add "${{ steps.mkmd.outputs.MD_FILE }}" "${{ steps.pdf.outputs.PDF_FILE }}"
+          git commit -m "Daily: $(basename "${{ steps.mkmd.outputs.MD_FILE }}") + PDF" || echo "Nothing to commit"
           git push
 
-      - name: Send Telegram notify
-        if: ${{ env.TG_BOT_TOKEN != '' && env.TG_CHAT_ID != '' }}
+      - name: Upload artifacts (MD + PDF)
+        uses: actions/upload-artifact@v4
+        with:
+          name: elaya-daily-${{ steps.mkmd.outputs.DATE }}
+          path: |
+            ${{ steps.mkmd.outputs.MD_FILE }}
+            ${{ steps.pdf.outputs.PDF_FILE }}
+
+      - name: Send Telegram notify (optional)
         env:
           TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
           TG_CHAT_ID: ${{ secrets.TG_REPORT_CHAT_ID }}
         run: |
-          FILE_URL="https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/main/${{ env.OUT_FILE }}"
+          # Если секретов нет — выходим без ошибки
+          if [ -z "$TG_BOT_TOKEN" ] || [ -z "$TG_CHAT_ID" ]; then
+            echo "No TG secrets, skip"
+            exit 0
+          fi
+
+          FILE_MD="${{ steps.mkmd.outputs.MD_FILE }}"
+          FILE_URL_MD="https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/main/${FILE_MD}"
+          FILE_PDF="${{ steps.pdf.outputs.PDF_FILE }}"
+          FILE_URL_PDF="https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/main/${FILE_PDF}"
+
+          SHORT_SHA="${GITHUB_SHA::7}"
           TEXT=$(cat <<EOF
 🧾 Ежедневный отчёт
 • ENV: develop
 • Branch: ${GITHUB_REF_NAME}
-• SHA: ${GITHUB_SHA::7}
-• File: ${FILE_URL}
+• SHA: ${SHORT_SHA}
+• MD: ${FILE_URL_MD}
+• PDF: ${FILE_URL_PDF}
 EOF
 )
           curl -sS -X POST "https://api.telegram.org/bot${TG_BOT_TOKEN}/sendMessage" \
