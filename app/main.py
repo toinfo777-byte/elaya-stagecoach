@@ -1,4 +1,3 @@
-# app/main.py
 from __future__ import annotations
 import asyncio
 import hashlib
@@ -16,7 +15,7 @@ from app.config import settings
 from app.build import BUILD_MARK
 from app.storage.repo import ensure_schema
 
-# routers
+# routers (без diag — подключим ниже по флагу HTTP_ENABLED)
 from app.routers import (
     entrypoints,
     help,
@@ -35,7 +34,6 @@ from app.routers import (
     faq,
     devops_sync,
     panic,
-    diag,  # <- держим последним: health/diag/status_json
 )
 
 logging.basicConfig(
@@ -101,8 +99,10 @@ async def main() -> None:
         "app.routers.faq",
         "app.routers.devops_sync",
         "app.routers.panic",
-        "app.routers.diag",
     ]
+    if settings.http_enabled:
+        smoke_modules.append("app.routers.diag")
+
     for modname in smoke_modules:
         try:
             mod = importlib.import_module(modname)
@@ -113,7 +113,7 @@ async def main() -> None:
     log.info("✅ SMOKE OK: routers exports are valid")
     # ───────────────────────────────────────────────────────────────
 
-    # Регистрируем в строгом порядке
+    # Регистрируем в строгом порядке (без diag)
     dp.include_router(entrypoints.router);   log.info("✅ router loaded: entrypoints")
     dp.include_router(help.router);          log.info("✅ router loaded: help")
     dp.include_router(cmd_aliases.router);   log.info("✅ router loaded: aliases")
@@ -131,7 +131,14 @@ async def main() -> None:
     dp.include_router(faq.router);           log.info("✅ router loaded: faq")
     dp.include_router(devops_sync.router);   log.info("✅ router loaded: devops_sync")
     dp.include_router(panic.router);         log.info("✅ router loaded: panic (near last)")
-    dp.include_router(diag.router);          log.info("✅ router loaded: diag (last)")
+
+    # diag — только если включён HTTP
+    if settings.http_enabled:
+        from app.routers import diag  # импортируем только при необходимости
+        dp.include_router(diag.router)
+        log.info("✅ router loaded: diag (last, HTTP_ENABLED=true)")
+    else:
+        log.info("ℹ️ HTTP_DISABLED: diag router is skipped")
 
     await _guard(_set_commands(bot), "set_my_commands")
 
