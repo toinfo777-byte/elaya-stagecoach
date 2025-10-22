@@ -2,8 +2,7 @@ name: Daily status report
 
 on:
   schedule:
-    # 06:00 UTC = 09:00 MSK
-    - cron: "0 6 * * *"
+    - cron: "0 6 * * *"      # 06:00 UTC = 09:00 MSK
   workflow_dispatch:
 
 permissions:
@@ -38,18 +37,20 @@ jobs:
           echo "MD_FILE=${MD_FILE}" >> $GITHUB_OUTPUT
           echo "DATE=${DATE}" >> $GITHUB_OUTPUT
 
-          cat > "${MD_FILE}" <<EOF
+          cat > "${MD_FILE}" <<'EOF'
 # Ежедневный отчёт
-- Time (UTC): ${TS}
-- Branch: ${GITHUB_REF_NAME}
-- Commit: ${GITHUB_SHA}
-- Runner: ${GITHUB_RUN_ID}
+- Time (UTC): {{TS}}
+- Branch: {{BR}}
+- Commit: {{SHA}}
+- Runner: {{RUN}}
 
 ## Пульс
 - ENV: develop
 - Source: GitHub Actions
 - Notes: Автогенерация.
 EOF
+          # подставим значения (чтобы не рвать YAML многострочником)
+          sed -i "s/{{TS}}/${TS}/; s/{{BR}}/${GITHUB_REF_NAME}/; s/{{SHA}}/${GITHUB_SHA}/; s/{{RUN}}/${GITHUB_RUN_ID}/" "${MD_FILE}"
 
       - name: Build PDF
         id: build_pdf
@@ -93,15 +94,20 @@ EOF
           URL_MD="https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/main/${FILE_MD}"
           URL_PDF="https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/main/${FILE_PDF}"
 
-          TEXT=$(cat <<EOM
+          TEXT=$(cat <<'EOM'
 🧾 Ежедневный отчёт
 • ENV: develop
-• Branch: ${GITHUB_REF_NAME}
-• SHA: ${GITHUB_SHA::7}
-• [MD](${URL_MD})
-• [PDF](${URL_PDF})
+• Branch: {{BR}}
+• SHA: {{SHA}}
+• [MD]({{MD}})
+• [PDF]({{PDF}})
 EOM
 )
+          TEXT="${TEXT//\{\{BR\}\}/${GITHUB_REF_NAME}}"
+          TEXT="${TEXT//\{\{SHA\}\}/${GITHUB_SHA::7}}"
+          TEXT="${TEXT//\{\{MD\}\}/${URL_MD}}"
+          TEXT="${TEXT//\{\{PDF\}\}/${URL_PDF}}"
+
           curl -sS -X POST "https://api.telegram.org/bot${TG_BOT_TOKEN}/sendMessage" \
             -d "chat_id=${TG_CHAT_ID}" \
             --data-urlencode "text=${TEXT}" \
