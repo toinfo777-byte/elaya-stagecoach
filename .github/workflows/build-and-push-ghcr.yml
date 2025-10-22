@@ -53,31 +53,46 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      # Триггерим Render: сначала staging, затем prod (fallback).
-      - name: Trigger Render deploy (staging → prod fallback)
+      # Триггерим Render: сначала STAGING, при его отсутствии — PROD.
+      # Шаг никогда не валит job, просто пишет HTTP-код.
+      - name: Trigger Render deploy (staging → prod fallback, soft)
         if: ${{ success() }}
         env:
           RENDER_STAGING_HOOK: ${{ secrets.RENDER_STAGING_HOOK }}
           RENDER_DEPLOY_HOOK:  ${{ secrets.RENDER_DEPLOY_HOOK }}
+        shell: bash
         run: |
+          set +e
           HOOK_URL="${RENDER_STAGING_HOOK:-$RENDER_DEPLOY_HOOK}"
+
           if [ -z "$HOOK_URL" ]; then
-            echo "No Render hook provided. Skipping."
+            echo "🔹 No Render hook provided. Skipping deploy hook."
             exit 0
           fi
 
-          echo "Using Render hook: ${HOOK_URL%%\?*}?... (masked)"
-          # Дадим реестру время раздать тег
+          MASKED="${HOOK_URL%%\?*}?key=***"
+          echo "🔹 POST ${MASKED}"
+          # Дадим реестру раздать тег
           sleep 10
-          # Выполним запрос и выведем HTTP-код; не падаем при ошибке
-          HTTP_CODE=$(curl -sS -X POST -o /dev/stderr -w "%{http_code}" "$HOOK_URL" || true)
-          echo "Render deploy hook HTTP code: $HTTP_CODE"
+
+          # Выполним запрос; выведем тело в STDERR, а код в STDOUT
+          HTTP_CODE=$(curl -sS -X POST -o >(cat >&2) -w "%{http_code}" "$HOOK_URL")
+          CURL_EXIT=$?
+
+          echo "🔹 curl exit=$CURL_EXIT, http_code=$HTTP_CODE"
+          if [ $CURL_EXIT -ne 0 ]; then
+            echo "⚠️ Curl error (network/SSL). Не валим pipeline."
+          fi
           case "$HTTP_CODE" in
-            200|201|202) echo "Render accepted deploy."; ;;
-            *) echo "⚠️ Render returned non-2xx ($HTTP_CODE). Continuing pipeline."; ;;
+            200|201|202) echo "✅ Render accepted deploy." ;;
+            0|"" )       echo "⚠️ No HTTP code captured." ;;
+            * )          echo "⚠️ Render returned non-2xx ($HTTP_CODE). Продолжаем." ;;
           esac
 
-      # После деплоя — репорт в main через repository_dispatch
+          # Никогда не фейлим шаг из-за хука
+          exit 0
+
+      # После деплоя — шлём repository_dispatch, чтобы main сделал пост-отчёт
       - name: Dispatch post-deploy status_report
         if: ${{ success() }}
         run: |
