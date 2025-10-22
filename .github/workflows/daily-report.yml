@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write   # коммитим файлы в docs/
+  contents: write
   packages: read
 
 jobs:
@@ -23,100 +23,87 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Install deps (for future use)
-        run: |
-          python -m pip install --upgrade pip
-          pip install pyyaml
-
-      - name: Build markdown
-        id: mkmd
-        run: |
-          set -e
-          mkdir -p docs/elaya_status
-          TS="$(date -u +'%Y-%m-%d %H:%M:%SZ')"
-          DATE="$(date -u +'%Y%m%d')"
-          MD_FILE="docs/elaya_status/Elaya_Status_${DATE}.md"
-
-          cat > "${MD_FILE}" <<'MD'
-          # Ежедневный отчёт
-          - Time (UTC): ${TS}
-          - Branch: $GITHUB_REF_NAME
-          - Commit: $GITHUB_SHA
-          - Runner: $GITHUB_RUN_ID
-
-          ## Пульс
-          - ENV: develop
-          - Source: GitHub Actions
-          - Notes: Автогенерация.
-          MD
-
-          # Подставим реальные значения
-          sed -i "s|\${TS}|${TS}|g" "${MD_FILE}"
-
-          echo "MD_FILE=${MD_FILE}" >> $GITHUB_OUTPUT
-          echo "DATE=${DATE}" >> $GITHUB_OUTPUT
-
-      - name: Install Pandoc + TeX
+      - name: Install dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y pandoc texlive-latex-recommended texlive-fonts-recommended texlive-latex-extra
 
-      - name: Build PDF
-        id: pdf
+      - name: Build markdown
+        id: build_md
         run: |
-          set -e
-          MD_FILE="${{ steps.mkmd.outputs.MD_FILE }}"
+          mkdir -p docs/elaya_status
+          TS="$(date -u +'%Y-%m-%d %H:%M:%SZ')"
+          DATE="$(date -u +'%Y%m%d')"
+          MD_FILE="docs/elaya_status/Elaya_Status_${DATE}.md"
+          echo "MD_FILE=${MD_FILE}" >> $GITHUB_OUTPUT
+          echo "DATE=${DATE}" >> $GITHUB_OUTPUT
+
+          cat > "${MD_FILE}" <<EOF
+# Ежедневный отчёт
+- Time (UTC): ${TS}
+- Branch: ${GITHUB_REF_NAME}
+- Commit: ${GITHUB_SHA}
+- Runner: ${GITHUB_RUN_ID}
+
+## Пульс
+- ENV: develop
+- Source: GitHub Actions
+- Notes: Автогенерация.
+EOF
+
+      - name: Build PDF
+        id: build_pdf
+        run: |
+          MD_FILE="${{ steps.build_md.outputs.MD_FILE }}"
           PDF_FILE="${MD_FILE%.md}.pdf"
-          # Конверт в PDF через pandoc
+          echo "PDF_FILE=${PDF_FILE}" >> $GITHUB_OUTPUT
           pandoc "$MD_FILE" -o "$PDF_FILE" \
             -V geometry:margin=2cm \
             -V mainfont="DejaVu Serif" \
             --from gfm --pdf-engine=xelatex
-          echo "PDF_FILE=${PDF_FILE}" >> $GITHUB_OUTPUT
 
-      - name: Commit & push
+      - name: Commit & push results
         run: |
           git config user.name "elaya-bot"
           git config user.email "actions@users.noreply.github.com"
-          git add "${{ steps.mkmd.outputs.MD_FILE }}" "${{ steps.pdf.outputs.PDF_FILE }}"
-          git commit -m "Daily: $(basename "${{ steps.mkmd.outputs.MD_FILE }}") + PDF" || echo "Nothing to commit"
+          git add "${{ steps.build_md.outputs.MD_FILE }}" "${{ steps.build_pdf.outputs.PDF_FILE }}"
+          git commit -m "Daily report ${{ steps.build_md.outputs.DATE }}" || echo "No changes"
           git push
 
-      - name: Upload artifacts (MD + PDF)
+      - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: elaya-daily-${{ steps.mkmd.outputs.DATE }}
+          name: elaya-daily-${{ steps.build_md.outputs.DATE }}
           path: |
-            ${{ steps.mkmd.outputs.MD_FILE }}
-            ${{ steps.pdf.outputs.PDF_FILE }}
+            ${{ steps.build_md.outputs.MD_FILE }}
+            ${{ steps.build_pdf.outputs.PDF_FILE }}
 
-      - name: Send Telegram notify (optional)
+      - name: Send Telegram notify
         env:
           TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
           TG_CHAT_ID: ${{ secrets.TG_REPORT_CHAT_ID }}
         run: |
-          # Если секретов нет — выходим без ошибки
           if [ -z "$TG_BOT_TOKEN" ] || [ -z "$TG_CHAT_ID" ]; then
-            echo "No TG secrets, skip"
+            echo "No TG secrets set, skipping..."
             exit 0
           fi
 
-          FILE_MD="${{ steps.mkmd.outputs.MD_FILE }}"
-          FILE_URL_MD="https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/main/${FILE_MD}"
-          FILE_PDF="${{ steps.pdf.outputs.PDF_FILE }}"
-          FILE_URL_PDF="https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/main/${FILE_PDF}"
+          FILE_MD="${{ steps.build_md.outputs.MD_FILE }}"
+          FILE_PDF="${{ steps.build_pdf.outputs.PDF_FILE }}"
+          URL_MD="https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/main/${FILE_MD}"
+          URL_PDF="https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/main/${FILE_PDF}"
 
-          SHORT_SHA="${GITHUB_SHA::7}"
-          TEXT=$(cat <<EOF
+          TEXT=$(cat <<EOM
 🧾 Ежедневный отчёт
 • ENV: develop
 • Branch: ${GITHUB_REF_NAME}
-• SHA: ${SHORT_SHA}
-• MD: ${FILE_URL_MD}
-• PDF: ${FILE_URL_PDF}
-EOF
+• SHA: ${GITHUB_SHA::7}
+• [MD](${URL_MD})
+• [PDF](${URL_PDF})
+EOM
 )
           curl -sS -X POST "https://api.telegram.org/bot${TG_BOT_TOKEN}/sendMessage" \
             -d "chat_id=${TG_CHAT_ID}" \
             --data-urlencode "text=${TEXT}" \
+            -d "parse_mode=Markdown" \
             -d "disable_web_page_preview=true"
