@@ -1,11 +1,9 @@
+# app/config.py
 from __future__ import annotations
-
 import json
 from typing import List, Optional
-
 from pydantic import Field, computed_field
 from pydantic_settings import BaseSettings, SettingsConfigDict
-
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
@@ -22,7 +20,7 @@ class Settings(BaseSettings):
 
     # админы/уведомления
     admin_alert_chat_id: Optional[int] = Field(None, alias="ADMIN_ALERT_CHAT_ID")
-    admin_ids_raw: Optional[str] = Field("", alias="ADMIN_IDS")  # строка из ENV
+    admin_ids_raw: Optional[str] = Field("", alias="ADMIN_IDS")
 
     # опциональные
     channel_username: Optional[str] = Field(None, alias="CHANNEL_USERNAME")
@@ -38,22 +36,18 @@ class Settings(BaseSettings):
         s = (self.admin_ids_raw or "").strip()
         if not s:
             return []
-        # JSON: "[1,2,3]"
         if s.startswith("[") and s.endswith("]"):
             try:
                 return [int(x) for x in json.loads(s)]
             except Exception:
                 pass
-        # "1,2,3" / "1 2 3" / "1;2;3"
         parts = [p for p in s.replace(";", ",").replace(" ", ",").split(",") if p]
         if parts:
             return [int(p) for p in parts]
-        # одно значение
         try:
             return [int(s)]
         except Exception:
             return []
-
 
 settings = Settings()
 __all__ = ["Settings", "settings"]
