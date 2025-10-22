@@ -1,16 +1,18 @@
 name: TG smoke
 
 on:
-  workflow_dispatch: {}
+  workflow_dispatch:
 
 jobs:
   smoke:
     runs-on: ubuntu-latest
     steps:
       - name: getMe
-        env: { TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }} }
+        env:
+          TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
         run: |
           curl -sS "https://api.telegram.org/bot${TG_BOT_TOKEN}/getMe" | tee /tmp/getme.json || true
+
       - name: getChat
         env:
           TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
@@ -18,6 +20,7 @@ jobs:
         run: |
           curl -sS -X POST "https://api.telegram.org/bot${TG_BOT_TOKEN}/getChat" \
             -d "chat_id=${TG_STATUS_CHAT_ID}" | tee /tmp/getchat.json || true
+
       - name: sendMessage
         env:
           TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
