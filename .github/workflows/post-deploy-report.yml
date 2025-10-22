@@ -3,7 +3,7 @@ name: Post-deploy status report
 on:
   repository_dispatch:
     types: [status_report]
-  workflow_dispatch: {}   # ← теперь можно запускать вручную из Actions
+  workflow_dispatch: {}   # можно запускать руками
 
 permissions:
   contents: write
@@ -20,33 +20,52 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Install deps for tooling
+      - name: Generate post-deploy Markdown (inline)
         run: |
-          python -m pip install --upgrade pip
-          pip install pyyaml python-telegram-bot==13.15
-
-      - name: Generate report (post-deploy)
-        env:
-          TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
-          TG_STATUS_CHAT_ID: ${{ secrets.TG_STATUS_CHAT_ID }}
-          STATUS_URL: ${{ secrets.STATUS_URL }}  # опционально
-        run: |
-          python tools/daily_report.py
+          python - <<'PY'
+          import os, datetime, pathlib
+          repo = os.environ.get("GITHUB_REPOSITORY","")
+          sha  = os.environ.get("GITHUB_SHA","")[:7]
+          now  = datetime.datetime.utcnow()
+          date = now.strftime("%Y%m%d")
+          ts   = now.strftime("%Y-%m-%d %H:%M:%SZ")
+          out  = pathlib.Path("docs/elaya_status"); out.mkdir(parents=True, exist_ok=True)
+          f    = out / f"Elaya_Status_{date}.md"
+          lines = []
+          if f.exists():
+            lines = f.read_text(encoding="utf-8").splitlines()
+          header = f"# Elaya Status — {date}"
+          body = [
+            "",
+            f"- Repo: `{repo}`",
+            f"- SHA: `{sha}`",
+            f"- Generated (UTC): {ts}",
+            "",
+            "Post-deploy summary (repository_dispatch/workflow_dispatch).",
+            "",
+          ]
+          if not lines or not lines[0].startswith("# Elaya Status"):
+            lines = [header] + body
+          else:
+            # append a post-deploy section
+            lines += ["", f"**Post-deploy update at {ts} (UTC)**", f"- SHA: `{sha}`", ""]
+          f.write_text("\n".join(lines), encoding="utf-8")
+          print(f"Wrote {f}")
+          PY
 
       - name: Commit & push report
         run: |
           git config user.name  "elaya-bot"
           git config user.email "actions@users.noreply.github.com"
           git add docs/elaya_status/Elaya_Status_*.md
-          git commit -m "chore(report): post-deploy status" || echo "Nothing to commit"
+          git commit -m "chore(report): post-deploy status $(date -u +%Y-%m-%dT%H:%M:%SZ)" || echo "Nothing to commit"
           git push
 
-      # 🔹 SMOKE: проверить бота и отправить короткое пост-деплой сообщение
+      # 🔹 SMOKE: проверяем бота и шлём короткое пост-деплой сообщение
       - name: Telegram getMe (smoke)
         env:
           TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
         run: |
-          echo "Calling getMe..."
           curl -fsS "https://api.telegram.org/bot${TG_BOT_TOKEN}/getMe" || true
 
       - name: Telegram smoke message (post-deploy)
