@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write    # пушим md в docs/
+  contents: write
   packages: read
 
 jobs:
@@ -43,9 +43,7 @@ jobs:
           - Notes: Автогенерация.
           MD
 
-          # Подставим реальные значения
           sed -i "s|\${TS}|${TS}|g" "${FILE}"
-
           echo "OUT_FILE=${FILE}" >> $GITHUB_ENV
 
       - name: Commit & push
@@ -57,11 +55,10 @@ jobs:
           git push
 
       - name: Send Telegram notify
+        if: ${{ env.TG_BOT_TOKEN != '' && env.TG_CHAT_ID != '' }}
         env:
           TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
-          TG_CHAT_ID:   ${{ secrets.TG_REPORT_CHAT_ID }}
-        # В if НЕ обращаемся к secrets напрямую — используем env
-        if: ${{ env.TG_BOT_TOKEN != '' && env.TG_CHAT_ID != '' }}
+          TG_CHAT_ID: ${{ secrets.TG_REPORT_CHAT_ID }}
         run: |
           FILE_URL="https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/main/${{ env.OUT_FILE }}"
           TEXT=$(cat <<EOF
