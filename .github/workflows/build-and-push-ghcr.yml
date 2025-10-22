@@ -53,46 +53,37 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      # Триггерим Render: сначала STAGING, при его отсутствии — PROD.
-      # Шаг никогда не валит job, просто пишет HTTP-код.
-      - name: Trigger Render deploy (staging → prod fallback, soft)
+      # Триггер Render (staging → prod fallback), мягкий режим
+      - name: Trigger Render deploy (safe mode)
         if: ${{ success() }}
         env:
           RENDER_STAGING_HOOK: ${{ secrets.RENDER_STAGING_HOOK }}
           RENDER_DEPLOY_HOOK:  ${{ secrets.RENDER_DEPLOY_HOOK }}
         shell: bash
         run: |
-          set +e
           HOOK_URL="${RENDER_STAGING_HOOK:-$RENDER_DEPLOY_HOOK}"
 
           if [ -z "$HOOK_URL" ]; then
-            echo "🔹 No Render hook provided. Skipping deploy hook."
+            echo "🔹 No Render hook configured. Skipping deploy trigger."
             exit 0
           fi
 
-          MASKED="${HOOK_URL%%\?*}?key=***"
-          echo "🔹 POST ${MASKED}"
-          # Дадим реестру раздать тег
+          echo "🔹 Triggering Render hook..."
           sleep 10
 
-          # Выполним запрос; выведем тело в STDERR, а код в STDOUT
-          HTTP_CODE=$(curl -sS -X POST -o >(cat >&2) -w "%{http_code}" "$HOOK_URL")
-          CURL_EXIT=$?
+          HTTP_CODE=$(curl -sS -o >(cat >&2) -w "%{http_code}" -X POST "$HOOK_URL" || true)
+          echo "🔹 Render HTTP code: $HTTP_CODE"
 
-          echo "🔹 curl exit=$CURL_EXIT, http_code=$HTTP_CODE"
-          if [ $CURL_EXIT -ne 0 ]; then
-            echo "⚠️ Curl error (network/SSL). Не валим pipeline."
+          if [[ "$HTTP_CODE" =~ ^(200|201|202)$ ]]; then
+            echo "✅ Render accepted deploy ($HTTP_CODE)"
+          else
+            echo "⚠️ Render returned non-2xx ($HTTP_CODE). Continuing."
           fi
-          case "$HTTP_CODE" in
-            200|201|202) echo "✅ Render accepted deploy." ;;
-            0|"" )       echo "⚠️ No HTTP code captured." ;;
-            * )          echo "⚠️ Render returned non-2xx ($HTTP_CODE). Продолжаем." ;;
-          esac
 
-          # Никогда не фейлим шаг из-за хука
+          # всегда возвращаем 0, чтобы пайплайн не падал
           exit 0
 
-      # После деплоя — шлём repository_dispatch, чтобы main сделал пост-отчёт
+      # После деплоя — репорт в main
       - name: Dispatch post-deploy status_report
         if: ${{ success() }}
         run: |
@@ -100,4 +91,4 @@ jobs:
             -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
             -H "Accept: application/vnd.github+json" \
             "${{ github.api_url }}/repos/${{ github.repository }}/dispatches" \
-            -d '{"event_type":"status_report","client_payload":{"source":"render_deploy","env":"develop"}}'
+            -d '{"event_type":"status_report","client_payload":{"source":"render_deploy","env":"develop"}}' || true
