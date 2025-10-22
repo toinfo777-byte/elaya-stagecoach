@@ -1,0 +1,52 @@
+name: daily-status
+
+on:
+  schedule:
+    # 18:30 UTC = 21:30 MSK
+    - cron: "30 18 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write   # нужны права на push в репозиторий
+
+jobs:
+  build-report:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout develop
+        uses: actions/checkout@v4
+        with:
+          ref: develop
+          fetch-depth: 0
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install deps (best-effort)
+        run: |
+          python -m pip install --upgrade pip
+          if [ -f requirements.txt ]; then pip install -r requirements.txt || true; fi
+
+      - name: Generate report
+        env:
+          STATUS_URL: ${{ secrets.STATUS_URL }}
+          SENTRY_DSN: ${{ secrets.SENTRY_DSN }}  # если захочешь репортить ошибки
+        run: |
+          python scripts/make_status_report.py --url "$STATUS_URL"
+
+      - name: Commit report
+        run: |
+          git config user.name  "elaya-bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add docs/elaya_status/*.md docs/elaya_status/*.json || true
+          git commit -m "daily: status report $(date -u +%Y-%m-%d)" || echo "No changes"
+          git push origin develop || true
+
+      - name: Send Telegram summary
+        env:
+          TG_BOT_TOKEN:      ${{ secrets.TG_BOT_TOKEN }}
+          TG_STATUS_CHAT_ID: ${{ secrets.TG_STATUS_CHAT_ID }}
+        run: |
+          python scripts/send_summary.py
