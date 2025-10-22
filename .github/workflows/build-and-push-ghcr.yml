@@ -53,22 +53,31 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      # Опционально: дёргаем Render deploy hook, если задан в секретах
-      - name: Trigger Render deploy
+      # Триггерим Render: сначала staging, затем prod (fallback).
+      - name: Trigger Render deploy (staging → prod fallback)
         if: ${{ success() }}
         env:
-          RENDER_DEPLOY_HOOK: ${{ secrets.RENDER_DEPLOY_HOOK }}
+          RENDER_STAGING_HOOK: ${{ secrets.RENDER_STAGING_HOOK }}
+          RENDER_DEPLOY_HOOK:  ${{ secrets.RENDER_DEPLOY_HOOK }}
         run: |
-          if [ -n "$RENDER_DEPLOY_HOOK" ]; then
-            echo "Waiting for tag propagation..."
-            sleep 10
-            echo "Triggering Render deploy via hook"
-            curl -fsS -X POST "$RENDER_DEPLOY_HOOK"
-          else
-            echo "Skipping Render deploy — no hook provided."
+          HOOK_URL="${RENDER_STAGING_HOOK:-$RENDER_DEPLOY_HOOK}"
+          if [ -z "$HOOK_URL" ]; then
+            echo "No Render hook provided. Skipping."
+            exit 0
           fi
 
-      # После успешного деплоя шлём repository_dispatch для отчёта в main
+          echo "Using Render hook: ${HOOK_URL%%\?*}?... (masked)"
+          # Дадим реестру время раздать тег
+          sleep 10
+          # Выполним запрос и выведем HTTP-код; не падаем при ошибке
+          HTTP_CODE=$(curl -sS -X POST -o /dev/stderr -w "%{http_code}" "$HOOK_URL" || true)
+          echo "Render deploy hook HTTP code: $HTTP_CODE"
+          case "$HTTP_CODE" in
+            200|201|202) echo "Render accepted deploy."; ;;
+            *) echo "⚠️ Render returned non-2xx ($HTTP_CODE). Continuing pipeline."; ;;
+          esac
+
+      # После деплоя — репорт в main через repository_dispatch
       - name: Dispatch post-deploy status_report
         if: ${{ success() }}
         run: |
