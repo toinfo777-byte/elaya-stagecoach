@@ -29,6 +29,9 @@ class Settings(BaseSettings):
     coach_rate_sec: int = Field(2, alias="COACH_RATE_SEC")
     coach_ttl_min: int = Field(30, alias="COACH_TTL_MIN")
 
+    # HTTP (FastAPI) — выключен по умолчанию для воркера
+    http_enabled: bool = Field(False, alias="HTTP_ENABLED")
+
     @computed_field
     @property
     def admin_ids(self) -> List[int]:
