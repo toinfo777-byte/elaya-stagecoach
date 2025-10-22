@@ -1,10 +1,7 @@
-# Ежедневный отчёт
-- Time (UTC): 2025-10-22 09:32:34Z
-- Branch: main
-- Commit: 9ba1f65c74c2458160ae9cd3d9f5beb0d0af3b8a
-- Runner: 18711787577
+# Elaya Status — 20251022
 
-## Пульс
-- ENV: develop
-- Source: GitHub Actions
-- Notes: Автогенерация.
+- Repo: `toinfo777-byte/elaya-stagecoach`
+- SHA: `9464b77`
+- Generated (UTC): 2025-10-22 13:46:37Z
+
+Post-deploy summary (repository_dispatch/workflow_dispatch).
