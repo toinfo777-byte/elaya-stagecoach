@@ -39,3 +39,23 @@ jobs:
           git add docs/elaya_status/Elaya_Status_*.md
           git commit -m "chore(report): post-deploy status" || echo "Nothing to commit"
           git push
+
+      # 🔹 SMOKE: проверить бота и отправить короткое пост-деплой сообщение
+      - name: Telegram getMe (smoke)
+        env:
+          TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
+        run: |
+          echo "Calling getMe..."
+          curl -fsS "https://api.telegram.org/bot${TG_BOT_TOKEN}/getMe" || true
+
+      - name: Telegram smoke message (post-deploy)
+        env:
+          TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
+          TG_STATUS_CHAT_ID: ${{ secrets.TG_STATUS_CHAT_ID }}
+        run: |
+          MSG="🟢 Post-deploy ok · repo=${{ github.repository }} · sha=${{ github.sha::7 }}"
+          curl -fsS -X POST "https://api.telegram.org/bot${TG_BOT_TOKEN}/sendMessage" \
+            -d "chat_id=${TG_STATUS_CHAT_ID}" \
+            -d "text=${MSG}" \
+            -d "disable_web_page_preview=true" \
+            -d "parse_mode=HTML" || true
