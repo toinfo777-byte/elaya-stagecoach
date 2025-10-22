@@ -36,6 +36,26 @@ jobs:
         run: |
           python tools/daily_report.py
 
+      # 🔹 SMOKE: быстрый пинг в Telegram, чтобы подтвердить связку токен/чат
+      - name: Telegram getMe (smoke)
+        env:
+          TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
+        run: |
+          echo "Calling getMe..."
+          curl -fsS "https://api.telegram.org/bot${TG_BOT_TOKEN}/getMe" || true
+
+      - name: Telegram smoke message (scheduled)
+        env:
+          TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
+          TG_STATUS_CHAT_ID: ${{ secrets.TG_STATUS_CHAT_ID }}
+        run: |
+          MSG="⏰ Daily workflow ran · ${GITHUB_WORKFLOW} · run=${GITHUB_RUN_NUMBER} · sha=${GITHUB_SHA::7}"
+          curl -fsS -X POST "https://api.telegram.org/bot${TG_BOT_TOKEN}/sendMessage" \
+            -d "chat_id=${TG_STATUS_CHAT_ID}" \
+            -d "text=${MSG}" \
+            -d "disable_web_page_preview=true" \
+            -d "parse_mode=HTML" || true
+
       - name: Commit report to docs/elaya_status
         run: |
           git config user.name  "elaya-bot"
