@@ -1,3 +1,4 @@
+# app/main.py
 from __future__ import annotations
 
 import asyncio
@@ -19,7 +20,7 @@ from app.config import settings
 from app.build import BUILD_MARK
 from app.storage.repo import ensure_schema
 
-# routers
+# routers (diag держим последним; добавлен hq)
 from app.routers import (
     entrypoints,
     help,
@@ -37,9 +38,9 @@ from app.routers import (
     apply,
     faq,
     devops_sync,
-    hq,      # HQ summary router
     panic,
-    diag,    # health/diag/status_json
+    hq,     # ← NEW
+    diag,   # health/diag/status_json (оставляем последним)
 )
 
 logging.basicConfig(
@@ -60,7 +61,6 @@ async def _set_commands(bot: Bot) -> None:
             BotCommand(command="progress", description="Мой прогресс"),
             BotCommand(command="help", description="Помощь / FAQ"),
             BotCommand(command="ping", description="Проверка связи"),
-            BotCommand(command="hq", description="HQ-сводка (штаб)"),
         ]
     )
 
@@ -99,10 +99,10 @@ async def run_polling() -> None:
     )
     dp = Dispatcher()
 
-    # Сбрасываем webhook
+    # Чистим webhook на всякий случай
     await _guard(bot.delete_webhook(drop_pending_updates=True), "delete_webhook")
 
-    # Проверяем, что все routers экспортируют router
+    # SMOKE: убеждаемся, что все routers экспортируют router
     smoke_modules = [
         "app.routers.entrypoints",
         "app.routers.help",
@@ -120,8 +120,8 @@ async def run_polling() -> None:
         "app.routers.apply",
         "app.routers.faq",
         "app.routers.devops_sync",
-        "app.routers.hq",
         "app.routers.panic",
+        "app.routers.hq",   # ← NEW
         "app.routers.diag",
     ]
     for modname in smoke_modules:
@@ -133,7 +133,7 @@ async def run_polling() -> None:
             sys.exit(1)
     log.info("✅ SMOKE OK: routers exports are valid")
 
-    # Подключаем роутеры
+    # Регистрируем в строгом порядке
     dp.include_router(entrypoints.router);   log.info("✅ router loaded: entrypoints")
     dp.include_router(help.router);          log.info("✅ router loaded: help")
     dp.include_router(cmd_aliases.router);   log.info("✅ router loaded: aliases")
@@ -150,8 +150,8 @@ async def run_polling() -> None:
     dp.include_router(apply.router);         log.info("✅ router loaded: apply")
     dp.include_router(faq.router);           log.info("✅ router loaded: faq")
     dp.include_router(devops_sync.router);   log.info("✅ router loaded: devops_sync")
-    dp.include_router(hq.router);            log.info("✅ router loaded: hq")
     dp.include_router(panic.router);         log.info("✅ router loaded: panic (near last)")
+    dp.include_router(hq.router);            log.info("✅ router loaded: hq")        # ← NEW
     dp.include_router(diag.router);          log.info("✅ router loaded: diag (last)")
 
     await _guard(_set_commands(bot), "set_my_commands")
@@ -168,20 +168,25 @@ async def run_polling() -> None:
 
 # ─────────────────────────── Web mode (FastAPI) ───────────────────────────
 def run_web() -> FastAPI:
+    """
+    Factory-функция для uvicorn (factory=True).
+    """
     app = FastAPI(title="Elaya StageCoach", version=BUILD_MARK)
 
     @app.get("/status_json")
     async def status_json():
         return await _get_status_dict()
 
+    # Можно расширить health-роуты тут же при необходимости
     return app
 
 
-# ─────────────────────────────── Entrypoint ───────────────────────────────
+# ───────────────────────────────── entrypoint ─────────────────────────────
 if __name__ == "__main__":
     import uvicorn
 
     if settings.mode.lower() == "web":
+        # uvicorn в factory-режиме создаст приложение из run_web()
         uvicorn.run("app.main:run_web", host="0.0.0.0", port=8000, factory=True)
     else:
         try:
