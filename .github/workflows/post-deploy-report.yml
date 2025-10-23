@@ -74,3 +74,13 @@ jobs:
             -d chat_id=$TG_CHAT \
             -d text="$msg" \
             -d parse_mode=Markdown
+
+      - name: Dispatch README update
+        if: ${{ success() }}
+        run: |
+          curl -fsS -X POST \
+            -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+            -H "Accept: application/vnd.github+json" \
+            "${{ github.api_url }}/repos/${{ github.repository }}/dispatches" \
+            -d '{"event_type":"daily_report"}'
+
