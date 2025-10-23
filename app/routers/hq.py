@@ -10,19 +10,22 @@ from aiogram import Router
 from aiogram.filters import Command
 from aiogram.types import Message
 
-from app.control.admin import AdminOnly  # есть в проекте
+# из своего проекта: опционально можно включить фильтр админов
+# from app.control.admin import AdminOnly
 
 router = Router(name="hq")
 
 RAW_HOST = "https://raw.githubusercontent.com"
-REPO     = os.getenv("GITHUB_REPOSITORY", "toinfo777-byte/elaya-stagecoach")
-BRANCH   = os.getenv("HQ_BRANCH", "main")
+REPO = os.getenv("GITHUB_REPOSITORY", "toinfo777-byte/elaya-stagecoach")
+BRANCH = os.getenv("HQ_BRANCH", "main")
 REPORT_DIR = os.getenv("HQ_REPORT_DIR", "docs/elaya_status")
 STATUS_JSON_URL = os.getenv("STATUS_JSON_URL")  # напр. https://elaya-stagecoach-web.onrender.com/status_json
+
 
 def _date_variants_utc(n: int = 2) -> list[str]:
     base = datetime.utcnow().date()
     return [f"Elaya_Status_{(base - timedelta(days=i)).isoformat().replace('-', '_')}.md" for i in range(n)]
+
 
 async def _fetch_text(session: aiohttp.ClientSession, url: str, timeout: int = 10) -> Optional[str]:
     try:
@@ -33,6 +36,7 @@ async def _fetch_text(session: aiohttp.ClientSession, url: str, timeout: int = 1
         return None
     return None
 
+
 async def _fetch_json(session: aiohttp.ClientSession, url: str, timeout: int = 8) -> Optional[dict]:
     try:
         async with session.get(url, timeout=timeout) as r:
@@ -42,8 +46,10 @@ async def _fetch_json(session: aiohttp.ClientSession, url: str, timeout: int = 8
         return None
     return None
 
+
 def _report_url(name: str) -> str:
     return f"{RAW_HOST}/{REPO}/{BRANCH}/{REPORT_DIR}/{name}"
+
 
 @router.message(Command("hq"))
 async def cmd_hq(message: Message) -> None:
@@ -81,5 +87,5 @@ async def cmd_hq(message: Message) -> None:
 
     await message.answer("\n".join(lines))
 
-# Ограничить /hq для админов — раскомментируй следующую строку:
+# Чтобы ограничить команду только для админов — раскомментируй:
 # router.message.filter(AdminOnly())
