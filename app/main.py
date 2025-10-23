@@ -13,14 +13,13 @@ from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.types import BotCommand
-
 from fastapi import FastAPI
 
 from app.config import settings
 from app.build import BUILD_MARK
 from app.storage.repo import ensure_schema
 
-# routers (diag держим последним; добавлен hq)
+# routers — явные импорты, как у тебя
 from app.routers import (
     entrypoints,
     help,
@@ -39,8 +38,8 @@ from app.routers import (
     faq,
     devops_sync,
     panic,
-    hq,     # ← NEW
-    diag,   # health/diag/status_json (оставляем последним)
+    diag,   # health/diag/status_json
+    hq,     # 🔹 наш новый роутер HQ
 )
 
 logging.basicConfig(
@@ -99,10 +98,10 @@ async def run_polling() -> None:
     )
     dp = Dispatcher()
 
-    # Чистим webhook на всякий случай
+    # Чистим webhook
     await _guard(bot.delete_webhook(drop_pending_updates=True), "delete_webhook")
 
-    # SMOKE: убеждаемся, что все routers экспортируют router
+    # SMOKE: проверим, что каждый модуль экспортирует router
     smoke_modules = [
         "app.routers.entrypoints",
         "app.routers.help",
@@ -121,7 +120,7 @@ async def run_polling() -> None:
         "app.routers.faq",
         "app.routers.devops_sync",
         "app.routers.panic",
-        "app.routers.hq",   # ← NEW
+        "app.routers.hq",     # 🔹 добавили в SMOKE
         "app.routers.diag",
     ]
     for modname in smoke_modules:
@@ -151,7 +150,7 @@ async def run_polling() -> None:
     dp.include_router(faq.router);           log.info("✅ router loaded: faq")
     dp.include_router(devops_sync.router);   log.info("✅ router loaded: devops_sync")
     dp.include_router(panic.router);         log.info("✅ router loaded: panic (near last)")
-    dp.include_router(hq.router);            log.info("✅ router loaded: hq")        # ← NEW
+    dp.include_router(hq.router);            log.info("✅ router loaded: hq")           # 🔹 вставили HQ
     dp.include_router(diag.router);          log.info("✅ router loaded: diag (last)")
 
     await _guard(_set_commands(bot), "set_my_commands")
@@ -168,16 +167,13 @@ async def run_polling() -> None:
 
 # ─────────────────────────── Web mode (FastAPI) ───────────────────────────
 def run_web() -> FastAPI:
-    """
-    Factory-функция для uvicorn (factory=True).
-    """
+    """Factory-функция для uvicorn (factory=True)."""
     app = FastAPI(title="Elaya StageCoach", version=BUILD_MARK)
 
     @app.get("/status_json")
     async def status_json():
         return await _get_status_dict()
 
-    # Можно расширить health-роуты тут же при необходимости
     return app
 
 
