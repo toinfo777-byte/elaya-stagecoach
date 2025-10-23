@@ -10,8 +10,11 @@ from aiogram import Router
 from aiogram.filters import Command
 from aiogram.types import Message
 
-# из своего проекта: опционально можно включить фильтр админов
-# from app.control.admin import AdminOnly
+# Если хочешь ограничить доступ — раскомментируй AdminOnly и фильтр внизу
+try:
+    from app.control.admin import AdminOnly  # noqa: F401
+except Exception:  # модуль может отсутствовать в некоторых окружениях
+    AdminOnly = None  # type: ignore
 
 router = Router(name="hq")
 
@@ -23,6 +26,7 @@ STATUS_JSON_URL = os.getenv("STATUS_JSON_URL")  # напр. https://elaya-stagec
 
 
 def _date_variants_utc(n: int = 2) -> list[str]:
+    """Имена отчётов за сегодня, вчера, ... (UTC)."""
     base = datetime.utcnow().date()
     return [f"Elaya_Status_{(base - timedelta(days=i)).isoformat().replace('-', '_')}.md" for i in range(n)]
 
@@ -51,11 +55,12 @@ def _report_url(name: str) -> str:
     return f"{RAW_HOST}/{REPO}/{BRANCH}/{REPORT_DIR}/{name}"
 
 
-@router.message(Command("hq"))
+@router.message(Command(commands=["hq", "who"]))
 async def cmd_hq(message: Message) -> None:
-    """Короткая HQ-сводка: build/sha/uptime + ссылка на последний отчёт."""
+    """Короткая HQ-сводка: build/sha/uptime + линк на последний отчёт."""
     latest_name: Optional[str] = None
     async with aiohttp.ClientSession() as s:
+        # 1) ищем свежий отчёт (сегодня → вчера → позавчера)
         for cand in _date_variants_utc(3):
             url = _report_url(cand)
             txt = await _fetch_text(s, url)
@@ -63,6 +68,7 @@ async def cmd_hq(message: Message) -> None:
                 latest_name = cand
                 break
 
+        # 2) подтянем статус из /status_json (если задан ENDPOINT)
         status = await _fetch_json(s, STATUS_JSON_URL) if STATUS_JSON_URL else None
 
     sha = (status or {}).get("sha") or "unknown"
@@ -87,5 +93,7 @@ async def cmd_hq(message: Message) -> None:
 
     await message.answer("\n".join(lines))
 
-# Чтобы ограничить команду только для админов — раскомментируй:
-# router.message.filter(AdminOnly())
+
+# 👉 чтобы ограничить /hq только для админов — раскомментируй строку ниже:
+# if AdminOnly:
+#     router.message.filter(AdminOnly())
