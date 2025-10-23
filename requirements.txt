@@ -8,3 +8,5 @@ alembic>=1.13.2
 aiosqlite>=0.20.0
 aiosqlite>=0.19
 PyGithub>=2.3.0
+fastapi==0.115.0
+uvicorn[standard]==0.30.6
