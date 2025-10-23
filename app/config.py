@@ -1,9 +1,12 @@
 # app/config.py
 from __future__ import annotations
+
 import json
 from typing import List, Optional
+
 from pydantic import Field, computed_field
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
@@ -18,17 +21,19 @@ class Settings(BaseSettings):
     db_url: str = Field("sqlite:////data/db.sqlite", alias="DB_URL")
     env: str = Field("prod", alias="ENV")
 
+    # режимы запуска
+    mode: str = Field("worker", alias="MODE")  # worker | web
+    build_sha: Optional[str] = Field(None, alias="BUILD_SHA")
+    bot_id: Optional[str] = Field(None, alias="BOT_ID")
+
     # админы/уведомления
     admin_alert_chat_id: Optional[int] = Field(None, alias="ADMIN_ALERT_CHAT_ID")
-    admin_ids_raw: Optional[str] = Field("", alias="ADMIN_IDS")
+    admin_ids_raw: Optional[str] = Field("", alias="ADMIN_IDS")  # строка из ENV
 
     # опциональные
     channel_username: Optional[str] = Field(None, alias="CHANNEL_USERNAME")
     coach_rate_sec: int = Field(2, alias="COACH_RATE_SEC")
     coach_ttl_min: int = Field(30, alias="COACH_TTL_MIN")
-
-    # HTTP (FastAPI) — выключен по умолчанию для воркера
-    http_enabled: bool = Field(False, alias="HTTP_ENABLED")
 
     @computed_field
     @property
@@ -48,6 +53,7 @@ class Settings(BaseSettings):
             return [int(s)]
         except Exception:
             return []
+
 
 settings = Settings()
 __all__ = ["Settings", "settings"]
