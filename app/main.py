@@ -6,6 +6,7 @@ import hashlib
 import logging
 import importlib
 import sys
+import time
 
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
@@ -13,11 +14,13 @@ from aiogram.enums import ParseMode
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.types import BotCommand
 
+from fastapi import FastAPI
+
 from app.config import settings
 from app.build import BUILD_MARK
 from app.storage.repo import ensure_schema
 
-# routers (без diag — подключим ниже по флагу HTTP_ENABLED)
+# routers (оставь как у тебя; здесь важен diag для health)
 from app.routers import (
     entrypoints,
     help,
@@ -36,6 +39,7 @@ from app.routers import (
     faq,
     devops_sync,
     panic,
+    diag,  # health/diag/status_json
 )
 
 logging.basicConfig(
@@ -43,6 +47,8 @@ logging.basicConfig(
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
 )
 log = logging.getLogger("main")
+
+START_TIME = time.time()
 
 
 async def _set_commands(bot: Bot) -> None:
@@ -68,7 +74,20 @@ async def _guard(coro, what: str):
         raise
 
 
-async def main() -> None:
+async def _get_status_dict() -> dict:
+    uptime = int(time.time() - START_TIME)
+    return {
+        "build": BUILD_MARK,
+        "sha": settings.build_sha or "unknown",
+        "uptime_sec": uptime,
+        "env": settings.env,
+        "mode": settings.mode,
+        "bot_id": settings.bot_id or None,
+    }
+
+
+# ───────────────────────── Polling mode (default) ─────────────────────────
+async def run_polling() -> None:
     log.info("=== BUILD %s ===", BUILD_MARK)
     ensure_schema()
     log.info("DB schema ensured")
@@ -82,7 +101,7 @@ async def main() -> None:
     # Чистим webhook на всякий случай
     await _guard(bot.delete_webhook(drop_pending_updates=True), "delete_webhook")
 
-    # ── SMOKE CHECK: проверяем, что у всех модулей есть `router`
+    # SMOKE: убеждаемся, что все routers экспортируют router
     smoke_modules = [
         "app.routers.entrypoints",
         "app.routers.help",
@@ -101,10 +120,8 @@ async def main() -> None:
         "app.routers.faq",
         "app.routers.devops_sync",
         "app.routers.panic",
+        "app.routers.diag",
     ]
-    if settings.http_enabled:
-        smoke_modules.append("app.routers.diag")
-
     for modname in smoke_modules:
         try:
             mod = importlib.import_module(modname)
@@ -113,9 +130,8 @@ async def main() -> None:
             log.error("❌ SMOKE FAIL %s: %r", modname, e)
             sys.exit(1)
     log.info("✅ SMOKE OK: routers exports are valid")
-    # ───────────────────────────────────────────────────────────────
 
-    # Регистрируем в строгом порядке (без diag)
+    # Регистрируем в строгом порядке
     dp.include_router(entrypoints.router);   log.info("✅ router loaded: entrypoints")
     dp.include_router(help.router);          log.info("✅ router loaded: help")
     dp.include_router(cmd_aliases.router);   log.info("✅ router loaded: aliases")
@@ -133,17 +149,7 @@ async def main() -> None:
     dp.include_router(faq.router);           log.info("✅ router loaded: faq")
     dp.include_router(devops_sync.router);   log.info("✅ router loaded: devops_sync")
     dp.include_router(panic.router);         log.info("✅ router loaded: panic (near last)")
-
-    # diag — только если включён HTTP
-    if settings.http_enabled:
-        try:
-            from app.routers import diag  # импортируем только при необходимости
-            dp.include_router(diag.router)
-            log.info("✅ router loaded: diag (last, HTTP_ENABLED=true)")
-        except ModuleNotFoundError as e:
-            log.warning("HTTP_ENABLED=true, но нет зависимостей для diag: %r", e)
-    else:
-        log.info("ℹ️ HTTP_DISABLED: diag router is skipped")
+    dp.include_router(diag.router);          log.info("✅ router loaded: diag (last)")
 
     await _guard(_set_commands(bot), "set_my_commands")
 
@@ -157,8 +163,30 @@ async def main() -> None:
     await dp.start_polling(bot, allowed_updates=["message", "callback_query"])
 
 
+# ─────────────────────────── Web mode (FastAPI) ───────────────────────────
+def run_web() -> FastAPI:
+    """
+    Factory-функция для uvicorn (factory=True).
+    """
+    app = FastAPI(title="Elaya StageCoach", version=BUILD_MARK)
+
+    @app.get("/status_json")
+    async def status_json():
+        return await _get_status_dict()
+
+    # Можно расширить health-роуты тут же при необходимости
+    return app
+
+
+# ───────────────────────────────── entrypoint ─────────────────────────────
 if __name__ == "__main__":
-    try:
-        asyncio.run(main())
-    except KeyboardInterrupt:
-        log.info("⏹ Stopped by user")
+    import uvicorn
+
+    if settings.mode.lower() == "web":
+        # uvicorn в factory-режиме создаст приложение из run_web()
+        uvicorn.run("app.main:run_web", host="0.0.0.0", port=8000, factory=True)
+    else:
+        try:
+            asyncio.run(run_polling())
+        except KeyboardInterrupt:
+            log.info("⏹ Stopped by user")
