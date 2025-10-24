@@ -19,7 +19,7 @@ from app.config import settings
 from app.build import BUILD_MARK
 from app.storage.repo import ensure_schema
 
-# routers — явные импорты, как у тебя
+# aiogram-routers (бот)
 from app.routers import (
     entrypoints,
     help,
@@ -38,8 +38,8 @@ from app.routers import (
     faq,
     devops_sync,
     panic,
-    diag,   # health/diag/status_json
-    hq,     # 🔹 наш новый роутер HQ
+    hq,
+    diag,  # важно: тут теперь есть get_router(mode)
 )
 
 logging.basicConfig(
@@ -86,7 +86,7 @@ async def _get_status_dict() -> dict:
     }
 
 
-# ───────────────────────── Polling mode (default) ─────────────────────────
+# ───────────────────────── Polling mode (worker) ─────────────────────────
 async def run_polling() -> None:
     log.info("=== BUILD %s ===", BUILD_MARK)
     ensure_schema()
@@ -101,7 +101,7 @@ async def run_polling() -> None:
     # Чистим webhook
     await _guard(bot.delete_webhook(drop_pending_updates=True), "delete_webhook")
 
-    # SMOKE: проверим, что каждый модуль экспортирует router
+    # SMOKE: модули должны экспортировать aiogram Router; для diag — get_router/bot_router
     smoke_modules = [
         "app.routers.entrypoints",
         "app.routers.help",
@@ -120,19 +120,23 @@ async def run_polling() -> None:
         "app.routers.faq",
         "app.routers.devops_sync",
         "app.routers.panic",
-        "app.routers.hq",     # 🔹 добавили в SMOKE
+        "app.routers.hq",
         "app.routers.diag",
     ]
     for modname in smoke_modules:
         try:
             mod = importlib.import_module(modname)
-            assert hasattr(mod, "router"), f"{modname}: no `router` export"
+            if modname == "app.routers.diag":
+                assert hasattr(mod, "get_router") or hasattr(mod, "bot_router"), \
+                    "diag must provide get_router()/bot_router"
+            else:
+                assert hasattr(mod, "router"), f"{modname}: no `router` export"
         except Exception as e:
             log.error("❌ SMOKE FAIL %s: %r", modname, e)
             sys.exit(1)
     log.info("✅ SMOKE OK: routers exports are valid")
 
-    # Регистрируем в строгом порядке
+    # Регистрируем aiogram-роутеры в строгом порядке
     dp.include_router(entrypoints.router);   log.info("✅ router loaded: entrypoints")
     dp.include_router(help.router);          log.info("✅ router loaded: help")
     dp.include_router(cmd_aliases.router);   log.info("✅ router loaded: aliases")
@@ -150,8 +154,9 @@ async def run_polling() -> None:
     dp.include_router(faq.router);           log.info("✅ router loaded: faq")
     dp.include_router(devops_sync.router);   log.info("✅ router loaded: devops_sync")
     dp.include_router(panic.router);         log.info("✅ router loaded: panic (near last)")
-    dp.include_router(hq.router);            log.info("✅ router loaded: hq")           # 🔹 вставили HQ
-    dp.include_router(diag.router);          log.info("✅ router loaded: diag (last)")
+    dp.include_router(hq.router);            log.info("✅ router loaded: hq")
+    # ⬇️ главное изменение: берём aiogram-роутер из diag по режиму
+    dp.include_router(diag.get_router("worker")); log.info("✅ router loaded: diag (last)")
 
     await _guard(_set_commands(bot), "set_my_commands")
 
@@ -170,9 +175,13 @@ def run_web() -> FastAPI:
     """Factory-функция для uvicorn (factory=True)."""
     app = FastAPI(title="Elaya StageCoach", version=BUILD_MARK)
 
-    @app.get("/status_json")
-    async def status_json():
-        return await _get_status_dict()
+    # Подключаем web-роутер из diag (в нём /status_json)
+    app.include_router(diag.get_router("web"))
+
+    # Простой health без лишней инфы
+    @app.get("/health")
+    async def health():
+        return {"ok": True, "mode": "web", **(await _get_status_dict())}
 
     return app
 
@@ -182,7 +191,6 @@ if __name__ == "__main__":
     import uvicorn
 
     if settings.mode.lower() == "web":
-        # uvicorn в factory-режиме создаст приложение из run_web()
         uvicorn.run("app.main:run_web", host="0.0.0.0", port=8000, factory=True)
     else:
         try:
