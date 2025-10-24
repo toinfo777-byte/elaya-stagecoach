@@ -10,10 +10,9 @@ from aiogram import Router
 from aiogram.filters import Command
 from aiogram.types import Message
 
-# Если хочешь ограничить доступ — раскомментируй AdminOnly и фильтр внизу
 try:
     from app.control.admin import AdminOnly  # noqa: F401
-except Exception:  # модуль может отсутствовать в некоторых окружениях
+except Exception:
     AdminOnly = None  # type: ignore
 
 router = Router(name="hq")
@@ -23,13 +22,11 @@ REPO = os.getenv("GITHUB_REPOSITORY", "toinfo777-byte/elaya-stagecoach")
 BRANCH = os.getenv("HQ_BRANCH", "main")
 REPORT_DIR = os.getenv("HQ_REPORT_DIR", "docs/elaya_status")
 STATUS_JSON_URL = os.getenv("STATUS_JSON_URL")  # напр. https://elaya-stagecoach-web.onrender.com/status_json
-
+WHO_ALIAS = os.getenv("HQ_WHO_ALIAS", "").lower() in {"1", "true", "yes"}
 
 def _date_variants_utc(n: int = 2) -> list[str]:
-    """Имена отчётов за сегодня, вчера, ... (UTC)."""
     base = datetime.utcnow().date()
     return [f"Elaya_Status_{(base - timedelta(days=i)).isoformat().replace('-', '_')}.md" for i in range(n)]
-
 
 async def _fetch_text(session: aiohttp.ClientSession, url: str, timeout: int = 10) -> Optional[str]:
     try:
@@ -40,7 +37,6 @@ async def _fetch_text(session: aiohttp.ClientSession, url: str, timeout: int = 1
         return None
     return None
 
-
 async def _fetch_json(session: aiohttp.ClientSession, url: str, timeout: int = 8) -> Optional[dict]:
     try:
         async with session.get(url, timeout=timeout) as r:
@@ -50,25 +46,20 @@ async def _fetch_json(session: aiohttp.ClientSession, url: str, timeout: int = 8
         return None
     return None
 
-
 def _report_url(name: str) -> str:
     return f"{RAW_HOST}/{REPO}/{BRANCH}/{REPORT_DIR}/{name}"
 
-
-@router.message(Command(commands=["hq", "who"]))
+# Базовый обработчик: только /hq
+@router.message(Command(commands=["hq"]))
 async def cmd_hq(message: Message) -> None:
-    """Короткая HQ-сводка: build/sha/uptime + линк на последний отчёт."""
     latest_name: Optional[str] = None
     async with aiohttp.ClientSession() as s:
-        # 1) ищем свежий отчёт (сегодня → вчера → позавчера)
         for cand in _date_variants_utc(3):
             url = _report_url(cand)
             txt = await _fetch_text(s, url)
             if txt:
                 latest_name = cand
                 break
-
-        # 2) подтянем статус из /status_json (если задан ENDPOINT)
         status = await _fetch_json(s, STATUS_JSON_URL) if STATUS_JSON_URL else None
 
     sha = (status or {}).get("sha") or "unknown"
@@ -93,7 +84,12 @@ async def cmd_hq(message: Message) -> None:
 
     await message.answer("\n".join(lines))
 
+# Опциональный алиас /who — включается только переменной окружения HQ_WHO_ALIAS=1
+if WHO_ALIAS:
+    @router.message(Command(commands=["who"]))
+    async def cmd_who_alias(message: Message) -> None:
+        await cmd_hq(message)
 
-# 👉 чтобы ограничить /hq только для админов — раскомментируй строку ниже:
+# Чтобы ограничить HQ только для админов — раскомментируйте:
 # if AdminOnly:
 #     router.message.filter(AdminOnly())
