@@ -3,10 +3,11 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
-import logging
 import importlib
+import logging
 import sys
 import time
+from typing import Any
 
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
@@ -15,11 +16,11 @@ from aiogram.exceptions import TelegramBadRequest
 from aiogram.types import BotCommand
 from fastapi import FastAPI
 
-from app.config import settings
 from app.build import BUILD_MARK
+from app.config import settings
 from app.storage.repo import ensure_schema
 
-# aiogram-routers (бот)
+# Явные импорты основных роутеров бота
 from app.routers import (
     entrypoints,
     help,
@@ -38,8 +39,7 @@ from app.routers import (
     faq,
     devops_sync,
     panic,
-    hq,
-    diag,  # важно: тут теперь есть get_router(mode)
+    hq,  # наш новый роутер HQ
 )
 
 logging.basicConfig(
@@ -74,7 +74,7 @@ async def _guard(coro, what: str):
         raise
 
 
-async def _get_status_dict() -> dict:
+async def _get_status_dict() -> dict[str, Any]:
     uptime = int(time.time() - START_TIME)
     return {
         "build": BUILD_MARK,
@@ -86,7 +86,7 @@ async def _get_status_dict() -> dict:
     }
 
 
-# ───────────────────────── Polling mode (worker) ─────────────────────────
+# ───────────────────────── Polling mode (default) ─────────────────────────
 async def run_polling() -> None:
     log.info("=== BUILD %s ===", BUILD_MARK)
     ensure_schema()
@@ -98,10 +98,10 @@ async def run_polling() -> None:
     )
     dp = Dispatcher()
 
-    # Чистим webhook
+    # Чистим webhook на всякий случай
     await _guard(bot.delete_webhook(drop_pending_updates=True), "delete_webhook")
 
-    # SMOKE: модули должны экспортировать aiogram Router; для diag — get_router/bot_router
+    # ── SMOKE: проверяем экспорты роутеров ────────────────────────────────
     smoke_modules = [
         "app.routers.entrypoints",
         "app.routers.help",
@@ -121,22 +121,28 @@ async def run_polling() -> None:
         "app.routers.devops_sync",
         "app.routers.panic",
         "app.routers.hq",
-        "app.routers.diag",
+        "app.routers.diag",  # особый случай (bot_router/get_router)
     ]
+
     for modname in smoke_modules:
         try:
             mod = importlib.import_module(modname)
             if modname == "app.routers.diag":
-                assert hasattr(mod, "get_router") or hasattr(mod, "bot_router"), \
-                    "diag must provide get_router()/bot_router"
+                ok = hasattr(mod, "bot_router") or hasattr(mod, "get_router")
+                if not ok:
+                    raise AssertionError(
+                        f"{modname}: expected get_router() or bot_router export"
+                    )
             else:
-                assert hasattr(mod, "router"), f"{modname}: no `router` export"
+                if not hasattr(mod, "router"):
+                    raise AssertionError(f"{modname}: no `router` export")
         except Exception as e:
             log.error("❌ SMOKE FAIL %s: %r", modname, e)
             sys.exit(1)
+
     log.info("✅ SMOKE OK: routers exports are valid")
 
-    # Регистрируем aiogram-роутеры в строгом порядке
+    # ── регистрируем роутеры в строгом порядке ────────────────────────────
     dp.include_router(entrypoints.router);   log.info("✅ router loaded: entrypoints")
     dp.include_router(help.router);          log.info("✅ router loaded: help")
     dp.include_router(cmd_aliases.router);   log.info("✅ router loaded: aliases")
@@ -155,9 +161,21 @@ async def run_polling() -> None:
     dp.include_router(devops_sync.router);   log.info("✅ router loaded: devops_sync")
     dp.include_router(panic.router);         log.info("✅ router loaded: panic (near last)")
     dp.include_router(hq.router);            log.info("✅ router loaded: hq")
-    # ⬇️ главное изменение: берём aiogram-роутер из diag по режиму
-    dp.include_router(diag.get_router("worker")); log.info("✅ router loaded: diag (last)")
 
+    # ── diag: поддерживаем bot_router и/или get_router() ──────────────────
+    diag_mod = importlib.import_module("app.routers.diag")
+    diag_router = getattr(diag_mod, "bot_router", None)
+    if diag_router is None:
+        factory = getattr(diag_mod, "get_router", None)
+        if callable(factory):
+            diag_router = factory()
+    if diag_router is None:
+        raise RuntimeError("app.routers.diag: neither bot_router nor get_router() provided")
+
+    dp.include_router(diag_router)
+    log.info("✅ router loaded: diag (last)")
+
+    # команды, инфо и запуск
     await _guard(_set_commands(bot), "set_my_commands")
 
     token_hash = hashlib.md5(settings.bot_token.encode()).hexdigest()[:8]
@@ -172,16 +190,15 @@ async def run_polling() -> None:
 
 # ─────────────────────────── Web mode (FastAPI) ───────────────────────────
 def run_web() -> FastAPI:
-    """Factory-функция для uvicorn (factory=True)."""
+    """
+    Factory-функция для uvicorn (factory=True).
+    Даёт простой /status_json без лишних зависимостей.
+    """
     app = FastAPI(title="Elaya StageCoach", version=BUILD_MARK)
 
-    # Подключаем web-роутер из diag (в нём /status_json)
-    app.include_router(diag.get_router("web"))
-
-    # Простой health без лишней инфы
-    @app.get("/health")
-    async def health():
-        return {"ok": True, "mode": "web", **(await _get_status_dict())}
+    @app.get("/status_json")
+    async def status_json():
+        return await _get_status_dict()
 
     return app
 
@@ -191,6 +208,7 @@ if __name__ == "__main__":
     import uvicorn
 
     if settings.mode.lower() == "web":
+        # uvicorn в factory-режиме создаст приложение из run_web()
         uvicorn.run("app.main:run_web", host="0.0.0.0", port=8000, factory=True)
     else:
         try:
