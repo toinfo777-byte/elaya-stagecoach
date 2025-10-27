@@ -10,11 +10,11 @@ import sys
 import time
 from typing import Any
 
-from aiogram import Bot, Dispatcher
+from aiogram import Bot, Dispatcher, Router, F
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 from aiogram.exceptions import TelegramBadRequest
-from aiogram.types import BotCommand
+from aiogram.types import BotCommand, Message
 from fastapi import FastAPI
 
 from app.build import BUILD_MARK
@@ -93,6 +93,20 @@ async def _get_status_dict() -> dict[str, Any]:
     }
 
 
+def _make_fallback_ping_router() -> Router:
+    """
+    Fallback-роутер на случай, если app.routers.ping отсутствует в репозитории.
+    Обрабатывает /ping и текст 'ping'.
+    """
+    r = Router(name="ping_fallback")
+
+    @r.message(F.text.casefold().in_({"/ping", "ping"}))
+    async def _ping(msg: Message):
+        await msg.answer("pong")
+
+    return r
+
+
 # ───────────────────────── Polling mode (default) ─────────────────────────
 async def run_polling() -> None:
     log.info("=== BUILD %s ===", BUILD_MARK)
@@ -109,7 +123,7 @@ async def run_polling() -> None:
     await _guard(bot.delete_webhook(drop_pending_updates=True), "delete_webhook")
 
     # ── SMOKE: проверяем экспорты роутеров ────────────────────────────────
-    smoke_modules = [
+    smoke_modules_required = [
         "app.routers.entrypoints",
         "app.routers.help",
         "app.routers.cmd_aliases",
@@ -130,7 +144,7 @@ async def run_polling() -> None:
         "app.routers.hq",
         "app.routers.diag",  # тут допускаем bot_router или get_router()
     ]
-    for modname in smoke_modules:
+    for modname in smoke_modules_required:
         try:
             mod = importlib.import_module(modname)
             if modname == "app.routers.diag":
@@ -143,6 +157,19 @@ async def run_polling() -> None:
         except Exception as e:
             log.error("❌ SMOKE FAIL %s: %r", modname, e)
             sys.exit(1)
+
+    # ping — опциональный: если модуля нет, используем встроенный fallback
+    ping_router = None
+    try:
+        _ping_mod = importlib.import_module("app.routers.ping")
+        ping_router = getattr(_ping_mod, "router", None)
+        if ping_router is None:
+            log.warning("app.routers.ping импортирован, но без `router` — будет использован fallback")
+    except ModuleNotFoundError:
+        log.info("app.routers.ping не найден — будет использован fallback")
+
+    if ping_router is None:
+        ping_router = _make_fallback_ping_router()
 
     log.info("✅ SMOKE OK: routers exports are valid")
 
@@ -165,6 +192,7 @@ async def run_polling() -> None:
     dp.include_router(devops_sync.router);   log.info("✅ router loaded: devops_sync")
     dp.include_router(panic.router);         log.info("✅ router loaded: panic (near last)")
     dp.include_router(hq.router);            log.info("✅ router loaded: hq")
+    dp.include_router(ping_router);          log.info("✅ router loaded: ping")
 
     # diag: поддерживаем bot_router и/или get_router()
     diag_mod = importlib.import_module("app.routers.diag")
