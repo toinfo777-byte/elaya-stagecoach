@@ -13,7 +13,7 @@ from typing import Any
 from aiogram import Bot, Dispatcher, Router, F
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
-from aiogram.exceptions import TelegramBadRequest
+from aiogram.exceptions import TelegramBadRequest, TelegramConflictError
 from aiogram.types import BotCommand, Message
 from fastapi import FastAPI
 
@@ -21,10 +21,10 @@ from app.build import BUILD_MARK
 from app.config import settings
 from app.storage.repo import ensure_schema
 
-# Роутеры бота
+# Роутеры бота (импортируем заранее — порядок подключения зададим ниже)
 from app.routers import (
     entrypoints,
-    help,
+    help as help_router_mod,
     cmd_aliases,
     onboarding,
     system,
@@ -40,7 +40,7 @@ from app.routers import (
     faq,
     devops_sync,
     panic,
-    hq,  # HQ-репорт
+    hq,  # HQ-репорт — подключим РАНЬШЕ alias/menu
     # diag — импортируем динамически ниже (нужна особая проверка)
 )
 
@@ -66,6 +66,7 @@ async def _set_commands(bot: Bot) -> None:
             BotCommand(command="progress", description="Мой прогресс"),
             BotCommand(command="help", description="Помощь / FAQ"),
             BotCommand(command="ping", description="Проверка связи"),
+            BotCommand(command="hq", description="HQ-сводка"),  # бонус
         ]
     )
 
@@ -173,26 +174,26 @@ async def run_polling() -> None:
 
     log.info("✅ SMOKE OK: routers exports are valid")
 
-    # ── Подключаем в строгом порядке ──────────────────────────────────────
-    dp.include_router(entrypoints.router);   log.info("✅ router loaded: entrypoints")
-    dp.include_router(help.router);          log.info("✅ router loaded: help")
-    dp.include_router(cmd_aliases.router);   log.info("✅ router loaded: aliases")
-    dp.include_router(onboarding.router);    log.info("✅ router loaded: onboarding")
-    dp.include_router(system.router);        log.info("✅ router loaded: system")
-    dp.include_router(minicasting.router);   log.info("✅ router loaded: minicasting")
-    dp.include_router(leader.router);        log.info("✅ router loaded: leader")
-    dp.include_router(training.router);      log.info("✅ router loaded: training")
-    dp.include_router(progress.router);      log.info("✅ router loaded: progress")
-    dp.include_router(privacy.router);       log.info("✅ router loaded: privacy")
-    dp.include_router(settings_mod.router);  log.info("✅ router loaded: settings")
-    dp.include_router(extended.router);      log.info("✅ router loaded: extended")
-    dp.include_router(casting.router);       log.info("✅ router loaded: casting")
-    dp.include_router(apply.router);         log.info("✅ router loaded: apply")
-    dp.include_router(faq.router);           log.info("✅ router loaded: faq")
-    dp.include_router(devops_sync.router);   log.info("✅ router loaded: devops_sync")
-    dp.include_router(panic.router);         log.info("✅ router loaded: panic (near last)")
-    dp.include_router(hq.router);            log.info("✅ router loaded: hq")
-    dp.include_router(ping_router);          log.info("✅ router loaded: ping")
+    # ── ПОРЯДОК ПОДКЛЮЧЕНИЯ (hq раньше alias/menu) ───────────────────────
+    dp.include_router(entrypoints.router);        log.info("✅ router loaded: entrypoints")
+    dp.include_router(help_router_mod.router);    log.info("✅ router loaded: help")
+    dp.include_router(hq.router);                 log.info("✅ router loaded: hq")            # ⬅️ подняли выше
+    dp.include_router(cmd_aliases.router);        log.info("✅ router loaded: aliases")
+    dp.include_router(onboarding.router);         log.info("✅ router loaded: onboarding")
+    dp.include_router(system.router);             log.info("✅ router loaded: system")
+    dp.include_router(minicasting.router);        log.info("✅ router loaded: minicasting")
+    dp.include_router(leader.router);             log.info("✅ router loaded: leader")
+    dp.include_router(training.router);           log.info("✅ router loaded: training")
+    dp.include_router(progress.router);           log.info("✅ router loaded: progress")
+    dp.include_router(privacy.router);            log.info("✅ router loaded: privacy")
+    dp.include_router(settings_mod.router);       log.info("✅ router loaded: settings")
+    dp.include_router(extended.router);           log.info("✅ router loaded: extended")
+    dp.include_router(casting.router);            log.info("✅ router loaded: casting")
+    dp.include_router(apply.router);              log.info("✅ router loaded: apply")
+    dp.include_router(faq.router);                log.info("✅ router loaded: faq")
+    dp.include_router(devops_sync.router);        log.info("✅ router loaded: devops_sync")
+    dp.include_router(panic.router);              log.info("✅ router loaded: panic (near last)")
+    dp.include_router(ping_router);               log.info("✅ router loaded: ping")
 
     # diag: поддерживаем bot_router и/или get_router()
     diag_mod = importlib.import_module("app.routers.diag")
@@ -204,9 +205,9 @@ async def run_polling() -> None:
     if diag_router is None:
         raise RuntimeError("app.routers.diag: neither bot_router nor get_router() provided")
 
-    dp.include_router(diag_router);          log.info("✅ router loaded: diag (last)")
+    dp.include_router(diag_router);               log.info("✅ router loaded: diag (last)")
 
-    # Команды, инфо, запуск
+    # Команды, инфо
     await _guard(_set_commands(bot), "set_my_commands")
 
     token_hash = hashlib.md5(settings.bot_token.encode()).hexdigest()[:8]
@@ -219,7 +220,13 @@ async def run_polling() -> None:
     log.info("🤖 Bot: @%s (ID: %s)", me.username, me.id)
     log.info("🚀 Start polling…")
 
-    await dp.start_polling(bot, allowed_updates=["message", "callback_query"])
+    # ── «Мягкий выход» при конфликте поллинга (особенно полезно для staging) ──
+    try:
+        await dp.start_polling(bot, allowed_updates=["message", "callback_query"])
+    except TelegramConflictError as e:
+        # Если параллельно поднялся второй инстанс с тем же токеном — аккуратно завершаемся.
+        log.error("⚠️ TelegramConflictError: %s — завершаю процесс, чтобы остался единый инстанс.", e)
+        sys.exit(0)
 
 
 # ─────────────────────────── Web mode (FastAPI) ───────────────────────────
