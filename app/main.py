@@ -7,14 +7,12 @@ import logging
 import os
 import sys
 import time
-from typing import Any
-
-import asyncpg  # ⬅️ для advisory lock
+from typing import Any, Optional
 
 from aiogram import Bot, Dispatcher, Router, F
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
-from aiogram.exceptions import TelegramBadRequest
+from aiogram.exceptions import TelegramBadRequest, TelegramConflictError
 from aiogram.types import BotCommand, Message
 from fastapi import FastAPI
 
@@ -25,7 +23,7 @@ from app.storage.repo import ensure_schema
 # Роутеры бота
 from app.routers import (
     entrypoints,
-    help,
+    help as help_router,
     cmd_aliases,
     onboarding,
     system,
@@ -67,7 +65,7 @@ async def _set_commands(bot: Bot) -> None:
             BotCommand(command="progress", description="Мой прогресс"),
             BotCommand(command="help", description="Помощь / FAQ"),
             BotCommand(command="ping", description="Проверка связи"),
-            BotCommand(command="hq", description="HQ-сводка"),
+            BotCommand(command="whoami", description="Текущий бот / среда"),
         ]
     )
 
@@ -84,7 +82,7 @@ async def _guard(coro, what: str):
 
 async def _get_status_dict() -> dict[str, Any]:
     uptime = int(time.time() - START_TIME)
-    os.environ["UPTIME_SEC"] = str(uptime)  # чтобы diag.api_router тоже видел актуальное значение
+    os.environ["UPTIME_SEC"] = str(uptime)
     return {
         "build": BUILD_MARK,
         "sha": settings.build_sha or "unknown",
@@ -96,62 +94,44 @@ async def _get_status_dict() -> dict[str, Any]:
 
 
 def _make_fallback_ping_router() -> Router:
-    """
-    Fallback-роутер на случай, если app.routers.ping отсутствует в репозитории.
-    Обрабатывает /ping и текст 'ping'.
-    """
     r = Router(name="ping_fallback")
 
     @r.message(F.text.casefold().in_({"/ping", "ping"}))
     async def _ping(msg: Message):
         await msg.answer("pong")
 
+    @r.message(F.text.casefold() == "/whoami")
+    async def _whoami(msg: Message, bot: Bot):
+        me = await bot.get_me()
+        await msg.answer(
+            f"🤖 <b>whoami</b>\n"
+            f"• username: <code>@{me.username}</code>\n"
+            f"• bot_id: <code>{me.id}</code>\n"
+            f"• ENV: <code>{settings.env}</code>\n"
+            f"• MODE: <code>{settings.mode}</code>\n"
+            f"• BUILD: <code>{BUILD_MARK}</code>"
+        )
+
     return r
 
 
-# ────────────── ДОБАВЛЕНО: «жёсткая» подготовка бота + лидер-лок ──────────────
-async def _safe_prepare_bot(bot: Bot) -> None:
-    """Сбрасываем вебхук и старые cloud-сессии Bot API (устраняет залипшие getUpdates)."""
+async def _force_single_session(bot: Bot, reason: str, pause: float = 0.6) -> None:
+    """
+    Жёстко очищает любые предыдущие сессии/хвосты у Telegram:
+    1) удаляет вебхук с дропом апдейтов
+    2) делает logout() — закрывает ВСЕ старые long-poll соединения
+    """
+    log.info("🔒 Force single session (%s): delete_webhook + log_out", reason)
     try:
         await bot.delete_webhook(drop_pending_updates=True)
-        log.info("🧹 Webhook cleared (drop_pending_updates=True)")
     except Exception as e:
-        log.warning("delete_webhook failed: %s", e)
-
+        log.warning("delete_webhook failed (%s): %r", reason, e)
     try:
         await bot.log_out()
-        log.info("🔌 Bot logged out from cloud session (old getUpdates stopped)")
     except Exception as e:
-        log.warning("bot.log_out failed: %s", e)
-
-
-async def _acquire_instance_lock(bot: Bot) -> bool:
-    """
-    Advisory lock в PostgreSQL, чтобы второй инстанс сразу завершился.
-    Ключ — bot_id (уникален для каждого токена).
-    """
-    dsn = os.getenv("DATABASE_URL")
-    if not dsn:
-        log.warning("DATABASE_URL is not set — skip advisory lock")
-        return True
-
-    try:
-        me = await bot.get_me()
-        lock_key = int(me.id)
-        conn = await asyncpg.connect(dsn)
-        locked = await conn.fetchval("SELECT pg_try_advisory_lock($1)", lock_key)
-        await conn.close()
-        if locked:
-            log.info("✅ Instance lock acquired (bot_id=%s)", lock_key)
-            return True
-        else:
-            log.error("🚫 Another instance holds the polling lock (bot_id=%s) — exiting", lock_key)
-            return False
-    except Exception as e:
-        # Если БД недоступна — не блокируем запуск, но логируем
-        log.error("Instance lock error (Postgres): %s", e)
-        return True
-# ───────────────────────────────────────────────────────────────────────────
+        # если уже Logged out — это ок
+        log.warning("log_out failed (%s): %r", reason, e)
+    await asyncio.sleep(pause)
 
 
 # ───────────────────────── Polling mode (default) ─────────────────────────
@@ -166,7 +146,10 @@ async def run_polling() -> None:
     )
     dp = Dispatcher()
 
-    # SMOKE: проверяем экспорты роутеров
+    # Префлайт: жёстко гарантируем, что нет вебхука/старых long-poll
+    await _force_single_session(bot, reason="preflight")
+
+    # ── SMOKE: проверяем экспорты роутеров ────────────────────────────────
     smoke_modules_required = [
         "app.routers.entrypoints",
         "app.routers.help",
@@ -186,7 +169,7 @@ async def run_polling() -> None:
         "app.routers.devops_sync",
         "app.routers.panic",
         "app.routers.hq",
-        "app.routers.diag",  # тут допускаем bot_router или get_router()
+        "app.routers.diag",
     ]
     for modname in smoke_modules_required:
         try:
@@ -218,11 +201,8 @@ async def run_polling() -> None:
     log.info("✅ SMOKE OK: routers exports are valid")
 
     # ── Подключаем в строгом порядке ──────────────────────────────────────
-    # Важно: hq подключаем раньше алиасов; ping — ближе к началу, чтобы всегда отвечать
     dp.include_router(entrypoints.router);   log.info("✅ router loaded: entrypoints")
-    dp.include_router(help.router);          log.info("✅ router loaded: help")
-    dp.include_router(hq.router);            log.info("✅ router loaded: hq")
-    dp.include_router(ping_router);          log.info("✅ router loaded: ping")
+    dp.include_router(help_router.router);   log.info("✅ router loaded: help")
     dp.include_router(cmd_aliases.router);   log.info("✅ router loaded: aliases")
     dp.include_router(onboarding.router);    log.info("✅ router loaded: onboarding")
     dp.include_router(system.router);        log.info("✅ router loaded: system")
@@ -238,6 +218,8 @@ async def run_polling() -> None:
     dp.include_router(faq.router);           log.info("✅ router loaded: faq")
     dp.include_router(devops_sync.router);   log.info("✅ router loaded: devops_sync")
     dp.include_router(panic.router);         log.info("✅ router loaded: panic (near last)")
+    dp.include_router(hq.router);            log.info("✅ router loaded: hq")
+    dp.include_router(ping_router);          log.info("✅ router loaded: ping")
 
     # diag: поддерживаем bot_router и/или get_router()
     diag_mod = importlib.import_module("app.routers.diag")
@@ -248,35 +230,36 @@ async def run_polling() -> None:
             diag_router = factory()
     if diag_router is None:
         raise RuntimeError("app.routers.diag: neither bot_router nor get_router() provided")
-
     dp.include_router(diag_router);          log.info("✅ router loaded: diag (last)")
 
     # Команды, инфо
     await _guard(_set_commands(bot), "set_my_commands")
 
-    token_hash = hashlib.md5(settings.bot_token.encode()).hexdigest()[:8]
     me = await bot.get_me()
-    os.environ["BOT_ID"] = str(me.id)
+    token_hash = hashlib.md5(settings.bot_token.encode()).hexdigest()[:8]
+    os.environ["BOT_ID"] = str(me.id)  # чтобы diag.api_router мог вернуть его
 
     log.info("🔑 Token hash: %s", token_hash)
-    log.info("🤖 Bot: @%s (ID: %s)", me.username, me.id)
+    log.info("🤖 Bot online: @%s (ID: %s)  ENV=%s MODE=%s BUILD=%s",
+             me.username, me.id, settings.env, settings.mode, BUILD_MARK)
 
-    # ── ДОБАВЛЕНО: подготовка + лидер-лок ─────────────────────────────────
-    await _safe_prepare_bot(bot)
-    if not await _acquire_instance_lock(bot):
-        # второй инстанс — завершаемся без поллинга
-        return
+    # ── Старт polling с автолечением конфликтов ───────────────────────────
+    async def _start_polling_once(tag: str) -> None:
+        log.info("🚀 Start polling (%s)…", tag)
+        await dp.start_polling(bot, allowed_updates=["message", "callback_query"])
 
-    log.info("🚀 Start polling…")
-    await dp.start_polling(bot, allowed_updates=["message", "callback_query"])
+    try:
+        await _start_polling_once("initial")
+    except TelegramConflictError as e:
+        # первое же столкновение — чистим сессию и повторяем один раз
+        log.error("⚠️ TelegramConflictError (initial): %s", e)
+        await _force_single_session(bot, reason="conflict-retry", pause=1.0)
+        await _start_polling_once("retry")
+    # иные исключения пусть валятся вверх — это справедливо для наблюдаемости
 
 
 # ─────────────────────────── Web mode (FastAPI) ───────────────────────────
 def run_web() -> FastAPI:
-    """
-    Factory-функция для uvicorn (factory=True).
-    Даёт простой /status_json без лишних зависимостей.
-    """
     app = FastAPI(title="Elaya StageCoach", version=BUILD_MARK)
 
     @app.get("/status_json")
@@ -291,7 +274,6 @@ if __name__ == "__main__":
     import uvicorn
 
     if settings.mode.lower() == "web":
-        # uvicorn в factory-режиме создаст приложение из run_web()
         uvicorn.run("app.main:run_web", host="0.0.0.0", port=8000, factory=True)
     else:
         try:
