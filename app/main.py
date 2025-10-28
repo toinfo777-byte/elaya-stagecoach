@@ -6,7 +6,7 @@ import logging
 import os
 import time
 from importlib import import_module
-from typing import Iterable
+from typing import Optional
 
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
@@ -15,92 +15,74 @@ from aiogram.types import Update
 
 from fastapi import FastAPI, Request, Response
 
-START_TS = time.time()
-
-
+# ---------------------------- env helpers -----------------------------------
 def env(name: str, default: str = "") -> str:
     v = os.getenv(name)
     return (v if v is not None else default).strip()
 
+START_TS = time.time()
 
-# ── ENV ──────────────────────────────────────────────────────────────────────
-MODE = env("MODE", "worker")  # worker | web | webhook
-ENV = env("ENV", "develop")
+MODE = env("MODE", "worker")          # worker | web | webhook
+ENV  = env("ENV", "develop")
 
-BOT_TOKEN = env("BOT_TOKEN") or env("TELEGRAM_TOKEN") or env("TELEGRAM_TOKEN_PROD")
-
-WEBHOOK_BASE = env("WEBHOOK_BASE")            # e.g. https://elaya-stagecoach-web.onrender.com
-WEBHOOK_SECRET = env("WEBHOOK_SECRET")        # long random string
-WEBHOOK_PATH = env("WEBHOOK_PATH")            # e.g. /tg/<secret>
+BOT_TOKEN       = env("BOT_TOKEN") or env("TELEGRAM_TOKEN")
+WEBHOOK_BASE    = env("WEBHOOK_BASE")        # e.g. https://elaya-stagecoach-web.onrender.com
+WEBHOOK_PATH    = env("WEBHOOK_PATH")        # e.g. /tg/<secret>
+WEBHOOK_SECRET  = env("WEBHOOK_SECRET")      # same <secret> value
 
 BUILD_MARK = env("BUILD_MARK", "local")
-SHORT_SHA = env("SHORT_SHA", "local")
+SHORT_SHA  = env("SHORT_SHA", env("BUILD_SHA", "local"))
 
 LOG_LEVEL = env("LOG_LEVEL", "INFO")
 
 logging.basicConfig(
-    level=getattr(logging, LOG_LEVEL.upper(), logging.INFO),
+    level=getattr(logging, LOG_LEVEL, logging.INFO),
     format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
 )
 
+# --------------------------- routers include --------------------------------
+async def _include_routers(dp: Dispatcher) -> None:
+    """
+    Подключаем только стабильные роутеры.
+    Важно: проблемный app.routers.control исключён, чтобы не падал импорт.
+    """
+    modules = (
+        "app.routers.faq",
+        "app.routers.devops_sync",
+        "app.routers.panic",
+        "app.routers.hq",
+    )
+    for module_name in modules:
+        try:
+            mod = import_module(module_name)
+            dp.include_router(getattr(mod, "router"))
+            logging.info("✅ router loaded: %s", module_name)
+        except Exception as e:
+            logging.error("❌ router failed: %s — %r", module_name, e)
 
 def _uptime_sec() -> int:
     return int(time.time() - START_TS)
 
-
-# Подключаем существующие роутеры: список составлен по твоему прежнему main.py.
-# Любой отсутствующий модуль будет пропущен без падения.
-ROUTERS: Iterable[str] = (
-    "app.routers.entrypoints",
-    "app.routers.help",
-    "app.routers.cmd_aliases",
-    "app.routers.onboarding",
-    "app.routers.system",
-    "app.routers.minicasting",
-    "app.routers.leader",
-    "app.routers.training",
-    "app.routers.progress",
-    "app.routers.privacy",
-    "app.routers.settings",
-    "app.routers.extended",
-    "app.routers.casting",
-    "app.routers.apply",
-    "app.routers.faq",
-    "app.routers.devops_sync",
-    "app.routers.panic",
-    "app.routers.hq",
-)
-
-
-async def _include_routers(dp: Dispatcher) -> None:
-    for module_name in ROUTERS:
-        try:
-            mod = import_module(module_name)
-            router = getattr(mod, "router", None)
-            if router is None:
-                logging.warning("⚠️ %s: router not found — skipped", module_name)
-                continue
-            dp.include_router(router)
-            logging.info("✅ router loaded: %s", module_name)
-        except ModuleNotFoundError:
-            logging.warning("↷ %s: module not found — skipped", module_name)
-        except Exception:
-            logging.exception("❌ router failed: %s", module_name)
-            raise
-
-
-# ── POLLING (worker) ─────────────────────────────────────────────────────────
+# ----------------------------- polling mode ---------------------------------
 async def run_polling() -> None:
     if not BOT_TOKEN:
         raise RuntimeError("BOT_TOKEN is required for polling mode")
+
     bot = Bot(BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
     dp = Dispatcher()
+
+    # на всякий случай снимаем webhook, чтобы Telegram не конфликтовал с getUpdates
+    try:
+        await bot.delete_webhook(drop_pending_updates=True)
+    except Exception as e:
+        logging.warning("delete_webhook failed: %r", e)
+
     await _include_routers(dp)
-    logging.info("🚀 Start polling… [%s | %s | %s]", ENV, BUILD_MARK, SHORT_SHA[:7])
+    me = await bot.get_me()
+    logging.info("🚀 Start polling… [%s | %s] @%s", BUILD_MARK, SHORT_SHA[:7], me.username)
     await dp.start_polling(bot)
 
-
-# ── FASTAPI: /status_json (web-only) ─────────────────────────────────────────
+# --------------------------- web status only --------------------------------
 def build_web_app_status() -> FastAPI:
     app = FastAPI(title="Elaya StageCoach (status)", version=BUILD_MARK)
 
@@ -117,8 +99,7 @@ def build_web_app_status() -> FastAPI:
 
     return app
 
-
-# ── FASTAPI: Webhook (Telegram → POST) ───────────────────────────────────────
+# ---------------------------- webhook mode ----------------------------------
 def build_web_app_webhook() -> FastAPI:
     if not BOT_TOKEN:
         raise RuntimeError("BOT_TOKEN is required for webhook mode")
@@ -133,16 +114,14 @@ def build_web_app_webhook() -> FastAPI:
     async def on_startup():
         await _include_routers(dp)
         url = f"{WEBHOOK_BASE}{WEBHOOK_PATH}"
-        # Полная очистка любых «хвостов»
+        # снимаем старый, ставим новый — с drop_pending_updates
         await bot.delete_webhook(drop_pending_updates=True)
         await bot.set_webhook(
             url=url,
             secret_token=WEBHOOK_SECRET,
             drop_pending_updates=True,
-            allowed_updates=["message", "callback_query"],
         )
-        me = await bot.get_me()
-        logging.info("✅ setWebhook: %s  (bot=%s @%s)", url, me.id, me.username)
+        logging.info("✅ setWebhook: %s", url)
 
     @app.on_event("shutdown")
     async def on_shutdown():
@@ -150,32 +129,30 @@ def build_web_app_webhook() -> FastAPI:
 
     @app.get("/status_json")
     async def status_json():
+        me = None
         try:
             me = await bot.get_me()
-            bot_id = me.id
-            bot_username = me.username
         except Exception:
-            bot_id = None
-            bot_username = None
+            pass
         return {
             "build": BUILD_MARK,
             "sha": SHORT_SHA,
             "uptime_sec": _uptime_sec(),
             "env": ENV,
             "mode": "webhook",
-            "bot_id": bot_id,
-            "bot_username": bot_username,
+            "bot_id": getattr(me, "id", None),
+            "bot_username": getattr(me, "username", None),
         }
 
     @app.post(WEBHOOK_PATH)
     async def tg_webhook(request: Request) -> Response:
-        # Проверяем секрет из заголовка
+        # проверка секрета Telegram
         if request.headers.get("X-Telegram-Bot-Api-Secret-Token") != WEBHOOK_SECRET:
             return Response(status_code=403)
 
         try:
             data = await request.json()
-            update = Update.model_validate(data)
+            update = Update.model_validate(data)  # pydantic v2
         except Exception:
             return Response(status_code=400)
 
@@ -184,8 +161,7 @@ def build_web_app_webhook() -> FastAPI:
 
     return app
 
-
-# ── ENTRYPOINT (Render запускает через python -m app.main) ───────────────────
+# -------------------------------- entrypoint --------------------------------
 if __name__ == "__main__":
     import uvicorn
 
