@@ -9,13 +9,14 @@ PORT="${PORT:-10000}"
 WORKERS="${WORKERS:-1}"
 LOG_LEVEL="${LOG_LEVEL:-info}"
 
-echo ">>> Elaya Stagecoach | MODE=${MODE} ENV=${ENV:-develop} BUILD=${BUILD_SHA:-local} SHA=${RENDER_GIT_COMMIT:-manual}"
+# uvicorn принимает только lower-case
+LOG_LEVEL="$(echo "$LOG_LEVEL" | tr '[:upper:]' '[:lower:]')"
+
+echo ">>> Elaya Stagecoach | MODE=${MODE} ENV=${ENV:-develop} BUILD=${BUILD_SHA:-local} SHA=${RENDER_GIT_COMMIT:-manual} | LOG_LEVEL=${LOG_LEVEL}"
 
 if [[ "$MODE" == "web" ]]; then
-  # FastAPI (status/health + твои роутеры)
   exec uvicorn app.main:app --host "$HOST" --port "$PORT" --workers "$WORKERS" --log-level "$LOG_LEVEL"
 elif [[ "$MODE" == "worker" || "$MODE" == "polling" ]]; then
-  # Aiogram polling-воркер
   exec python -m app.main
 else
   echo "Unknown MODE: '$MODE' (allowed: web | worker)"
