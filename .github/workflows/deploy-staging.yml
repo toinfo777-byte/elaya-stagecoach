@@ -2,44 +2,59 @@ name: Deploy to Staging (Render)
 
 on:
   push:
-    branches:
-      - develop
+    branches: [ "develop" ]
     paths:
-      - 'app/**'
-      - 'Dockerfile'
-      - 'requirements.txt'
-      - '.github/workflows/deploy-staging.yml'
+      - "app/**"
+      - "Dockerfile"
+      - ".dockerignore"
+      - ".github/workflows/deploy-staging.yml"
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+
+    permissions:
+      contents: read
+      packages: write
+
+    env:
+      IMAGE_NAME: ghcr.io/${{ github.repository_owner }}/elaya-stagecoach
+      TAG: develop
 
     steps:
-      - name: Checkout repository
+      - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Trigger Render Staging Deploy
-        env:
-          RENDER_STAGING_HOOK_URL: ${{ secrets.RENDER_STAGING_HOOK_URL }}
-        run: |
-          if [ -z "$RENDER_STAGING_HOOK_URL" ]; then
-            echo "❌ Missing secret: RENDER_STAGING_HOOK_URL"
-            exit 1
-          fi
-          echo "🔹 Triggering Render staging deploy..."
-          curl -fsSL -X POST "$RENDER_STAGING_HOOK_URL"
-          echo "✅ Render deploy triggered."
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Post-deploy status report
-        if: ${{ success() }}
+      - name: Build & Push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: |
+            ${{ env.IMAGE_NAME }}:${{ env.TAG }}
+
+      - name: Wait for tag propagation
+        run: sleep 10
+
+      - name: Trigger Render WEB deploy (optional)
+        if: ${{ secrets.RENDER_DEPLOY_HOOK_WEB != '' }}
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          HOOK: ${{ secrets.RENDER_DEPLOY_HOOK_WEB }}
         run: |
-          echo "📡 Dispatching post-deploy status_report..."
-          curl -fsS -X POST \
-            -H "Authorization: Bearer $GITHUB_TOKEN" \
-            -H "Accept: application/vnd.github+json" \
-            "${{ github.api_url }}/repos/${{ github.repository }}/dispatches" \
-            -d '{"event_type":"status_report","client_payload":{"source":"render_staging","env":"develop"}}'
-          echo "✅ Status report dispatched."
+          echo "Trigger WEB hook: $HOOK"
+          curl -fsS -X POST "$HOOK"
+
+      - name: Trigger Render BOT deploy (optional)
+        if: ${{ secrets.RENDER_DEPLOY_HOOK_BOT != '' }}
+        env:
+          HOOK: ${{ secrets.RENDER_DEPLOY_HOOK_BOT }}
+        run: |
+          echo "Trigger BOT hook: $HOOK"
+          curl -fsS -X POST "$HOOK"
