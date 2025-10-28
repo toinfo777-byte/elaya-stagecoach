@@ -80,7 +80,6 @@ jobs:
             echo "⚠️ Render returned non-2xx ($HTTP_CODE). Continuing."
           fi
 
-          # всегда возвращаем 0, чтобы пайплайн не падал
           exit 0
 
       # После деплоя — репорт в main
