@@ -1,170 +1,190 @@
+# app/main.py
 from __future__ import annotations
 
 import asyncio
-import importlib
 import logging
-import os
-from typing import Optional
+import signal
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
-from fastapi.responses import JSONResponse
 
-from aiogram import Bot, Dispatcher, Router
+from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
-from aiogram.filters import Command
-from aiogram.types import BotCommand, Message
 
-# --- Project settings / optional imports
+from app.config import settings
+
+# --- опционально: ваши утилиты (не обязательны для запуска) ---
 try:
-    from app.config import settings  # your Pydantic settings
-except Exception:  # fail-safe if config not available
-    class _Stub:
-        MODE: str = os.getenv("MODE", "polling")
-        ENV: str = os.getenv("ENV", "dev")
-
-    settings = _Stub()  # type: ignore
+    from app.storage.repo import ensure_schema  # если есть миграции/инициализация
+except Exception:  # noqa: BLE001
+    ensure_schema = None
 
 try:
-    from app.storage.repo import ensure_schema
-except Exception:
-    def ensure_schema() -> None:
+    from app.build import BUILD_MARK  # если в проекте есть сборочный маркер
+except Exception:  # noqa: BLE001
+    BUILD_MARK = "dev"
+
+# --- Роутеры FastAPI (подключайте то, что реально есть в репозитории) ---
+# Пример: from app.routers import entrypoints, health, hq, ...
+# Ниже аккуратная попытка подключить, но без падения, если модулей нет.
+def include_optional_routers(app_: FastAPI) -> None:
+    try:
+        from app.routers import entrypoints
+        app_.include_router(entrypoints.router)
+    except Exception:
         pass
 
-try:
-    from app.build import BUILD_MARK  # e.g. git sha / timestamp
-except Exception:
-    BUILD_MARK = os.getenv("BUILD_SHA", "manual")
-
-# ------------------------------
-# Logging
-# ------------------------------
-LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
-logging.basicConfig(
-    level=LOG_LEVEL,
-    format="%(asctime)s | %(levelname)s | %(name)s: %(message)s",
-)
-log = logging.getLogger("main")
-
-# ------------------------------
-# Token resolution (BOT_TOKEN / TG_BOT_TOKEN)
-# ------------------------------
-def resolve_token() -> Optional[str]:
-    # be gentle with missing attributes on settings
-    token = None
-    for key in ("BOT_TOKEN", "TG_BOT_TOKEN"):
-        token = token or getattr(settings, key, None)
-        token = token or os.getenv(key)
-    return token
-
-# ------------------------------
-# FastAPI (web mode)
-# ------------------------------
-app = FastAPI(title="Elaya StageCoach", version=str(BUILD_MARK))
-
-@app.get("/ping")
-async def ping():
-    return JSONResponse({"ok": True, "pong": True, "build": str(BUILD_MARK)})
-
-@app.get("/status")
-async def status():
-    mode = getattr(settings, "MODE", os.getenv("MODE", "polling"))
-    env = getattr(settings, "ENV", os.getenv("ENV", "dev"))
-    return JSONResponse({"ok": True, "mode": mode, "env": env, "build": str(BUILD_MARK)})
-
-# ------------------------------
-# Aiogram (polling mode)
-# ------------------------------
-dp = Dispatcher()
-diag_router = Router(name="diag")
-
-@diag_router.message(Command(commands=["ping", "diag"]))
-async def cmd_ping(m: Message):
-    await m.answer("✅ pong")
-
-dp.include_router(diag_router)
-
-def _try_include_project_routers() -> None:
-    """
-    Подключаем твои роутеры, если они есть.
-    Ничего страшного, если каких-то модулей нет — просто идём дальше.
-    """
     try:
-        mod = importlib.import_module("app.routers")
-    except Exception as e:
-        log.info("routers package not found: %s", e)
+        from app.routers import help as help_router
+        app_.include_router(help_router.router)
+    except Exception:
+        pass
+
+    # Добавьте здесь остальные ваши роутеры по аналогии:
+    # try:
+    #     from app.routers import hq, privacy, training, progress, ...
+    #     app_.include_router(hq.router)
+    #     ...
+    # except Exception:
+    #     pass
+
+
+# ------------- Aiogram section -------------
+dp: Dispatcher | None = None
+bot: Bot | None = None
+
+
+async def start_polling() -> None:
+    """Стартуем polling только если MODE = polling/bot и есть токен."""
+    global dp, bot
+
+    token = settings.EFFECTIVE_BOT_TOKEN
+    if not token:
+        logging.warning("Polling skipped: no BOT_TOKEN/TG_BOT_TOKEN provided.")
         return
 
-    # ожидаемые имена внутри app.routers (router-объекты или подмодули с .router)
-    maybe_names = [
-        "entrypoints", "help", "cmd_aliases", "onboarding", "system",
-        "minicasting", "leader", "training", "progress", "privacy",
-        "settings", "extended", "casting", "apply", "faq",
-        "devops_sync", "panic", "hq", "diag",
-    ]
-
-    for name in maybe_names:
-        try:
-            sub = getattr(mod, name)
-            # если это подмодуль — подтянем его .router
-            if hasattr(sub, "router"):
-                dp.include_router(getattr(sub, "router"))
-            elif isinstance(sub, Router):
-                dp.include_router(sub)  # непосредственно Router
-        except Exception as e:
-            log.debug("skip router %s: %s", name, e)
-
-_try_include_project_routers()
-
-async def _set_bot_commands(bot: Bot) -> None:
-    commands = [
-        BotCommand(command="menu", description="Главное меню"),
-        BotCommand(command="help", description="Помощь"),
-        BotCommand(command="ping", description="Проверка ответа"),
-    ]
-    try:
-        await bot.set_my_commands(commands)
-    except Exception as e:
-        log.warning("set_my_commands failed: %s", e)
-
-async def run_polling() -> None:
-    token = resolve_token()
-    if not token:
-        log.error("No BOT token found. Set BOT_TOKEN or TG_BOT_TOKEN env/setting.")
-        # Для веб-сервиса это нормально; для worker — причина завершить.
-        raise SystemExit(1)
-
-    # инициализация схемы/БД, если есть
-    try:
-        ensure_schema()
-    except Exception as e:
-        log.warning("ensure_schema() failed: %s", e)
-
+    # Создаём бота и диспетчер
     bot = Bot(token, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
-    await _set_bot_commands(bot)
+    dp = Dispatcher()
 
-    log.info("🚀 Start polling… (build=%s)", BUILD_MARK)
+    # Подключаем aiogram-роутеры, если они есть
     try:
-        await dp.start_polling(bot)
-    finally:
-        await bot.session.close()
+        from app.routers import (
+            entrypoints as tg_entrypoints,
+            help as tg_help,
+            cmd_aliases,
+            onboarding,
+            system,
+            minicasting,
+            leader,
+            training,
+            progress,
+            privacy,
+            settings as settings_mod,
+            extended,
+            casting,
+            apply,
+            faq,
+            devops_sync,
+            panic,
+            hq,
+            # diag,  # добавьте при наличии
+        )
 
-# ------------------------------
-# Entrypoint switch
-# ------------------------------
-def is_web_mode() -> bool:
-    mode = str(getattr(settings, "MODE", os.getenv("MODE", "polling"))).lower()
-    return mode in {"web", "api", "asgi", "uvicorn"}
+        dp.include_router(tg_entrypoints.router)
+        dp.include_router(tg_help.router)
+        dp.include_router(cmd_aliases.router)
+        dp.include_router(onboarding.router)
+        dp.include_router(system.router)
+        dp.include_router(minicasting.router)
+        dp.include_router(leader.router)
+        dp.include_router(training.router)
+        dp.include_router(progress.router)
+        dp.include_router(privacy.router)
+        dp.include_router(settings_mod.router)
+        dp.include_router(extended.router)
+        dp.include_router(casting.router)
+        dp.include_router(apply.router)
+        dp.include_router(faq.router)
+        dp.include_router(devops_sync.router)
+        dp.include_router(panic.router)
+        dp.include_router(hq.router)
+        # dp.include_router(diag.router)
+    except Exception:
+        # Если aiogram-роутеров нет/переименованы — запускаем чистый dp
+        logging.getLogger(__name__).warning("Aiogram routers not linked; running bare Dispatcher.")
 
-def is_polling_mode() -> bool:
-    mode = str(getattr(settings, "MODE", os.getenv("MODE", "polling"))).lower()
-    return mode in {"polling", "bot", "worker"}
+    logging.info("🚀 Start polling… [mode=%s, build=%s]", settings.MODE, BUILD_MARK)
+    await dp.start_polling(bot, allowed_updates=None)  # None = все типы
 
-if __name__ == "__main__":
-    # Локальный запуск: выбираем режим из MODE
-    if is_polling_mode():
-        asyncio.run(run_polling())
-    else:
-        # В контейнере web обычно запускает uvicorn: `uvicorn app.main:app --host 0.0.0.0 --port 8000`
-        import uvicorn
-        uvicorn.run(app, host="0.0.0.0", port=int(os.getenv("PORT", "8000")))
+
+async def stop_polling() -> None:
+    """Корректная остановка aiogram."""
+    global dp, bot
+    try:
+        if dp:
+            await dp.storage.close()
+            await dp.fsm.storage.close()  # если используется FSMStorage
+    except Exception:
+        pass
+    try:
+        if bot:
+            await bot.session.close()
+    except Exception:
+        pass
+    dp = None
+    bot = None
+
+
+# ------------- FastAPI section -------------
+@asynccontextmanager
+async def lifespan(app_: FastAPI):
+    # Инициализация БД/схем — если в проекте предусмотрено
+    if ensure_schema is not None:
+        try:
+            await ensure_schema()
+        except Exception:  # noqa: BLE001
+            logging.getLogger(__name__).warning("ensure_schema() skipped or failed.", exc_info=True)
+
+    # Если процесс не web — поднимем polling в фоне
+    polling_task: asyncio.Task | None = None
+    if settings.is_polling:
+        polling_task = asyncio.create_task(start_polling())
+
+    # Передаём управление FastAPI
+    yield
+
+    # При остановке сервиса аккуратно гасим polling
+    if polling_task:
+        # отправим сигнал остановки polling
+        try:
+            await stop_polling()
+        finally:
+            try:
+                polling_task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await polling_task
+            except Exception:
+                pass
+
+
+def create_app() -> FastAPI:
+    app_ = FastAPI(
+        title="Elaya StageCoach",
+        version=str(BUILD_MARK),
+        lifespan=lifespan,
+    )
+
+    @app_.get("/health")
+    async def health():
+        return {"status": "ok", "mode": settings.MODE, "build": BUILD_MARK}
+
+    include_optional_routers(app_)
+    return app_
+
+
+app = create_app()
+
+# Локальный запуск uvicorn (не нужен на Render, но полезен локально):
+# uvicorn app.main:app --reload
