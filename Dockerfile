@@ -1,30 +1,36 @@
-# -------- base image
-FROM python:3.11-slim AS base
+# syntax=docker/dockerfile:1.7
+FROM python:3.10-slim AS base
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    PIP_DISABLE_PIP_VERSION_CHECK=on \
-    PIP_NO_CACHE_DIR=off
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    POETRY_VIRTUALENVS_CREATE=0 \
+    PORT=10000
 
 WORKDIR /app
 
-# Системные зависимости для asyncpg и др.
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential gcc curl \
+# Системные зависимости (опционально расширяйте по мере надобности)
+RUN apt-get update -y && apt-get install -y --no-install-recommends \
+    curl bash ca-certificates tzdata gcc \
  && rm -rf /var/lib/apt/lists/*
 
-# -------- deps
-COPY requirements.txt ./
-RUN pip install --upgrade pip && pip install -r requirements.txt
+# Зависимости Python
+COPY requirements.txt /app/requirements.txt
+RUN pip install --no-cache-dir -r /app/requirements.txt
 
-# -------- app
-COPY . .
+# Исходники приложения
+COPY . /app
 
-# Включим entrypoint и дадим право на исполнение
-RUN chmod +x docker/entrypoint.sh
+# entrypoint
+COPY docker/entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
 
-# Render пробрасывает порт через переменные, но на Starter стабильнее явно держать 10000
 EXPOSE 10000
 
-# ВНИМАНИЕ: запуск всегда через entrypoint — он сам решает web/worker
-CMD ["docker/entrypoint.sh"]
+# MODE управляет запуском (web / worker). LOG_LEVEL — в нижнем регистре: info|warning|error|critical|debug|trace
+ENV MODE=web \
+    LOG_LEVEL=info
+
+# Не используем shell-обёртки, чтобы сигналы доходили до процесса
+CMD ["/entrypoint.sh"]
