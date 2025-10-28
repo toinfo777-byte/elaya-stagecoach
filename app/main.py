@@ -4,112 +4,83 @@ import asyncio
 import importlib
 import logging
 import os
-from typing import Any
+from typing import List
 
-from aiogram import Bot, Dispatcher, F
+from fastapi import FastAPI
+from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
-from aiogram.types import Update
-from fastapi import FastAPI, Request
 
 from app.config import settings
 
-# -------------------------------------------------
-# Логирование
-# -------------------------------------------------
-logging.basicConfig(
-    level=getattr(logging, settings.LOG_LEVEL, logging.INFO),
-    format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
-)
-log = logging.getLogger("main")
+logger = logging.getLogger("main")
+logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)s | %(name)s | %(message)s")
 
-# -------------------------------------------------
-# Инициализация бота/диспетчера
-# -------------------------------------------------
-# DefaultBotProperties принимает строку, поэтому settings.PARSE_MODE ок
-bot = Bot(
-    token=settings.BOT_TOKEN,
-    default=DefaultBotProperties(parse_mode=settings.PARSE_MODE),
-)
-dp = Dispatcher()
+# ------------ FastAPI ------------
+app = FastAPI(title="Elaya StageCoach", version=os.getenv("BUILD_MARK", "manual"))
 
-# -------------------------------------------------
-# Подключение стабильных роутеров
-# -------------------------------------------------
-async def _include_routers(dp: Dispatcher) -> None:
-    """
-    Подключаем только стабильные роутеры.
-    ВНИМАНИЕ: app.routers.control исключён.
-    """
-    modules = (
-        "app.routers.faq",
-        "app.routers.devops_sync",
-        "app.routers.panic",
-        "app.routers.hq",
-    )
+def include_routers(fastapi_app: FastAPI, modules: List[str]) -> None:
+    """Динамическое подключение роутеров FastAPI, если они есть (можно оставить пустым)."""
     for module_name in modules:
         try:
             mod = importlib.import_module(module_name)
-            if hasattr(mod, "router"):
-                dp.include_router(mod.router)  # type: ignore[attr-defined]
-                log.info("router loaded: %s", module_name)
-            else:
-                log.warning("module %s has no 'router'", module_name)
+            router = getattr(mod, "router", None)
+            if router:
+                fastapi_app.include_router(router)
+                logger.info("fastapi router loaded: %s", module_name)
         except Exception as e:
-            log.error("router failed: %s", module_name, exc_info=e)
-            raise
+            logger.error("router failed: %s (%s)", module_name, e)
 
-# -------------------------------------------------
-# Режимы запуска: WEB (webhook) / WORKER (polling)
-# -------------------------------------------------
-app = FastAPI(title="Elaya Stagecoach Web") if settings.MODE == "web" else None
+# если у тебя есть web-роутеры — пропиши их здесь
+include_routers(app, [
+    # "app.routers.health",  # пример
+])
 
-async def _startup_common() -> None:
-    await _include_routers(dp)
+@app.get("/healthz")
+async def healthz():
+    return {"status": "ok", "mode": settings.MODE, "build": os.getenv("BUILD_MARK", "manual")}
 
-# ---------- WEBHOOK ----------
-if settings.MODE == "web":
-    assert app is not None
+# ------------ Telegram Bot (aiogram) ------------
+bot = Bot(
+    token=settings.BOT_TOKEN,
+    default=DefaultBotProperties(parse_mode=ParseMode(settings.PARSE_MODE)),
+)
+dp = Dispatcher()
 
-    @app.on_event("startup")
-    async def on_startup() -> None:
-        await _startup_common()
-        # ставим вебхук
-        url = settings.webhook_url  # валидирует WEB_BASE_URL
-        await bot.set_webhook(url, drop_pending_updates=True)
-        log.info("setWebhook: %s", url)
-        log.info("Application startup complete. Uvicorn will serve FastAPI.")
+def include_bot_routers(dispatcher: Dispatcher, modules: List[str]) -> None:
+    for module_name in modules:
+        try:
+            mod = importlib.import_module(module_name)
+            router = getattr(mod, "router", None)
+            if router:
+                dispatcher.include_router(router)
+                logger.info("bot router loaded: %s", module_name)
+        except Exception as e:
+            logger.error("bot router failed: %s (%s)", module_name, e)
 
-    @app.on_event("shutdown")
-    async def on_shutdown() -> None:
-        await bot.session.close()
+# перечисли свои aiogram-роутеры
+include_bot_routers(dp, [
+    # "app.routers.entrypoints",
+    # "app.routers.help",
+    # "app.routers.faq",
+    # "app.routers.devops_sync",
+    # "app.routers.hq",
+    # и т.д.
+])
 
-    @app.get("/")
-    async def root() -> dict[str, Any]:
-        return {
-            "ok": True,
-            "env": settings.ENV,
-            "mode": settings.MODE,
-            "build": settings.BUILD_MARK,
-            "sha": settings.SHORT_SHA,
-        }
-
-    @app.post("/tg/{token}")
-    async def telegram_webhook(token: str, request: Request) -> dict[str, Any]:
-        if token != settings.BOT_TOKEN:
-            return {"ok": False}
-        data = await request.json()
-        update = Update.model_validate(data)
-        await dp.feed_update(bot, update)
-        return {"ok": True}
-
-# ---------- POLLING WORKER ----------
 async def run_polling() -> None:
-    await _startup_common()
-    log.info("🚀 Start polling…")
-    await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types())
+    logger.info("🚀 Start polling…")
+    await dp.start_polling(bot)
+
+# Внимание: процесс запускается из entrypoint.sh
+# - для worker: python -m app.main → здесь пойдём в polling
+# - для web: uvicorn app.main:app → uvicorn поднимет FastAPI и НЕ вызовет polling
 
 if __name__ == "__main__":
-    # Локальный запуск: MODE=worker → polling
-    if settings.MODE in {"worker", "polling"}:
+    # Запускаем только в режиме worker (для совместимости, если кто-то вызовет напрямую)
+    if settings.MODE == "worker":
         asyncio.run(run_polling())
+    else:
+        # В режиме web управление передаст uvicorn через entrypoint.sh
+        import uvicorn
+        uvicorn.run("app.main:app", host="0.0.0.0", port=8000, reload=False)
