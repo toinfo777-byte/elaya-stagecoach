@@ -1,15 +1,23 @@
 #!/usr/bin/env bash
-set -e
+set -euo pipefail
 
-: "${MODE:=web}"
+export PYTHONPATH=/app
+
+MODE="${MODE:-web}"
+HOST="${HOST:-0.0.0.0}"
+PORT="${PORT:-10000}"
+WORKERS="${WORKERS:-1}"
+LOG_LEVEL="${LOG_LEVEL:-info}"
+
+echo ">>> Elaya Stagecoach | MODE=${MODE} ENV=${ENV:-develop} BUILD=${BUILD_SHA:-local} SHA=${RENDER_GIT_COMMIT:-manual}"
 
 if [[ "$MODE" == "web" ]]; then
-  # Запуск FastAPI
-  exec uvicorn app.main:app --host 0.0.0.0 --port "${PORT:-8000}"
-elif [[ "$MODE" == "worker" ]]; then
-  # Запуск бота (polling) — адаптируй команду под свой main
+  # FastAPI (status/health + твои роутеры)
+  exec uvicorn app.main:app --host "$HOST" --port "$PORT" --workers "$WORKERS" --log-level "$LOG_LEVEL"
+elif [[ "$MODE" == "worker" || "$MODE" == "polling" ]]; then
+  # Aiogram polling-воркер
   exec python -m app.main
 else
-  echo "Unknown MODE=$MODE (expected 'web' or 'worker')"
+  echo "Unknown MODE: '$MODE' (allowed: web | worker)"
   exit 1
 fi
