@@ -2,17 +2,44 @@ name: Deploy to Staging (Render)
 
 on:
   push:
-    branches: [ "develop" ]   # триггер — пуш в ветку develop
+    branches:
+      - develop
+    paths:
+      - 'app/**'
+      - 'Dockerfile'
+      - 'requirements.txt'
+      - '.github/workflows/deploy-staging.yml'
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
+
     steps:
-      - name: Checkout
+      - name: Checkout repository
         uses: actions/checkout@v4
 
       - name: Trigger Render Staging Deploy
-        run: |
-          curl -fsSL -X POST "$RENDER_STAGING_HOOK_URL"
         env:
           RENDER_STAGING_HOOK_URL: ${{ secrets.RENDER_STAGING_HOOK_URL }}
+        run: |
+          if [ -z "$RENDER_STAGING_HOOK_URL" ]; then
+            echo "❌ Missing secret: RENDER_STAGING_HOOK_URL"
+            exit 1
+          fi
+          echo "🔹 Triggering Render staging deploy..."
+          curl -fsSL -X POST "$RENDER_STAGING_HOOK_URL"
+          echo "✅ Render deploy triggered."
+
+      - name: Post-deploy status report
+        if: ${{ success() }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "📡 Dispatching post-deploy status_report..."
+          curl -fsS -X POST \
+            -H "Authorization: Bearer $GITHUB_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            "${{ github.api_url }}/repos/${{ github.repository }}/dispatches" \
+            -d '{"event_type":"status_report","client_payload":{"source":"render_staging","env":"develop"}}'
+          echo "✅ Status report dispatched."
