@@ -1,24 +1,22 @@
-# app/routers/control.py
 from __future__ import annotations
 
-import logging
-from aiogram import Router, F
+from aiogram import Router
+from aiogram.filters import Command
 from aiogram.types import Message
-from aiogram.filters import CommandStart, Command
 
-router = Router(name=__name__)
-log = logging.getLogger("control")
+from app.config import settings
 
-@router.message(CommandStart())
-async def on_start(msg: Message):
-    await msg.answer(
-        "Привет! Я живой. Команды: /ping, /help"
-    )
+router = Router(name="control")
 
-@router.message(Command("help"))
-async def on_help(msg: Message):
-    await msg.answer("Доступно: /ping — проверить ответ бота.")
 
-@router.message(Command("ping"))
-async def on_ping(msg: Message):
-    await msg.answer("pong")
+def _is_admin(user_id: int) -> bool:
+    return user_id in settings.ADMIN_IDS
+
+
+@router.message(Command("control"))
+async def cmd_control(message: Message) -> None:
+    uid = message.from_user.id if message.from_user else 0
+    if not _is_admin(uid):
+        await message.answer("⛔️ Доступ запрещён.")
+        return
+    await message.answer("✅ Админ-панель (заглушка) доступна. Настройте позже реальные команды.")
