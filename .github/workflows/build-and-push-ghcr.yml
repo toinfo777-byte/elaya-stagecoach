@@ -2,23 +2,21 @@ name: Build & Push Docker image to GHCR
 
 on:
   push:
-    branches: [ "develop" ]
-    paths-ignore:
-      - "**.md"
-      - "**/.gitignore"
-  workflow_dispatch:
+    branches: [ "develop", "main" ]
+  workflow_dispatch: {}
 
 permissions:
   contents: read
   packages: write
 
 env:
-  IMAGE_NAME: ghcr.io/${{ github.repository }}
+  IMAGE_NAME: ghcr.io/${{ github.repository_owner }}/elaya-stagecoach
+  # Если добавишь секрет RENDER_DEPLOY_HOOK (для worker-образа) — задеплоим Render-хуком
+  RENDER_DEPLOY_HOOK: ${{ secrets.RENDER_DEPLOY_HOOK }}
 
 jobs:
   build:
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -26,69 +24,37 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Login to GHCR
+      - name: Log in to GHCR
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Extract metadata (tags, labels)
+      - name: Docker meta
         id: meta
         uses: docker/metadata-action@v5
         with:
           images: ${{ env.IMAGE_NAME }}
           tags: |
-            type=raw,value=develop
-            type=sha
+            type=sha,prefix=sha-,format=short
+            type=raw,value=${{ github.ref_name }}-latest
+            type=raw,value=manual_${{ github.run_id }}
 
-      - name: Build and push
-        uses: docker/build-push-action@v5
+      - name: Build & Push
+        uses: docker/build-push-action@v6
         with:
+          push: true
           context: .
           file: ./Dockerfile
-          push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+          provenance: false
 
-      # Триггер Render (staging → prod fallback), мягкий режим
-      - name: Trigger Render deploy (safe mode)
-        if: ${{ success() }}
-        env:
-          RENDER_STAGING_HOOK: ${{ secrets.RENDER_STAGING_HOOK }}
-          RENDER_DEPLOY_HOOK:  ${{ secrets.RENDER_DEPLOY_HOOK }}
-        shell: bash
+      - name: Trigger Render deploy (optional)
+        if: ${{ env.RENDER_DEPLOY_HOOK != '' }}
         run: |
-          HOOK_URL="${RENDER_STAGING_HOOK:-$RENDER_DEPLOY_HOOK}"
-
-          if [ -z "$HOOK_URL" ]; then
-            echo "🔹 No Render hook configured. Skipping deploy trigger."
-            exit 0
-          fi
-
-          echo "🔹 Triggering Render hook..."
-          sleep 10
-
-          HTTP_CODE=$(curl -sS -o >(cat >&2) -w "%{http_code}" -X POST "$HOOK_URL" || true)
-          echo "🔹 Render HTTP code: $HTTP_CODE"
-
-          if [[ "$HTTP_CODE" =~ ^(200|201|202)$ ]]; then
-            echo "✅ Render accepted deploy ($HTTP_CODE)"
-          else
-            echo "⚠️ Render returned non-2xx ($HTTP_CODE). Continuing."
-          fi
-
-          # всегда возвращаем 0, чтобы пайплайн не падал
-          exit 0
-
-      # После деплоя — репорт в main
-      - name: Dispatch post-deploy status_report
-        if: ${{ success() }}
-        run: |
-          curl -fsS -X POST \
-            -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
-            -H "Accept: application/vnd.github+json" \
-            "${{ github.api_url }}/repos/${{ github.repository }}/dispatches" \
-            -d '{"event_type":"status_report","client_payload":{"source":"render_deploy","env":"develop"}}' || true
+          echo "Triggering Render deploy…"
+          curl -fsS -X POST "${RENDER_DEPLOY_HOOK}"
