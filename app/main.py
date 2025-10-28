@@ -1,148 +1,103 @@
+# app/main.py
+from __future__ import annotations
+
 import asyncio
+import hashlib
+import importlib
 import logging
 import os
-import signal
 import sys
-from datetime import datetime, timezone
+import time
+from typing import Any
 
-from aiogram import Bot, Dispatcher, Router, F
-from aiogram.filters import Command, CommandStart
-from aiogram.types import Message
+from aiogram import Bot, Dispatcher
+from aiogram.client.default import DefaultBotProperties
+from aiogram.enums import ParseMode
+from aiogram.exceptions import TelegramBadRequest
+from aiogram.types import BotCommand
+from fastapi import FastAPI
 
-# ---------- базовая настройка ----------
+from app.build import BUILD_MARK
+from app.config import settings
+from app.storage.repo import ensure_schema
 
-LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
-logging.basicConfig(
-    level=LOG_LEVEL,
-    format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
-    stream=sys.stdout,
+# Роутеры бота
+from app.routers import (
+    entrypoints,
+    help,
+    cmd_aliases,
+    onboarding,
+    system,
+    minicasting,
+    leader,
+    training,
+    progress,
+    privacy,
+    settings as settings_mod,
+    extended,
+    casting,
+    apply,
+    faq,
+    devops_sync,
+    panic,
+    hq,  # HQ-репорт
+    diag,
 )
-log = logging.getLogger("app")
 
-BOT_TOKEN = os.environ.get("BOT_TOKEN")
-if not BOT_TOKEN:
-    log.error("ENV BOT_TOKEN is not set")
-    sys.exit(1)
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
-ENV = os.getenv("ENV", "staging")
-MODE = os.getenv("MODE", "polling")
-BUILD_MARK = os.getenv("BUILD_MARK", "manual")
-TZ_DEFAULT = os.getenv("TZ_DEFAULT", "Europe/Moscow")
-
-STARTED_AT = datetime.now(timezone.utc)
-
-# ---------- aiogram v3 ----------
-
-bot = Bot(BOT_TOKEN, parse_mode="HTML")
+bot = Bot(settings.TG_BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
 dp = Dispatcher()
-router = Router()
-dp.include_router(router)
 
+# Регистрация роутеров
+for router in [
+    entrypoints.router,
+    help.router,
+    cmd_aliases.router,
+    onboarding.router,
+    system.router,
+    minicasting.router,
+    leader.router,
+    training.router,
+    progress.router,
+    privacy.router,
+    settings_mod.router,
+    extended.router,
+    casting.router,
+    apply.router,
+    faq.router,
+    devops_sync.router,
+    panic.router,
+    hq.router,
+    diag.router,
+]:
+    dp.include_router(router)
 
-# ---------- helpers ----------
-
-def uptime_human() -> str:
-    delta = datetime.now(timezone.utc) - STARTED_AT
-    secs = int(delta.total_seconds())
-    d, r = divmod(secs, 86400)
-    h, r = divmod(r, 3600)
-    m, s = divmod(r, 60)
-    parts = []
-    if d: parts.append(f"{d}d")
-    if d or h: parts.append(f"{h}h")
-    if d or h or m: parts.append(f"{m}m")
-    parts.append(f"{s}s")
-    return " ".join(parts)
-
-
-async def hq_text() -> str:
-    me = await bot.get_me()
-    return (
-        "<b>HQ-сводка</b>\n"
-        f"• ENV: <code>{ENV}</code>\n"
-        f"• MODE: <code>{MODE}</code>\n"
-        f"• BUILD: <code>{BUILD_MARK}</code>\n"
-        f"• TZ: <code>{TZ_DEFAULT}</code>\n"
-        f"• Bot: <code>@{me.username}</code> (id={me.id})\n"
-        f"• Uptime: <code>{uptime_human()}</code>\n"
-        "• Note: polling с авто-сбросом webhook\n"
-    )
-
-
-# ---------- handlers ----------
-
-@router.message(CommandStart())
-async def on_start(message: Message):
-    await message.answer(
-        "Команды и разделы: выбери нужное 🧭\n"
-        "🏋️ Тренировка дня — ежедневная рутина 5–15 мин.\n"
-        "📈 Мой прогресс — стрик и эпизоды за 7 дней.\n"
-        "🎯 Мини-кастинг · 💥 Путь лидера\n"
-        "🆘 Помощь / FAQ · ⚙️ Настройки\n"
-        "📜 Политика · ⭐️ Расширенная версия"
-    )
-
-
-@router.message(Command(commands=["hq"]))
-async def on_hq(message: Message):
-    await message.answer(await hq_text())
-
-
-@router.message(Command(commands=["ping", "diag"]))
-async def on_ping(message: Message):
-    me = await bot.get_me()
-    await message.answer(
-        f"pong · ok · @{me.username}\n"
-        f"uptime: <code>{uptime_human()}</code>"
-    )
-
-
-# резервный “эхо”-ответ только в dev/staging
-@router.message(F.text)
-async def fallback(message: Message):
-    if ENV != "prod":
-        await message.answer("Команда не распознана. Попробуй /hq или /ping.")
-    # в проде — молчим
-
-
-# ---------- lifecycle ----------
-
-stop_event = asyncio.Event()
-
-def _graceful_shutdown(*_):
-    log.warning("SIGTERM/SIGINT received — shutting down…")
-    stop_event.set()
-
-async def main():
-    # ВАЖНО: перед polling всегда сбрасываем webhook,
-    # чтобы избежать конфликтов “getUpdates / webhook”.
+# Команды
+async def set_bot_commands():
+    commands = [
+        BotCommand(command="menu", description="Главное меню"),
+        BotCommand(command="help", description="Помощь и FAQ"),
+    ]
     try:
-        await bot.delete_webhook(drop_pending_updates=True)
-        log.info("Webhook deleted (drop_pending_updates=True)")
-    except Exception as e:
-        log.warning("delete_webhook failed: %s", e)
+        await bot.set_my_commands(commands)
+    except TelegramBadRequest as e:
+        logger.warning(f"Failed to set commands: {e}")
 
-    # Запускаем polling
-    log.info("Starting polling…")
-    polling = asyncio.create_task(dp.start_polling(bot, allowed_updates=None))
+# Основной запуск
+async def main():
+    await ensure_schema()
+    await set_bot_commands()
+    logger.info(f"🚀 Elaya StageCoach started | Build: {BUILD_MARK}")
+    await dp.start_polling(bot)
 
-    # Ждём сигнала остановки
-    await stop_event.wait()
+# FastAPI для Render web endpoint
+app = FastAPI()
 
-    # Останавливаем polling корректно
-    polling.cancel()
-    with contextlib.suppress(asyncio.CancelledError):
-        await polling
+@app.get("/")
+async def root() -> dict[str, Any]:
+    return {"status": "ok", "build": BUILD_MARK}
 
 if __name__ == "__main__":
-    import contextlib
-
-    loop = asyncio.get_event_loop()
-    for sig in (signal.SIGINT, signal.SIGTERM):
-        loop.add_signal_handler(sig, _graceful_shutdown)
-
-    try:
-        loop.run_until_complete(main())
-    finally:
-        loop.run_until_complete(bot.session.close())
-        loop.close()
+    asyncio.run(main())
