@@ -4,83 +4,153 @@ import asyncio
 import importlib
 import logging
 import os
-from typing import List
+import time
+from typing import Any, Dict
 
-from fastapi import FastAPI
-from aiogram import Bot, Dispatcher
-from aiogram.client.default import DefaultBotProperties
-from aiogram.enums import ParseMode
+from fastapi import FastAPI, Response
+from fastapi.responses import JSONResponse
 
-from app.config import settings
+# ---------- базовый логгер
+LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
+logging.basicConfig(
+    level=LOG_LEVEL,
+    format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
+)
+log = logging.getLogger("elaya.main")
 
-logger = logging.getLogger("main")
-logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)s | %(name)s | %(message)s")
+# ---------- FastAPI
+app = FastAPI(
+    title="Elaya Stagecoach — Web",
+    version=os.getenv("BUILD_SHA", "local"),
+)
 
-# ------------ FastAPI ------------
-app = FastAPI(title="Elaya StageCoach", version=os.getenv("BUILD_MARK", "manual"))
 
-def include_routers(fastapi_app: FastAPI, modules: List[str]) -> None:
-    """Динамическое подключение роутеров FastAPI, если они есть (можно оставить пустым)."""
-    for module_name in modules:
+# Подключаем твои роутеры, если есть (мягко — без падений, как только файл появится — подхватится)
+def _include_optional_routers(_app: FastAPI) -> None:
+    router_modules = [
+        # добавляй/снимай по вкусу — порядок не критичен
+        "app.routers.faq",
+        "app.routers.devops_sync",
+        "app.routers.hq",
+        "app.routers.system",
+        "app.routers.entrypoints",
+        "app.routers.help",
+        "app.routers.cmd_aliases",
+        "app.routers.onboarding",
+        "app.routers.leader",
+        "app.routers.training",
+        "app.routers.progress",
+        "app.routers.privacy",
+        "app.routers.settings",
+        "app.routers.extended",
+        "app.routers.casting",
+        "app.routers.apply",
+        # "app.routers.diag",  # если понадобится
+    ]
+    for mod_name in router_modules:
         try:
-            mod = importlib.import_module(module_name)
+            mod = importlib.import_module(mod_name)
             router = getattr(mod, "router", None)
-            if router:
-                fastapi_app.include_router(router)
-                logger.info("fastapi router loaded: %s", module_name)
+            if router is not None:
+                _app.include_router(router)
+                log.info("router loaded: %s", mod_name)
+            else:
+                log.debug("module has no router: %s", mod_name)
         except Exception as e:
-            logger.error("router failed: %s (%s)", module_name, e)
+            # Не валим web, просто логируем
+            log.warning("router skipped: %s (%s)", mod_name, e)
 
-# если у тебя есть web-роутеры — пропиши их здесь
-include_routers(app, [
-    # "app.routers.health",  # пример
-])
+
+_include_optional_routers(app)
+
+
+# ---------- служебные эндпоинты
 
 @app.get("/healthz")
-async def healthz():
-    return {"status": "ok", "mode": settings.MODE, "build": os.getenv("BUILD_MARK", "manual")}
+def healthz() -> Dict[str, str]:
+    # Лёгкий endpoint для Render Health Check
+    return {"status": "ok"}
 
-# ------------ Telegram Bot (aiogram) ------------
-bot = Bot(
-    token=settings.BOT_TOKEN,
-    default=DefaultBotProperties(parse_mode=ParseMode(settings.PARSE_MODE)),
-)
-dp = Dispatcher()
 
-def include_bot_routers(dispatcher: Dispatcher, modules: List[str]) -> None:
-    for module_name in modules:
+@app.get("/status_json")
+def status_json() -> JSONResponse:
+    # Быстрый отчёт, чтобы HQ-бот/панель могли дёргать состояние web
+    payload = {
+        "env": os.getenv("ENV", "staging"),
+        "mode": os.getenv("MODE", "web"),
+        "build": os.getenv("BUILD_SHA", "local"),
+        "sha": os.getenv("RENDER_GIT_COMMIT", "manual"),
+        "uptime": int(time.time() - START_TS),
+        "service": "web",
+    }
+    return JSONResponse(payload)
+
+
+# ---------- точка входа воркера (aiogram polling)
+
+async def run_worker() -> None:
+    from aiogram import Bot, Dispatcher
+    from aiogram.client.default import DefaultBotProperties
+    from aiogram.enums import ParseMode
+
+    token = os.getenv("TG_BOT_TOKEN")
+    if not token:
+        raise RuntimeError("TG_BOT_TOKEN is not set")
+
+    bot = Bot(token=token, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
+    dp = Dispatcher()
+
+    # Пытаемся подключить те же роутеры, если они содержат aiogram-хендлеры
+    modules = [
+        "app.routers.faq",
+        "app.routers.devops_sync",
+        "app.routers.hq",
+        "app.routers.system",
+        "app.routers.entrypoints",
+        "app.routers.help",
+        "app.routers.cmd_aliases",
+        "app.routers.onboarding",
+        "app.routers.leader",
+        "app.routers.training",
+        "app.routers.progress",
+        "app.routers.privacy",
+        "app.routers.settings",
+        "app.routers.extended",
+        "app.routers.casting",
+        "app.routers.apply",
+    ]
+    for name in modules:
         try:
-            mod = importlib.import_module(module_name)
-            router = getattr(mod, "router", None)
-            if router:
-                dispatcher.include_router(router)
-                logger.info("bot router loaded: %s", module_name)
+            mod = importlib.import_module(name)
+            # поддерживаем оба варианта: dp/routers или register(dp)
+            if hasattr(mod, "router"):
+                dp.include_router(getattr(mod, "router"))
+                log.info("bot router loaded: %s", name)
+            elif hasattr(mod, "register"):
+                getattr(mod, "register")(dp)
+                log.info("bot register called: %s", name)
         except Exception as e:
-            logger.error("bot router failed: %s (%s)", module_name, e)
+            log.warning("bot router skipped: %s (%s)", name, e)
 
-# перечисли свои aiogram-роутеры
-include_bot_routers(dp, [
-    # "app.routers.entrypoints",
-    # "app.routers.help",
-    # "app.routers.faq",
-    # "app.routers.devops_sync",
-    # "app.routers.hq",
-    # и т.д.
-])
-
-async def run_polling() -> None:
-    logger.info("🚀 Start polling…")
+    log.info("🧭 Start polling…")
     await dp.start_polling(bot)
 
-# Внимание: процесс запускается из entrypoint.sh
-# - для worker: python -m app.main → здесь пойдём в polling
-# - для web: uvicorn app.main:app → uvicorn поднимет FastAPI и НЕ вызовет polling
+
+# ---------- локальный запуск (Render вызывает через entrypoint.sh)
+
+START_TS = time.time()
 
 if __name__ == "__main__":
-    # Запускаем только в режиме worker (для совместимости, если кто-то вызовет напрямую)
-    if settings.MODE == "worker":
-        asyncio.run(run_polling())
+    mode = os.getenv("MODE", "web").lower()
+    if mode in ("worker", "polling"):
+        asyncio.run(run_worker())
     else:
-        # В режиме web управление передаст uvicorn через entrypoint.sh
+        # Локально: uvicorn app.main:app --reload
         import uvicorn
-        uvicorn.run("app.main:app", host="0.0.0.0", port=8000, reload=False)
+
+        uvicorn.run(
+            "app.main:app",
+            host=os.getenv("HOST", "0.0.0.0"),
+            port=int(os.getenv("PORT", "10000")),
+            log_level=os.getenv("LOG_LEVEL", "info"),
+        )
