@@ -1,18 +1,15 @@
 #!/usr/bin/env bash
 set -e
 
-MODE_ARG="${1:-web}"
-MODE="${MODE:-$MODE_ARG}"
+: "${MODE:=web}"
 
-echo "[entrypoint] MODE=${MODE}"
-
-if [ "$MODE" = "worker" ]; then
-  # бот (polling/webhook — зависит от твоих настроек в коде)
+if [[ "$MODE" == "web" ]]; then
+  # Запуск FastAPI
+  exec uvicorn app.main:app --host 0.0.0.0 --port "${PORT:-8000}"
+elif [[ "$MODE" == "worker" ]]; then
+  # Запуск бота (polling) — адаптируй команду под свой main
   exec python -m app.main
-elif [ "$MODE" = "web" ]; then
-  # веб-сервис FastAPI
-  exec uvicorn app.main:app --host 0.0.0.0 --port 8000
 else
-  echo "[entrypoint] Unknown MODE='$MODE' (use 'web' or 'worker')"
+  echo "Unknown MODE=$MODE (expected 'web' or 'worker')"
   exit 1
 fi
