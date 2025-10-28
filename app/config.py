@@ -1,47 +1,35 @@
 from __future__ import annotations
 
 import os
-from typing import Literal
+from typing import Literal, Optional
 
 
-def _env(name: str, default: str | None = None) -> str:
+def _env(name: str, default: Optional[str] = None, required: bool = False) -> str:
     val = os.getenv(name, default)
-    if val is None:
+    if required and (val is None or val == ""):
         raise RuntimeError(f"ENV {name} is not set")
     return val
 
 
 class Settings:
-    """
-    Единая точка конфигурации.
-    ВАЖНО:
-      - токен читаем из BOT_TOKEN (а не TG_BOT_TOKEN)
-      - PARSE_MODE строкой: 'HTML' | 'MarkdownV2' | 'Markdown'
-    """
-    # Общие
-    ENV: str = os.getenv("ENV", "staging")            # staging | prod
-    MODE: Literal["web", "worker", "polling"] = os.getenv("MODE", "web")
-    LOG_LEVEL: str = os.getenv("LOG_LEVEL", "INFO")
+    # Режим запуска (влияет на entrypoint через ENV, но дублируем для логов/поведения)
+    MODE: Literal["worker", "web"] = _env("MODE", "web")
 
-    # Сборочные метки (необязательны)
-    BUILD_MARK: str = os.getenv("BUILD_MARK", "manual")
-    SHORT_SHA: str = os.getenv("SHORT_SHA", "manual_")
+    # Токен бота: ИСПОЛЬЗУЕМ ИМЕННО BOT_TOKEN (по скринам у тебя так)
+    BOT_TOKEN: str = _env("BOT_TOKEN", required=True)
 
-    # Telegram
-    BOT_TOKEN: str = _env("BOT_TOKEN")                # обязательная во всех режимах
-    PARSE_MODE: str = os.getenv("PARSE_MODE", "HTML") # по умолчанию HTML
+    # Парс-мод по умолчанию — нужен для aiogram.DefaultBotProperties
+    PARSE_MODE: str = _env("PARSE_MODE", "HTML")  # HTML | MarkdownV2
 
-    # Webhook-база (только для MODE=web)
-    # Пример: https://elaya-stagecoach-web.onrender.com
-    WEB_BASE_URL: str | None = os.getenv("WEB_BASE_URL")
+    # Базовый URL веб-сервиса (для линков в HQ-отчёте и т.п.)
+    WEB_BASE_URL: str = _env("WEB_BASE_URL", "http://localhost:8000")
 
-    @property
-    def webhook_url(self) -> str:
-        if self.MODE == "web":
-            if not self.WEB_BASE_URL:
-                raise RuntimeError("ENV WEB_BASE_URL is not set")
-            return f"{self.WEB_BASE_URL.rstrip('/')}/tg/{self.BOT_TOKEN}"
-        return ""
+    # Метки билда/деплоя (если Render их прокидывает — используем, иначе safe default)
+    RENDER_GIT_COMMIT: str = os.getenv("RENDER_GIT_COMMIT", "manual")
+    RENDER_SERVICE_NAME: str = os.getenv("RENDER_SERVICE_NAME", "local")
+
+    # Прочие ID чатов/метрики и т.п. — оставь как у тебя заведено:
+    TG_STATUS_CHAT_ID: Optional[str] = os.getenv("TG_STATUS_CHAT_ID")  # не required
 
 
 settings = Settings()
