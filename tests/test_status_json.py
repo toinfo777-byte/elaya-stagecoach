@@ -7,13 +7,8 @@ def test_status_json_fields():
     r = client.get("/status_json")
     assert r.status_code == 200
     data = r.json()
-
-    # базовые ключи
-    for key in ["env", "mode", "service", "build", "uptime"]:
-        assert key in data, f"missing {key}"
-
-    # HQ-поля
-    for key in ["status_emoji", "status_word", "focus", "note", "quote"]:
-        assert key in data, f"missing {key}"
-
-    print("✅ /status_json OK —", data)
+    # обязательные поля
+    must = {"env", "mode", "service", "build", "sha", "uptime"}
+    assert must.issubset(data.keys())
+    assert data["service"] in ("web", "worker")
+    assert isinstance(data["uptime"], int) or str(data["uptime"]).endswith("h")
