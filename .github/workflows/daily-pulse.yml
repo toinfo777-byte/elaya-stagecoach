@@ -1,0 +1,65 @@
+name: Daily HQ Pulse
+
+on:
+  schedule:
+    # 06:00 UTC = 09:00 MSK
+    - cron: "0 6 * * *"
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+jobs:
+  pulse:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout (develop)
+        uses: actions/checkout@v4
+        with:
+          ref: develop
+          fetch-depth: 0
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install deps for scripts
+        run: |
+          python -m pip install --upgrade pip
+          # без лишних зависимостей
+
+      - name: Generate HQ Pulse
+        env:
+          STATUS_JSON_URL: ${{ secrets.STATUS_JSON_URL }} # optional
+          PULSE_TZ: Europe/Moscow
+          GITHUB_SERVER_URL: ${{ github.server_url }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          PULSE_BRANCH: develop
+        run: |
+          python tools/make_hq_pulse.py
+
+      - name: Commit pulse + README
+        run: |
+          git config user.name "elaya-bot"
+          git config user.email "elaya-bot@users.noreply.github.com"
+          git add docs/hq/pulse README.md
+          if git diff --cached --quiet; then
+            echo "No changes to commit."
+          else
+            d=$(date -u +"%Y-%m-%d")
+            git commit -m "chore(hq): pulse ${d}"
+            git push origin develop
+          fi
+
+      - name: Notify Telegram (HQ)
+        env:
+          TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
+          TG_HQ_CHAT_ID: ${{ secrets.TG_HQ_CHAT_ID }}
+          GITHUB_SERVER_URL: ${{ github.server_url }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: |
+          FILE="docs/hq/pulse/HQ_Pulse_$(date -u +"%Y-%m-%d").md"
+          URL="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/blob/develop/${FILE}"
+          TEXT="*HQ PULSE* — $(date -u +"%Y-%m-%d")\n🔗 ${URL}"
+          PULSE_TEXT="${TEXT}" python tools/tg_notify.py
