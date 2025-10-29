@@ -24,33 +24,28 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.cache/pip
-          key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements*.txt') }}
+          key: ${{ runner.os }}-pip-${{ hashFiles('elaya-stagecoach/requirements*.txt') }}
           restore-keys: |
             ${{ runner.os }}-pip-
 
       - name: Install deps
+        working-directory: ./elaya-stagecoach
         run: |
           python -m pip install --upgrade pip
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
-          if [ -f requirements-dev.txt ]; then pip install -r requirements-dev.txt; fi
+          if [ -f requirements-dev.txt ]; then
+            pip install -r requirements-dev.txt
+          else
+            pip install pytest httpx anyio
+          fi
 
       - name: Run pytest
+        working-directory: ./elaya-stagecoach
         env:
           ENV: test
           MODE: web
           LOG_LEVEL: WARNING
-          PYTHONPATH: ${{ github.workspace }}
+          PYTHONPATH: ${{ github.workspace }}/elaya-stagecoach
         run: |
-          python -c "import sys; print(sys.version)"
+          python -c "import sys, pathlib; print(sys.version); print('PWD=', pathlib.Path().resolve())"
           pytest -q
-
-      # опционально: сохраняем junit-репорт (удобно в интерфейсе Actions)
-      # - name: Run pytest (with JUnit)
-      #   if: always()
-      #   run: pytest -q --junitxml=pytest-report.xml
-      # - name: Upload report
-      #   if: always()
-      #   uses: actions/upload-artifact@v4
-      #   with:
-      #     name: pytest-report
-      #     path: pytest-report.xml
