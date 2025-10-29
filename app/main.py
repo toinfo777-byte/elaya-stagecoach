@@ -24,10 +24,16 @@ app = FastAPI(
     version=os.getenv("BUILD_SHA", "local"),
 )
 
+START_TS = time.time()
 
-# ---------- динамическое подключение роутеров
+
 def _include_optional_routers(_app: FastAPI) -> None:
+    """
+    Динамически подключаем веб-роутеры (FastAPI).
+    Модули могут отсутствовать — в этом случае просто логируем и продолжаем.
+    """
     router_modules = [
+        # === существующие веб-роутеры проекта ===
         "app.routers.faq",
         "app.routers.devops_sync",
         "app.routers.hq",
@@ -44,7 +50,14 @@ def _include_optional_routers(_app: FastAPI) -> None:
         "app.routers.extended",
         "app.routers.casting",
         "app.routers.apply",
-        # "app.routers.diag",  # по желанию
+        # "app.routers.diag",
+
+        # === ВНУТРЕННЯЯ СЦЕНА (новое) ===
+        # Эти файлы создаются в app/scene/*.py, каждый содержит aiogram Router,
+        # но мы подключаем их и к FastAPI, чтобы иметь единый список модулей.
+        "app.scene.intro",
+        "app.scene.reflect",
+        "app.scene.transition",
     ]
     for mod_name in router_modules:
         try:
@@ -59,12 +72,11 @@ def _include_optional_routers(_app: FastAPI) -> None:
             log.warning("router skipped: %s (%s)", mod_name, e)
 
 
+# Подключаем, если доступны
 _include_optional_routers(app)
 
+
 # ---------- служебные эндпоинты
-
-START_TS = time.time()
-
 
 @app.get("/healthz")
 def healthz() -> Dict[str, str]:
@@ -92,7 +104,7 @@ def status_json() -> JSONResponse:
         "sha": os.getenv("RENDER_GIT_COMMIT", "manual"),
         "uptime": uptime_str,
 
-        # HQ-поля — читаются скриптом make_hq_pulse.py
+        # HQ-поля — читаются скриптом tools/make_hq_pulse.py
         "status_emoji": os.getenv("HQ_STATUS_EMOJI", "🌞"),
         "status_word": os.getenv("HQ_STATUS_WORD", "Stable"),
         "focus": os.getenv("HQ_STATUS_FOCUS", "Система в ритме дыхания"),
@@ -105,7 +117,7 @@ def status_json() -> JSONResponse:
 # ---------- точка входа воркера (aiogram polling)
 
 async def run_worker() -> None:
-    """Aiogram-polling воркер."""
+    """Aiogram-polling воркер: подключаем все ботовые роутеры (включая сцены)."""
     from aiogram import Bot, Dispatcher
     from aiogram.client.default import DefaultBotProperties
     from aiogram.enums import ParseMode
@@ -118,6 +130,7 @@ async def run_worker() -> None:
     dp = Dispatcher()
 
     modules = [
+        # === существующие хендлеры ===
         "app.routers.faq",
         "app.routers.devops_sync",
         "app.routers.hq",
@@ -134,6 +147,12 @@ async def run_worker() -> None:
         "app.routers.extended",
         "app.routers.casting",
         "app.routers.apply",
+        # "app.routers.diag",
+
+        # === ВНУТРЕННЯЯ СЦЕНА (новое) ===
+        "app.scene.intro",
+        "app.scene.reflect",
+        "app.scene.transition",
     ]
     for name in modules:
         try:
