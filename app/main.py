@@ -7,7 +7,7 @@ import os
 import time
 from typing import Any, Dict
 
-from fastapi import FastAPI, Response
+from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 
 # ---------- базовый логгер
@@ -25,10 +25,9 @@ app = FastAPI(
 )
 
 
-# Подключаем твои роутеры, если есть (мягко — без падений, как только файл появится — подхватится)
+# ---------- динамическое подключение роутеров
 def _include_optional_routers(_app: FastAPI) -> None:
     router_modules = [
-        # добавляй/снимай по вкусу — порядок не критичен
         "app.routers.faq",
         "app.routers.devops_sync",
         "app.routers.hq",
@@ -45,7 +44,7 @@ def _include_optional_routers(_app: FastAPI) -> None:
         "app.routers.extended",
         "app.routers.casting",
         "app.routers.apply",
-        # "app.routers.diag",  # если понадобится
+        # "app.routers.diag",  # по желанию
     ]
     for mod_name in router_modules:
         try:
@@ -57,31 +56,48 @@ def _include_optional_routers(_app: FastAPI) -> None:
             else:
                 log.debug("module has no router: %s", mod_name)
         except Exception as e:
-            # Не валим web, просто логируем
             log.warning("router skipped: %s (%s)", mod_name, e)
 
 
 _include_optional_routers(app)
 
-
 # ---------- служебные эндпоинты
+
+START_TS = time.time()
+
 
 @app.get("/healthz")
 def healthz() -> Dict[str, str]:
-    # Лёгкий endpoint для Render Health Check
+    """Лёгкий endpoint для Render Health Check"""
     return {"status": "ok"}
 
 
 @app.get("/status_json")
 def status_json() -> JSONResponse:
-    # Быстрый отчёт, чтобы HQ-бот/панель могли дёргать состояние web
+    """
+    Тонкий HQ-эндпоинт: используется и Render'ом для health, и HQ-пульсом для статуса.
+    Возвращает JSON с базовыми и HQ-полями (status_emoji, focus, note, quote).
+    """
+    uptime_sec = int(time.time() - START_TS)
+    h, rem = divmod(uptime_sec, 3600)
+    m, _ = divmod(rem, 60)
+    uptime_str = f"{h}h {m}m"
+
     payload = {
+        # системные поля
         "env": os.getenv("ENV", "staging"),
         "mode": os.getenv("MODE", "web"),
+        "service": "web",
         "build": os.getenv("BUILD_SHA", "local"),
         "sha": os.getenv("RENDER_GIT_COMMIT", "manual"),
-        "uptime": int(time.time() - START_TS),
-        "service": "web",
+        "uptime": uptime_str,
+
+        # HQ-поля — читаются скриптом make_hq_pulse.py
+        "status_emoji": os.getenv("HQ_STATUS_EMOJI", "🌞"),
+        "status_word": os.getenv("HQ_STATUS_WORD", "Stable"),
+        "focus": os.getenv("HQ_STATUS_FOCUS", "Система в ритме дыхания"),
+        "note": os.getenv("HQ_STATUS_NOTE", "Web и Bot синхронны; пульс ровный."),
+        "quote": os.getenv("HQ_STATUS_QUOTE", "«Ноябрь — дыхание изнутри.»"),
     }
     return JSONResponse(payload)
 
@@ -89,6 +105,7 @@ def status_json() -> JSONResponse:
 # ---------- точка входа воркера (aiogram polling)
 
 async def run_worker() -> None:
+    """Aiogram-polling воркер."""
     from aiogram import Bot, Dispatcher
     from aiogram.client.default import DefaultBotProperties
     from aiogram.enums import ParseMode
@@ -100,7 +117,6 @@ async def run_worker() -> None:
     bot = Bot(token=token, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
     dp = Dispatcher()
 
-    # Пытаемся подключить те же роутеры, если они содержат aiogram-хендлеры
     modules = [
         "app.routers.faq",
         "app.routers.devops_sync",
@@ -122,7 +138,6 @@ async def run_worker() -> None:
     for name in modules:
         try:
             mod = importlib.import_module(name)
-            # поддерживаем оба варианта: dp/routers или register(dp)
             if hasattr(mod, "router"):
                 dp.include_router(getattr(mod, "router"))
                 log.info("bot router loaded: %s", name)
@@ -136,16 +151,14 @@ async def run_worker() -> None:
     await dp.start_polling(bot)
 
 
-# ---------- локальный запуск (Render вызывает через entrypoint.sh)
-
-START_TS = time.time()
+# ---------- точка запуска (Render вызывает через entrypoint.sh)
 
 if __name__ == "__main__":
     mode = os.getenv("MODE", "web").lower()
     if mode in ("worker", "polling"):
         asyncio.run(run_worker())
     else:
-        # Локально: uvicorn app.main:app --reload
+        # локальный запуск: uvicorn app.main:app --reload
         import uvicorn
 
         uvicorn.run(
