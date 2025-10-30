@@ -1,60 +1,30 @@
-name: Deploy to Staging (Render)
+name: Deploy staging
 
 on:
   push:
-    branches: [ "develop" ]
-    paths:
-      - "app/**"
-      - "Dockerfile"
-      - ".dockerignore"
-      - ".github/workflows/deploy-staging.yml"
+    branches: [develop]
+  workflow_dispatch:
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
 
-    permissions:
-      contents: read
-      packages: write
-
-    env:
-      IMAGE_NAME: ghcr.io/${{ github.repository_owner }}/elaya-stagecoach
-      TAG: develop
-
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Log in to GHCR
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Build & Push
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          push: true
-          tags: |
-            ${{ env.IMAGE_NAME }}:${{ env.TAG }}
-
-      - name: Wait for tag propagation
-        run: sleep 10
-
-      - name: Trigger Render WEB deploy (optional)
-        if: ${{ secrets.RENDER_DEPLOY_HOOK_WEB != '' }}
+      - name: Deploy to Render (WEB)
+        if: ${{ env.RENDER_DEPLOY_HOOK_WEB != '' }}
         env:
-          HOOK: ${{ secrets.RENDER_DEPLOY_HOOK_WEB }}
+          RENDER_DEPLOY_HOOK_WEB: ${{ secrets.RENDER_DEPLOY_HOOK_WEB }}
         run: |
-          echo "Trigger WEB hook: $HOOK"
-          curl -fsS -X POST "$HOOK"
+          echo "Deploying WEB service..."
+          curl -fsS -X POST "$RENDER_DEPLOY_HOOK_WEB"
 
-      - name: Trigger Render BOT deploy (optional)
-        if: ${{ secrets.RENDER_DEPLOY_HOOK_BOT != '' }}
+      - name: Deploy to Render (BOT)
+        if: ${{ env.RENDER_DEPLOY_HOOK_BOT != '' }}
         env:
-          HOOK: ${{ secrets.RENDER_DEPLOY_HOOK_BOT }}
+          RENDER_DEPLOY_HOOK_BOT: ${{ secrets.RENDER_DEPLOY_HOOK_BOT }}
         run: |
-          echo "Trigger BOT hook: $HOOK"
-          curl -fsS -X POST "$HOOK"
+          echo "Deploying BOT service..."
+          curl -fsS -X POST "$RENDER_DEPLOY_HOOK_BOT"
