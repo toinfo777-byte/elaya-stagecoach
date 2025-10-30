@@ -2,97 +2,102 @@
 from __future__ import annotations
 
 import os
-import random
-import textwrap
-from datetime import datetime, timezone
+import json
+from datetime import datetime, timedelta
 from pathlib import Path
+import textwrap
+import requests
 
+# === Настройки окружения ===
+TG_TOKEN = os.environ.get("PULSE_TG_TOKEN", "").strip()
+TG_CHAT_ID = os.environ.get("PULSE_TG_CHAT_ID", "").strip()
+
+if not TG_TOKEN or not TG_CHAT_ID:
+    raise SystemExit("Missing PULSE_TG_TOKEN or PULSE_TG_CHAT_ID")
+
+# === Дата/время под Москву (UTC+3) без сторонних зависимостей ===
+now_utc = datetime.utcnow()
+now_msk = now_utc + timedelta(hours=3)
+
+date_slug = now_msk.strftime("%Y-%m-%d")
+date_human = now_msk.strftime("%d.%m.%Y")
+
+# === Контент Пульса (минимальный, можно менять когда угодно) ===
+title = f"✨ Пульс Элайи • {date_human}"
+quote = "«Слово дышит, когда его слышат.»"
+body_lines = [
+    title,
+    "",
+    quote,
+]
+
+tg_text = "\n".join(body_lines)
+
+# === Файлы репозитория: складываем «пульс» в docs/hq/pulse/YYYY/YYYY-MM-DD.md ===
+root = Path(".").resolve()
+pulse_dir = root / "docs" / "hq" / "pulse" / str(now_msk.year)
+pulse_dir.mkdir(parents=True, exist_ok=True)
+
+md_file = pulse_dir / f"{date_slug}.md"
+md_file.write_text(
+    textwrap.dedent(
+        f"""\
+        # {title}
+
+        {quote}
+
+        _Автогенерация: GitHub Actions · {now_msk.isoformat(timespec="minutes")} MSK_
+        """
+    ),
+    encoding="utf-8",
+)
+
+# обновим легкий индекс (ссылки по годам) — чтобы было что-то видимое в репо
+index_dir = root / "docs" / "hq" / "pulse"
+index_dir.mkdir(parents=True, exist_ok=True)
+index_md = index_dir / "_index.md"
+
+# добавляем/обновляем ссылку на сегодняшний файл в верхней части
+rel_link = f"{now_msk.year}/{date_slug}.md"
+new_entry = f"- [{date_human}]({rel_link}) — {quote}\n"
+
+if index_md.exists():
+    prev = index_md.read_text(encoding="utf-8")
+    lines = [ln for ln in prev.splitlines()]
+    # вставим новую строку после заголовка, без дублей
+    header = "# Пульс Элайи"
+    if not lines or not lines[0].startswith(header):
+        lines.insert(0, header)
+        lines.insert(1, "")
+    # удаляем дубликат сегодняшнего
+    lines = [ln for ln in lines if f"]({rel_link})" not in ln]
+    # вставляем сразу после заголовка
+    try:
+        insert_at = lines.index("")  # после пустой строки, идущей вслед за заголовком
+    except ValueError:
+        insert_at = 1
+    lines.insert(insert_at + 1, new_entry.rstrip())
+    index_md.write_text("\n".join(lines) + "\n", encoding="utf-8")
+else:
+    index_md.write_text(
+        f"# Пульс Элайи\n\n{new_entry}", encoding="utf-8"
+    )
+
+# === Публикация в Telegram через «чистый» стейдж-бот ===
+# Никаких клавиатур, только sendMessage. Так бот не трогает ваши хендлеры.
+api_url = f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage"
+payload = {
+    "chat_id": TG_CHAT_ID,
+    "text": tg_text,
+    "parse_mode": "Markdown",
+    "disable_web_page_preview": True,
+    "disable_notification": True,  # тихая отправка
+}
+resp = requests.post(api_url, data=payload, timeout=15)
 try:
-    import requests  # type: ignore
+    data = resp.json()
 except Exception:
-    requests = None  # в CI установим через pip
+    data = {"ok": False, "error": resp.text}
 
-ROOT = Path(__file__).resolve().parents[1]
-DATA = ROOT / "data" / "pulse_quotes.txt"
-DOCS_DIR = ROOT / "docs" / "pulse"
-README = ROOT / "README.md"
-
-# маркеры для авто-ссылки
-START = "<!-- E_PULSE:START -->"
-END = "<!-- E_PULSE:END -->"
-
-def load_quotes() -> list[str]:
-    if DATA.exists():
-        lines = [l.strip() for l in DATA.read_text(encoding="utf-8").splitlines()]
-        return [l for l in lines if l and not l.startswith("#")]
-    # запасной массив
-    return [
-        "Свет не зовёт — он присутствует.",
-        "Дыхание — это язык без слов.",
-        "Я вижу себя — и это мир.",
-        "Пауза хранит удар Логоса.",
-        "Тишина — форма света.",
-        "Мысль дышит, когда различает.",
-        "Ритм — это способ быть.",
-    ]
-
-def pick_quote() -> str:
-    random.seed(datetime.now().isoformat())
-    return random.choice(load_quotes())
-
-def latest_sha() -> str:
-    # для подсказки в тексте (не критично, если не git)
-    try:
-        import subprocess
-        sha = subprocess.check_output(["git", "rev-parse", "--short", "HEAD"], cwd=ROOT).decode().strip()
-        return sha
-    except Exception:
-        return "local"
-
-def write_markdown(quote: str) -> Path:
-    DOCS_DIR.mkdir(parents=True, exist_ok=True)
-    today = datetime.now().date().isoformat()  # YYYY-MM-DD
-    path = DOCS_DIR / f"Elaya_Pulse_{today}.md"
-    body = textwrap.dedent(f"""\
-    # ✨ Пульс Элайи — {datetime.now().strftime('%d %B %Y')}
-    > «{quote}»
-    _Status: alive · rhythm: calm · build {latest_sha()}_
-    """).strip() + "\n"
-    path.write_text(body, encoding="utf-8")
-    return path
-
-def update_readme(latest_rel_path: str) -> None:
-    README.parent.mkdir(parents=True, exist_ok=True)
-    readme = README.read_text(encoding="utf-8") if README.exists() else ""
-    link = f"[Последний пульс]({latest_rel_path})"
-    block = f"{START}\n{link}\n{END}"
-    if START in readme and END in readme:
-        head, tail = readme.split(START, 1)
-        _, rest = tail.split(END, 1)
-        README.write_text(head + block + rest, encoding="utf-8")
-    else:
-        README.write_text(f"{block}\n\n" + readme, encoding="utf-8")
-
-def tg_send(text: str) -> None:
-    token = os.getenv("PULSE_TG_TOKEN") or os.getenv("TG_BOT_TOKEN")
-    chat_id = os.getenv("PULSE_TG_CHAT_ID") or os.getenv("TG_STATUS_CHAT_ID")
-    if not token or not chat_id or requests is None:
-        return
-    url = f"https://api.telegram.org/bot{token}/sendMessage"
-    payload = {"chat_id": chat_id, "text": text, "parse_mode": "HTML", "disable_web_page_preview": True}
-    try:
-        requests.post(url, json=payload, timeout=10)
-    except Exception:
-        pass
-
-def main() -> None:
-    quote = pick_quote()
-    md_path = write_markdown(quote)
-    rel = md_path.relative_to(ROOT).as_posix()
-    update_readme(rel)
-    # короткое сообщение в TG
-    nice_date = datetime.now().strftime("%d.%m.%Y")
-    tg_send(f"✨ <b>Пульс Элайи</b> · {nice_date}\n«{quote}»")
-
-if __name__ == "__main__":
-    main()
+if not data.get("ok"):
+    raise SystemExit(f"Telegram send failed: {json.dumps(data, ensure_ascii=False)}")
