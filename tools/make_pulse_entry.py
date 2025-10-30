@@ -1,103 +1,82 @@
-#!/usr/bin/env python3
 from __future__ import annotations
-
-import os
-import json
-from datetime import datetime, timedelta
-from pathlib import Path
-import textwrap
+import os, pathlib, datetime as dt, json
 import requests
 
-# === Настройки окружения ===
-TG_TOKEN = os.environ.get("PULSE_TG_TOKEN", "").strip()
-TG_CHAT_ID = os.environ.get("PULSE_TG_CHAT_ID", "").strip()
+REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 
-if not TG_TOKEN or not TG_CHAT_ID:
-    raise SystemExit("Missing PULSE_TG_TOKEN or PULSE_TG_CHAT_ID")
+def msk_now() -> dt.datetime:
+    # раннер в UTC — даём сдвиг +3
+    return dt.datetime.utcnow() + dt.timedelta(hours=3)
 
-# === Дата/время под Москву (UTC+3) без сторонних зависимостей ===
-now_utc = datetime.utcnow()
-now_msk = now_utc + timedelta(hours=3)
+def ensure_dir(p: pathlib.Path) -> None:
+    p.mkdir(parents=True, exist_ok=True)
 
-date_slug = now_msk.strftime("%Y-%m-%d")
-date_human = now_msk.strftime("%d.%m.%Y")
-
-# === Контент Пульса (минимальный, можно менять когда угодно) ===
-title = f"✨ Пульс Элайи • {date_human}"
-quote = "«Слово дышит, когда его слышат.»"
-body_lines = [
-    title,
-    "",
-    quote,
-]
-
-tg_text = "\n".join(body_lines)
-
-# === Файлы репозитория: складываем «пульс» в docs/hq/pulse/YYYY/YYYY-MM-DD.md ===
-root = Path(".").resolve()
-pulse_dir = root / "docs" / "hq" / "pulse" / str(now_msk.year)
-pulse_dir.mkdir(parents=True, exist_ok=True)
-
-md_file = pulse_dir / f"{date_slug}.md"
-md_file.write_text(
-    textwrap.dedent(
-        f"""\
-        # {title}
-
-        {quote}
-
-        _Автогенерация: GitHub Actions · {now_msk.isoformat(timespec="minutes")} MSK_
-        """
-    ),
-    encoding="utf-8",
-)
-
-# обновим легкий индекс (ссылки по годам) — чтобы было что-то видимое в репо
-index_dir = root / "docs" / "hq" / "pulse"
-index_dir.mkdir(parents=True, exist_ok=True)
-index_md = index_dir / "_index.md"
-
-# добавляем/обновляем ссылку на сегодняшний файл в верхней части
-rel_link = f"{now_msk.year}/{date_slug}.md"
-new_entry = f"- [{date_human}]({rel_link}) — {quote}\n"
-
-if index_md.exists():
-    prev = index_md.read_text(encoding="utf-8")
-    lines = [ln for ln in prev.splitlines()]
-    # вставим новую строку после заголовка, без дублей
-    header = "# Пульс Элайи"
-    if not lines or not lines[0].startswith(header):
-        lines.insert(0, header)
-        lines.insert(1, "")
-    # удаляем дубликат сегодняшнего
-    lines = [ln for ln in lines if f"]({rel_link})" not in ln]
-    # вставляем сразу после заголовка
+def send_tg(text: str) -> None:
+    token = os.getenv("PULSE_TG_TOKEN") or os.getenv("TG_BOT_TOKEN")
+    chat_id = os.getenv("PULSE_TG_CHAT_ID") or os.getenv("TG_STATUS_CHAT_ID")
+    if not token or not chat_id:
+        print("TG env missing — skip send.")
+        return
+    url = f"https://api.telegram.org/bot{token}/sendMessage"
+    payload = {
+        "chat_id": chat_id,                       # для канала — -100xxxxxxxxxx
+        "text": text,
+        "parse_mode": "HTML",
+        "disable_web_page_preview": True,
+        "disable_notification": True,
+        "reply_markup": json.dumps({"remove_keyboard": True}),  # убрать клавиатуру, если была
+    }
+    r = requests.post(url, data=payload, timeout=30)
     try:
-        insert_at = lines.index("")  # после пустой строки, идущей вслед за заголовком
-    except ValueError:
-        insert_at = 1
-    lines.insert(insert_at + 1, new_entry.rstrip())
-    index_md.write_text("\n".join(lines) + "\n", encoding="utf-8")
-else:
-    index_md.write_text(
-        f"# Пульс Элайи\n\n{new_entry}", encoding="utf-8"
-    )
+        r.raise_for_status()
+    except Exception:
+        print("TG send failed:", r.text)
+        raise
 
-# === Публикация в Telegram через «чистый» стейдж-бот ===
-# Никаких клавиатур, только sendMessage. Так бот не трогает ваши хендлеры.
-api_url = f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage"
-payload = {
-    "chat_id": TG_CHAT_ID,
-    "text": tg_text,
-    "parse_mode": "Markdown",
-    "disable_web_page_preview": True,
-    "disable_notification": True,  # тихая отправка
-}
-resp = requests.post(api_url, data=payload, timeout=15)
-try:
-    data = resp.json()
-except Exception:
-    data = {"ok": False, "error": resp.text}
+def main() -> None:
+    now = msk_now()
+    y, m, d = now.year, now.month, now.day
+    y_s = f"{y:04d}"
+    m_s = f"{m:02d}"
+    d_s = f"{d:02d}"
 
-if not data.get("ok"):
-    raise SystemExit(f"Telegram send failed: {json.dumps(data, ensure_ascii=False)}")
+    # путь и файл
+    pulse_dir = REPO_ROOT / "docs" / "hq" / "pulse" / y_s / m_s
+    ensure_dir(pulse_dir)
+    md_path = pulse_dir / f"{y_s}-{m_s}-{d_s}.md"
+
+    sha = (os.getenv("GITHUB_SHA_SHORT") or "")[:7]
+    title = f"Пульс Элайи • {d_s}.{m_s}.{y_s}"
+    body = [
+        f"# {title}",
+        "",
+        "«Слово дышит, когда его слышат.»",
+        "",
+        f"_build: <code>{sha}</code>_",
+        "",
+    ]
+    content = "\n".join(body)
+
+    # записываем / обновляем файл
+    md_path.write_text(content, encoding="utf-8")
+    print("Wrote:", md_path)
+
+    # телеграм
+    tg_text = f"✨ <b>{title}</b>\n«Слово дышит, когда его слышат.»"
+    send_tg(tg_text)
+
+    # лёгкое обновление README (опционально)
+    readme = REPO_ROOT / "README.md"
+    if readme.exists():
+        lines = readme.read_text(encoding="utf-8").splitlines()
+        stamp = f"Last pulse: {d_s}.{m_s}.{y_s}"
+        if not any("Last pulse:" in ln for ln in lines):
+            lines.append("")
+            lines.append(f"<!-- pulse-stamp --> {stamp}")
+        else:
+            lines = [ (f"<!-- pulse-stamp --> {stamp}" if "pulse-stamp" in ln else ln) for ln in lines ]
+        readme.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        print("README updated")
+
+if __name__ == "__main__":
+    main()
