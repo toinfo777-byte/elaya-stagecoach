@@ -1,0 +1,39 @@
+name: Manual — Elaya Pulse
+
+on:
+  workflow_dispatch:
+    inputs:
+      override_quote:
+        description: 'Custom pulse text (optional)'
+        required: false
+        type: string
+
+permissions:
+  contents: write
+
+env:
+  TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
+  TG_STATUS_CHAT_ID: ${{ secrets.TG_STATUS_CHAT_ID }}
+  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+jobs:
+  pulse:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install deps
+        run: |
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+
+      - name: Run Pulse generator
+        env:
+          PULSE_OVERRIDE: ${{ inputs.override_quote }}
+        run: |
+          python tools/make_pulse_entry.py
