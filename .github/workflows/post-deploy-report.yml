@@ -1,86 +1,25 @@
 name: Post-deploy status report
 
 on:
-  repository_dispatch:
-    types: [elaya_post_deploy]
   workflow_dispatch:
+  repository_dispatch:
+    types: [status_report]
 
 jobs:
   postdeploy:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Fetch web status
-        id: status
-        run: |
-          echo "Fetching status from Render..."
-          curl -s https://elaya-stagecoach-web.onrender.com/status_json -o status.json
-          cat status.json
-          echo "##vso[task.setvariable variable=status_json;isOutput=true]$(cat status.json)"
-
-      - name: Parse and format report
-        id: format
-        run: |
-          echo "Formatting report..."
-          ts=$(date '+%Y-%m-%d %H:%M:%S')
-          build=$(jq -r '.build' status.json)
-          sha=$(jq -r '.sha' status.json)
-          uptime=$(jq -r '.uptime_sec' status.json)
-          env=$(jq -r '.env' status.json)
-          mode=$(jq -r '.mode' status.json)
-
-          mkdir -p docs/elaya_status
-          file="docs/elaya_status/Elaya_Status_$(date '+%Y%m%d').md"
-
-          {
-            echo "# 🩵 Elaya Status Report"
-            echo "**Date:** $ts"
-            echo
-            echo "| Field | Value |"
-            echo "|-------|--------|"
-            echo "| Build | $build |"
-            echo "| SHA | $sha |"
-            echo "| Uptime (s) | $uptime |"
-            echo "| Env | $env |"
-            echo "| Mode | $mode |"
-          } > "$file"
-
-          echo "file_path=$file" >> $GITHUB_OUTPUT
-
-      - name: Commit and push report
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          git config user.name "elaya-bot"
-          git config user.email "bot@users.noreply.github.com"
-          git add docs/elaya_status/
-          git commit -m "🩵 Post-deploy status update [skip ci]" || echo "No changes"
-          git push
-
-      - name: Send Telegram summary
+      - name: Send post-deploy status to Telegram
         env:
           TG_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
-          TG_CHAT: ${{ secrets.TG_STATUS_CHAT_ID }}
+          CHAT_ID:  ${{ secrets.TG_STATUS_CHAT_ID }}
+          REPO:     ${{ github.repository }}
+          RUN_ID:   ${{ github.run_id }}
+          SHA:      ${{ github.sha }}
         run: |
-          msg="✅ *Elaya Web Status*  
-          Build: \`$(jq -r '.build' status.json)\`  
-          Env: \`$(jq -r '.env' status.json)\`  
-          Mode: \`$(jq -r '.mode' status.json)\`  
-          SHA: \`$(jq -r '.sha' status.json)\`  
-          Uptime: \`$(jq -r '.uptime_sec' status.json)s\`"
-          curl -s -X POST https://api.telegram.org/bot$TG_TOKEN/sendMessage \
-            -d chat_id=$TG_CHAT \
-            -d text="$msg" \
-            -d parse_mode=Markdown
-
-      - name: Dispatch README update
-        if: ${{ success() }}
-        run: |
-          curl -fsS -X POST \
-            -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
-            -H "Accept: application/vnd.github+json" \
-            "${{ github.api_url }}/repos/${{ github.repository }}/dispatches" \
-            -d '{"event_type":"daily_report"}'
-
+          SHORT=$(echo "$SHA" | cut -c1-7)
+          TEXT="🚀 Post-deploy · ${REPO} · ${SHORT}\nhttps://github.com/${REPO}/actions/runs/${RUN_ID}"
+          curl -sS -X POST "https://api.telegram.org/bot${TG_TOKEN}/sendMessage" \
+            -d chat_id="${CHAT_ID}" \
+            -d parse_mode="Markdown" \
+            --data-urlencode text="$TEXT" >/dev/null
