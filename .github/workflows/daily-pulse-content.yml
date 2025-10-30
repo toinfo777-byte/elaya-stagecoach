@@ -31,7 +31,10 @@ jobs:
           python -m pip install --upgrade pip
           pip install requests
 
-      - name: Generate pulse
+      - name: Generate & publish pulse
+        env:
+          PULSE_TG_TOKEN:   ${{ secrets.PULSE_TG_TOKEN }}
+          PULSE_TG_CHAT_ID: ${{ secrets.PULSE_TG_CHAT_ID }}
         run: |
           python tools/make_pulse_entry.py
 
@@ -43,6 +46,6 @@ jobs:
           if git diff --cached --quiet; then
             echo "No changes."
           else
-            git commit -m "chore(pulse): add daily pulse and update README"
+            git commit -m "chore(pulse): add daily pulse and update index"
             git push
           fi
