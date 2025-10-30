@@ -1,58 +1,62 @@
-from __future__ import annotations
-
+# app/routers/entrypoints.py
 from aiogram import Router, F
-from aiogram.filters import Command
-from aiogram.types import Message, KeyboardButton, ReplyKeyboardMarkup
+from aiogram.types import Message, ReplyKeyboardRemove
+from aiogram.utils.deep_linking import create_start_link
+
+from app.keyboards.main import main_kb
 
 router = Router(name="entrypoints")
 
 
-def _menu_kb() -> ReplyKeyboardMarkup:
-    return ReplyKeyboardMarkup(
-        keyboard=[
-            [KeyboardButton(text="Меню")],
-            [KeyboardButton(text="/ping"), KeyboardButton(text="/hq"), KeyboardButton(text="/faq")],
-        ],
-        resize_keyboard=True,
-        one_time_keyboard=False,
+def _is_private(msg: Message) -> bool:
+    return msg.chat.type == "private"
+
+
+@router.message(F.text == "/start")
+async def cmd_start(msg: Message):
+    # В группах — полностью тихо, даже без клавиатуры
+    if not _is_private(msg):
+        return
+
+    await msg.answer(
+        "Привет! Я «Элайя — Тренер сцены». "
+        "Нажми /menu, чтобы открыть разделы.",
+        reply_markup=ReplyKeyboardRemove(),
     )
 
 
-@router.message(Command("start"))
-async def cmd_start(message: Message) -> None:
-    await message.answer(
-        "Привет! Я — «Элайя — Тренер сцены». Готов к работе.\n"
-        "Команды: /ping /hq /faq\n"
-        "Нажми «Меню», чтобы открыть клавиатуру.",
-        reply_markup=_menu_kb(),
-    )
+@router.message(F.text == "/menu")
+async def cmd_menu(msg: Message):
+    if _is_private(msg):
+        # Только в личке показываем клавиатуру
+        await msg.answer("Команды и разделы: выбери нужное ⤵️", reply_markup=main_kb())
+        return
+
+    # В группах не открываем клавиатуру и даем удобную ссылку в ЛС
+    try:
+        # deep-link на личный чат с ботом
+        link = await create_start_link(msg.bot, payload="open_menu")
+        text = (
+            "Меню доступно в личном чате с ботом.\n"
+            f"Открой: {link}"
+        )
+    except Exception:
+        text = "Меню доступно в личном чате с ботом."
+
+    await msg.answer(text, reply_markup=ReplyKeyboardRemove())
 
 
-@router.message(F.text == "Меню")
-async def show_menu(message: Message) -> None:
-    await message.answer("Меню открыто. Используй кнопки или команды.", reply_markup=_menu_kb())
+# На всякий случай: если кто-то шлёт «/help» в группе — без клавиатуры
+@router.message(F.text.in_({"/help", "Помощь", "FAQ", "/faq"}))
+async def cmd_help(msg: Message):
+    if _is_private(msg):
+        await msg.answer(
+            "Помощь:\n"
+            "• /menu — открыть разделы\n"
+            "• Тренировка дня — ежедневная рутина 5–15 мин.\n"
+            "• Мой прогресс — стрик и эпизоды за 7 дней.\n",
+            reply_markup=ReplyKeyboardRemove(),
+        )
+        return
 
-
-@router.message(Command("ping"))
-async def cmd_ping(message: Message) -> None:
-    await message.answer("pong 🟢")
-
-
-@router.message(Command("hq"))
-async def cmd_hq(message: Message) -> None:
-    await message.answer(
-        "🛰 HQ-сводка\n"
-        "• ENV: web\n"
-        "• MODE: webhook\n"
-        "• Отчёт: проверьте daily/post-deploy отчёты (если подключены)"
-    )
-
-
-@router.message(Command("faq"))
-async def cmd_faq(message: Message) -> None:
-    await message.answer(
-        "❓ FAQ\n"
-        "• /start — перезапустить меню\n"
-        "• /ping — быстрая проверка связи\n"
-        "• /hq — краткая служебная сводка"
-    )
+    await msg.answer("Помощь доступна в ЛС с ботом.", reply_markup=ReplyKeyboardRemove())
