@@ -1,39 +1,46 @@
-name: Manual — Elaya Pulse
+name: Manual pulse content
 
 on:
-  workflow_dispatch:
-    inputs:
-      override_quote:
-        description: 'Custom pulse text (optional)'
-        required: false
-        type: string
+  workflow_dispatch: {}   # всегда даёт кнопку "Run workflow"
 
 permissions:
   contents: write
 
-env:
-  TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
-  TG_STATUS_CHAT_ID: ${{ secrets.TG_STATUS_CHAT_ID }}
-  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
 jobs:
-  pulse:
+  make_pulse_manual:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Set up Python
+      - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
 
       - name: Install deps
         run: |
-          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+          python -m pip install --upgrade pip
+          pip install requests
 
-      - name: Run Pulse generator
+      - name: Generate pulse (manual)
         env:
-          PULSE_OVERRIDE: ${{ inputs.override_quote }}
+          PULSE_TG_TOKEN:     ${{ secrets.PULSE_TG_TOKEN }}
+          PULSE_TG_CHAT_ID:   ${{ secrets.PULSE_TG_CHAT_ID }}
+          TG_BOT_TOKEN:       ${{ secrets.TG_BOT_TOKEN }}
+          TG_STATUS_CHAT_ID:  ${{ secrets.TG_STATUS_CHAT_ID }}
         run: |
           python tools/make_pulse_entry.py
+
+      - name: Commit changes (manual)
+        run: |
+          git config user.name  "elaya-bot"
+          git config user.email "elaya-bot@users.noreply.github.com"
+          git add -A
+          if git diff --cached --quiet; then
+            echo "No changes."
+          else
+            git commit -m "chore(pulse): manual run — add daily pulse and update README"
+            git push
+          fi
