@@ -1,9 +1,9 @@
 name: Daily pulse content
 
 on:
+  workflow_dispatch:
   schedule:
     - cron: '59 18 * * *'   # 21:59 MSK (UTC+3)
-  workflow_dispatch: {}      # ручной запуск из Actions
 
 permissions:
   contents: write
@@ -12,9 +12,14 @@ jobs:
   make_pulse:
     runs-on: ubuntu-latest
     timeout-minutes: 5
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: develop
+          fetch-depth: 0
+          persist-credentials: true
 
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -29,10 +34,10 @@ jobs:
       - name: Generate pulse
         env:
           # Основной канал Пульса
-          PULSE_TG_TOKEN:  ${{ secrets.PULSE_TG_TOKEN }}
-          PULSE_TG_CHAT_ID: ${{ secrets.PULSE_TG_CHAT_ID }}
-          # Фоллбек к уже существующим HQ-секретам (если PULSE_* не заданы)
-          TG_BOT_TOKEN:    ${{ secrets.TG_BOT_TOKEN }}
+          PULSE_TG_TOKEN:    ${{ secrets.PULSE_TG_TOKEN }}
+          PULSE_TG_CHAT_ID:  ${{ secrets.PULSE_TG_CHAT_ID }}
+          # Фоллбек на HQ-секреты (если PULSE_* не заданы)
+          TG_BOT_TOKEN:      ${{ secrets.TG_BOT_TOKEN }}
           TG_STATUS_CHAT_ID: ${{ secrets.TG_STATUS_CHAT_ID }}
         run: |
           python tools/make_pulse_entry.py
