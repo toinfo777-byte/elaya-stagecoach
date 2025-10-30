@@ -26,11 +26,14 @@ jobs:
           pip install requests
 
       - name: Generate pulse
-        env:
-          PULSE_TG_TOKEN: ${{ secrets.PULSE_TG_TOKEN || secrets.TG_BOT_TOKEN }}
-          PULSE_TG_CHAT_ID: ${{ secrets.PULSE_TG_CHAT_ID || secrets.TG_STATUS_CHAT_ID }}
-        run: |
-          python tools/make_pulse_entry.py
+            env:
+      # PULSE-секреты (основные)
+      PULSE_TG_TOKEN: ${{ secrets.PULSE_TG_TOKEN }}
+      PULSE_TG_CHAT_ID: ${{ secrets.PULSE_TG_CHAT_ID }}
+      # Fallback на уже существующие HQ-бота (если PULSE_* не заданы)
+      TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
+      TG_STATUS_CHAT_ID: ${{ secrets.TG_STATUS_CHAT_ID }}
+
 
       - name: Commit changes
         run: |
