@@ -1,17 +1,14 @@
 from aiogram import Router
+from aiogram.filters import Command
 from aiogram.types import Message
-from .manager import scene_manager
 
 router = Router(name="scene_reflect")
 
-@router.message(commands=["scene_reflect"])
+@router.message(Command("scene_reflect"))
 async def reflect_scene(message: Message):
-    cfg = scene_manager.get_config("scene_reflect")
-    hint = f"⏱ окно: ~{cfg.duration_sec//60} мин • время в штабе: {cfg.time}" if cfg else ""
     text = (
-        "🌕 Отрази свой день.\n"
-        "Что сегодня было светлым?\n"
-        "Какая мысль или жест остались с тобой?\n"
-        f"{hint}"
+        "🪞 Рефлексия сцены.\n"
+        "Сделай мягкий выдох и отметь главное различение.\n"
+        "Один факт • одно чувство • одно решение."
     )
     await message.answer(text)
