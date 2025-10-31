@@ -1,3 +1,4 @@
+# app/main.py
 from __future__ import annotations
 
 import asyncio
@@ -30,7 +31,7 @@ START_TS = time.time()
 def _include_optional_routers(_app: FastAPI) -> None:
     """
     Динамически подключаем веб-роутеры (FastAPI).
-    Модули могут отсутствовать — в этом случае просто логируем и продолжаем.
+    Модули могут отсутствовать — логируем и идём дальше.
     """
     router_modules = [
         # === существующие веб-роутеры проекта ===
@@ -85,7 +86,7 @@ def healthz() -> Dict[str, str]:
 @app.get("/status_json")
 def status_json() -> JSONResponse:
     """
-    Тонкий HQ-эндпоинт: используется Render для health и HQ-пульсом для статуса.
+    Тонкий HQ-эндпоинт: используется и Render'ом для health, и HQ-пульсом для статуса.
     Возвращает JSON с базовыми и HQ-полями (status_emoji, focus, note, quote).
     """
     uptime_sec = int(time.time() - START_TS)
@@ -115,10 +116,20 @@ def status_json() -> JSONResponse:
 # ---------- точка входа воркера (aiogram polling)
 
 async def run_worker() -> None:
-    """Aiogram-polling воркер: подключаем все ботовые роутеры (включая сцены)."""
-    from aiogram import Bot, Dispatcher, F
+    """
+    Aiogram-polling воркер: подключаем все ботовые роутеры (включая сцены).
+    Здесь же настраиваем КОМАНДЫ только для приватных чатов.
+    """
+    from aiogram import Bot, Dispatcher
     from aiogram.client.default import DefaultBotProperties
     from aiogram.enums import ParseMode
+    from aiogram.types import (
+        BotCommand,
+        BotCommandScopeAllPrivateChats,
+        BotCommandScopeDefault,
+        BotCommandScopeAllGroupChats,
+        BotCommandScopeAllChatAdministrators,
+    )
 
     token = os.getenv("TG_BOT_TOKEN")
     if not token:
@@ -127,10 +138,26 @@ async def run_worker() -> None:
     bot = Bot(token=token, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
     dp = Dispatcher()
 
-    # === ГЛОБАЛЬНЫЕ ФИЛЬТРЫ: бот «молчит» в группах/каналах ===
-    dp.message.filter(F.chat.type == "private")
-    dp.callback_query.filter(F.message.chat.type == "private")
+    # --- Команды бота: публикуем ТОЛЬКО в приватных чатах
+    private_commands = [
+        BotCommand(command="menu", description="Главное меню"),
+        BotCommand(command="training", description="Тренировка дня"),
+        BotCommand(command="progress", description="Мой прогресс"),
+        BotCommand(command="leader", description="Путь лидера"),
+        BotCommand(command="faq", description="Помощь / FAQ"),
+        BotCommand(command="privacy", description="Политика"),
+    ]
 
+    # Ставим команды для приватных чатов
+    await bot.set_my_commands(private_commands, scope=BotCommandScopeAllPrivateChats())
+
+    # А в группах/супергруппах и по умолчанию — очищаем,
+    # чтобы меню и команды не торчали и не провоцировали «шум»
+    await bot.delete_my_commands(scope=BotCommandScopeAllGroupChats())
+    await bot.delete_my_commands(scope=BotCommandScopeAllChatAdministrators())
+    await bot.delete_my_commands(scope=BotCommandScopeDefault())
+
+    # --- Подключаем роутеры
     modules = [
         # === существующие хендлеры ===
         "app.routers.faq",
@@ -181,6 +208,7 @@ if __name__ == "__main__":
     else:
         # локальный запуск: uvicorn app.main:app --reload
         import uvicorn
+
         uvicorn.run(
             "app.main:app",
             host=os.getenv("HOST", "0.0.0.0"),
