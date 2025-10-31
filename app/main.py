@@ -5,7 +5,7 @@ import importlib
 import logging
 import os
 import time
-from typing import Any, Dict
+from typing import Any, Dict, Iterable
 
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse
@@ -28,12 +28,8 @@ START_TS = time.time()
 
 
 def _include_optional_routers(_app: FastAPI) -> None:
-    """
-    Динамически подключаем веб-роутеры (FastAPI).
-    Модули могут отсутствовать — в этом случае просто логируем и продолжаем.
-    """
+    """Подключаем веб-роутеры, если они есть в проекте."""
     router_modules = [
-        # === существующие веб-роутеры проекта ===
         "app.routers.faq",
         "app.routers.devops_sync",
         "app.routers.hq",
@@ -52,7 +48,7 @@ def _include_optional_routers(_app: FastAPI) -> None:
         "app.routers.apply",
         # "app.routers.diag",
 
-        # === ВНУТРЕННЯЯ СЦЕНА (если есть)
+        # внутренняя сцена (если есть)
         "app.scene.intro",
         "app.scene.reflect",
         "app.scene.transition",
@@ -70,7 +66,6 @@ def _include_optional_routers(_app: FastAPI) -> None:
             log.warning("router skipped: %s (%s)", mod_name, e)
 
 
-# Подключаем, если доступны
 _include_optional_routers(app)
 
 
@@ -78,23 +73,17 @@ _include_optional_routers(app)
 
 @app.get("/healthz")
 def healthz() -> Dict[str, str]:
-    """Лёгкий endpoint для Render Health Check"""
     return {"status": "ok"}
 
 
 @app.get("/status_json")
 def status_json() -> JSONResponse:
-    """
-    Тонкий HQ-эндпоинт: используется и Render'ом для health, и HQ-пульсом для статуса.
-    Возвращает JSON с базовыми и HQ-полями (status_emoji, focus, note, quote).
-    """
     uptime_sec = int(time.time() - START_TS)
     h, rem = divmod(uptime_sec, 3600)
     m, _ = divmod(rem, 60)
     uptime_str = f"{h}h {m}m"
 
     payload = {
-        # системные поля
         "env": os.getenv("ENV", "staging"),
         "mode": os.getenv("MODE", "web"),
         "service": "web",
@@ -102,7 +91,7 @@ def status_json() -> JSONResponse:
         "sha": os.getenv("RENDER_GIT_COMMIT", "manual"),
         "uptime": uptime_str,
 
-        # HQ-поля — читаются скриптом tools/make_hq_pulse.py
+        # HQ-поля
         "status_emoji": os.getenv("HQ_STATUS_EMOJI", "🌞"),
         "status_word": os.getenv("HQ_STATUS_WORD", "Stable"),
         "focus": os.getenv("HQ_STATUS_FOCUS", "Система в ритме дыхания"),
@@ -115,27 +104,32 @@ def status_json() -> JSONResponse:
 # ---------- точка входа воркера (aiogram polling)
 
 async def run_worker() -> None:
-    """Aiogram-polling воркер: подключаем все ботовые роутеры (включая сцены)."""
+    """
+    Aiogram-polling воркер: подключаем все роутеры,
+    вешаем GroupCommandGate для групп.
+    """
     from aiogram import Bot, Dispatcher
     from aiogram.client.default import DefaultBotProperties
     from aiogram.enums import ParseMode
 
+    from app.middlewares.group_gate import GroupCommandGate
+
     token = os.getenv("TG_BOT_TOKEN") or os.getenv("BOT_TOKEN")
     if not token:
-        raise RuntimeError("TG_BOT_TOKEN/BOT_TOKEN is not set")
+        raise RuntimeError("TG_BOT_TOKEN (или BOT_TOKEN) is not set")
 
     bot = Bot(token=token, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
     dp = Dispatcher()
 
-    # === МИДЛВАРЬ, запрещающая групповой шум (кроме ALLOW_GROUP_COMMANDS)
-    from app.middlewares.group_gate import GroupGate
-    # на всякий случай ставим на разные уровни:
-    dp.update.outer_middleware(GroupGate())
-    dp.message.middleware(GroupGate())
-    dp.callback_query.middleware(GroupGate())
+    # --- Жёсткая калитка для групп
+    default_whitelist = {"/hq", "/healthz"}
+    env_extra = {c.strip() for c in os.getenv("ALLOW_GROUP_COMMANDS", "").split(",") if c.strip()}
+    allowed = default_whitelist | env_extra
+    dp.message.middleware(GroupCommandGate(allowed))
+    dp.callback_query.middleware(GroupCommandGate(allowed))
 
+    # --- Роутеры бота
     modules = [
-        # === существующие хендлеры ===
         "app.routers.faq",
         "app.routers.devops_sync",
         "app.routers.hq",
@@ -154,7 +148,6 @@ async def run_worker() -> None:
         "app.routers.apply",
         # "app.routers.diag",
 
-        # === ВНУТРЕННЯЯ СЦЕНА (если есть)
         "app.scene.intro",
         "app.scene.reflect",
         "app.scene.transition",
@@ -175,16 +168,14 @@ async def run_worker() -> None:
     await dp.start_polling(bot)
 
 
-# ---------- точка запуска (Render вызывает через entrypoint.sh)
+# ---------- точка запуска
 
 if __name__ == "__main__":
     mode = os.getenv("MODE", "web").lower()
     if mode in ("worker", "polling"):
         asyncio.run(run_worker())
     else:
-        # локальный запуск: uvicorn app.main:app --reload
         import uvicorn
-
         uvicorn.run(
             "app.main:app",
             host=os.getenv("HOST", "0.0.0.0"),
