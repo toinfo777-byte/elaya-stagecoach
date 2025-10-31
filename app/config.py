@@ -1,30 +1,60 @@
 from __future__ import annotations
 import os
-from dataclasses import dataclass
+from pydantic import BaseSettings
 
 
-def _get(name: str, default: str | None = None) -> str:
-    v = os.getenv(name, default)
-    if v is None:
-        raise RuntimeError(f"ENV {name} is required")
-    return v
+class Settings(BaseSettings):
+    """
+    Единая конфигурация для всех сервисов Элайи.
+    Работает как на Render, так и локально.
+    """
+
+    # ─────────────────────────────────────────────
+    # Базовые параметры окружения
+    # ─────────────────────────────────────────────
+    ENV: str = os.getenv("ENV", "develop")              # окружение (develop / staging / prod)
+    MODE: str = os.getenv("MODE", "worker")             # режим работы (worker / web)
+    LOG_LEVEL: str = os.getenv("LOG_LEVEL", "INFO")     # уровень логирования
+
+    # ─────────────────────────────────────────────
+    # Telegram
+    # ─────────────────────────────────────────────
+    TG_BOT_TOKEN: str | None = os.getenv("TG_BOT_TOKEN")  # токен HQ-бота
+    BOT_TOKEN: str | None = os.getenv("BOT_TOKEN")        # токен тренера (если используется другой)
+    ADMIN_IDS: str | None = os.getenv("ADMIN_IDS")
+    ADMIN_ALERT_CHAT_ID: str | None = os.getenv("ADMIN_ALERT_CHAT_ID")
+
+    # ─────────────────────────────────────────────
+    # Render API (для /hq /status /sync_status)
+    # ─────────────────────────────────────────────
+    RENDER_API_KEY: str | None = os.getenv("RENDER_API_KEY")
+    RENDER_SERVICE_ID: str | None = os.getenv("RENDER_SERVICE_ID")
+    RENDER_SERVICE_LABELS: str | None = os.getenv("RENDER_SERVICE_LABELS")
+
+    # ─────────────────────────────────────────────
+    # Build / Deploy информация
+    # ─────────────────────────────────────────────
+    BUILD_MARK: str = os.getenv("BUILD_MARK", "manual")
+    BUILD_SHA: str | None = os.getenv("BUILD_SHA")
+
+    # ─────────────────────────────────────────────
+    # Прочие настройки
+    # ─────────────────────────────────────────────
+    LLM_ENABLED: bool = os.getenv("LLM_ENABLED", "false").lower() == "true"
+    LLM_MODEL: str | None = os.getenv("LLM_MODEL")
+    IMAGE_TAG: str | None = os.getenv("IMAGE_TAG")
+
+    # ─────────────────────────────────────────────
+    # Служебные параметры (необязательно)
+    # ─────────────────────────────────────────────
+    HQ_REPORT_DIR: str = os.getenv("HQ_REPORT_DIR", "/tmp")
+    COACH_RATE_SEC: str | None = os.getenv("COACH_RATE_SEC")
+    COACH_TTL_MIN: str | None = os.getenv("COACH_TTL_MIN")
+
+    class Config:
+        env_file = ".env"
+        env_file_encoding = "utf-8"
 
 
-@dataclass(frozen=True)
-class Settings:
-    token: str = _get("TG_BOT_TOKEN")
-    env: str = os.getenv("ENV", "staging")
-    mode: str = os.getenv("MODE", "worker")
-    build_mark: str = os.getenv("BUILD_MARK", "manual")
-
-    render_git_commit: str = os.getenv("RENDER_GIT_COMMIT", "")
-    render_service: str = os.getenv("RENDER_SERVICE_NAME", "")
-    render_instance: str = os.getenv("RENDER_INSTANCE_ID", "")
-    render_region: str = os.getenv("RENDER_REGION", "")
-
-    # Для команды /status
-    render_api_key: str = os.getenv("RENDER_API_KEY", "")
-    render_service_id: str = os.getenv("RENDER_SERVICE_ID", "")
-
-
+# глобальный экземпляр настроек
 settings = Settings()
