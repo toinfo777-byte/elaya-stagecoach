@@ -1,23 +1,57 @@
-import os, time
-from fastapi import APIRouter
+from __future__ import annotations
 
-router = APIRouter()
+import os
+from aiogram import Router, types
+from aiogram.filters import Command
 
-_started = time.time()
+router = Router(name="hq")
 
-@router.get("/healthz")
-def healthz():
-    # Простой ответ 200 для Render health check
-    return {"ok": True, "uptime_s": int(time.time() - _started)}
-
-@router.get("/render")
-def render_info():
-    # Полезные переменные от Render (если есть)
+def _render_info() -> dict:
+    # мягко читаем переменные окружения — если чего-то нет, покажем «–»
     return {
-        "env": os.getenv("ENV"),
-        "mode": os.getenv("MODE"),
-        "build_mark": os.getenv("BUILD_MARK"),
-        "render_git_commit": os.getenv("RENDER_GIT_COMMIT"),
-        "render_service_id": os.getenv("RENDER_SERVICE_ID"),
-        "port": os.getenv("PORT"),
+        "Branch": os.getenv("RENDER_GIT_BRANCH", "–"),
+        "Commit": os.getenv("RENDER_GIT_COMMIT", "–"),
+        "Status": os.getenv("RENDER_SERVICE_STATUS", "–"),
+        "Created": os.getenv("RENDER_SERVICE_CREATED_AT", "–"),
+        "Updated": os.getenv("RENDER_SERVICE_UPDATED_AT", "–"),
     }
+
+@router.message(Command("start"))
+async def cmd_start(m: types.Message):
+    text = (
+        "Привет! Я HQ-бот Элайи.\n\n"
+        "Доступные команды:\n"
+        "• /hq — короткая техническая сводка\n"
+        "• /healthz — проверка доступности\n"
+        "• /menu — показать это меню"
+    )
+    await m.answer(text)
+
+@router.message(Command("menu"))
+async def cmd_menu(m: types.Message):
+    await cmd_start(m)
+
+@router.message(Command("healthz"))
+async def cmd_healthz(m: types.Message):
+    await m.answer("✅ ok")
+
+@router.message(Command("hq"))
+async def cmd_hq(m: types.Message):
+    info = _render_info()
+    lines = [
+        "🧭 <b>Render Build</b>",
+        f"• Branch: {info['Branch']}",
+        f"• Commit: {info['Commit']}",
+        f"• Status: {info['Status']}",
+        f"• Created: {info['Created']}",
+        f"• Updated: {info['Updated']}",
+    ]
+    # Подсказка, если не заведены ключи для Render API
+    missing = []
+    if not os.getenv("RENDER_API_KEY"):
+        missing.append("RENDER_API_KEY")
+    if not os.getenv("RENDER_SERVICE_ID"):
+        missing.append("RENDER_SERVICE_ID")
+    if missing:
+        lines.append(f"\n⚠️ Не настроены {', '.join(missing)}.")
+    await m.answer("\n".join(lines))
