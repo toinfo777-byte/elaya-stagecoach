@@ -53,8 +53,6 @@ def _include_optional_routers(_app: FastAPI) -> None:
         # "app.routers.diag",
 
         # === ВНУТРЕННЯЯ СЦЕНА (новое) ===
-        # Эти файлы создаются в app/scene/*.py, каждый содержит aiogram Router,
-        # но мы подключаем их и к FastAPI, чтобы иметь единый список модулей.
         "app.scene.intro",
         "app.scene.reflect",
         "app.scene.transition",
@@ -87,7 +85,7 @@ def healthz() -> Dict[str, str]:
 @app.get("/status_json")
 def status_json() -> JSONResponse:
     """
-    Тонкий HQ-эндпоинт: используется и Render'ом для health, и HQ-пульсом для статуса.
+    Тонкий HQ-эндпоинт: используется Render для health и HQ-пульсом для статуса.
     Возвращает JSON с базовыми и HQ-полями (status_emoji, focus, note, quote).
     """
     uptime_sec = int(time.time() - START_TS)
@@ -118,7 +116,7 @@ def status_json() -> JSONResponse:
 
 async def run_worker() -> None:
     """Aiogram-polling воркер: подключаем все ботовые роутеры (включая сцены)."""
-    from aiogram import Bot, Dispatcher
+    from aiogram import Bot, Dispatcher, F
     from aiogram.client.default import DefaultBotProperties
     from aiogram.enums import ParseMode
 
@@ -128,6 +126,10 @@ async def run_worker() -> None:
 
     bot = Bot(token=token, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
     dp = Dispatcher()
+
+    # === ГЛОБАЛЬНЫЕ ФИЛЬТРЫ: бот «молчит» в группах/каналах ===
+    dp.message.filter(F.chat.type == "private")
+    dp.callback_query.filter(F.message.chat.type == "private")
 
     modules = [
         # === существующие хендлеры ===
@@ -179,7 +181,6 @@ if __name__ == "__main__":
     else:
         # локальный запуск: uvicorn app.main:app --reload
         import uvicorn
-
         uvicorn.run(
             "app.main:app",
             host=os.getenv("HOST", "0.0.0.0"),
