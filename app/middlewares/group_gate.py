@@ -1,29 +1,60 @@
-import os
+from __future__ import annotations
+
+from typing import Callable, Awaitable, Dict, Any, Iterable
+
 from aiogram import BaseMiddleware
-from aiogram.types import Update, Message, CallbackQuery
+from aiogram.types import Message, CallbackQuery, Chat, ChatType
 
-# список разрешённых групповых команд: "/hq,/healthz"
-ALLOW = {s.strip() for s in os.getenv("ALLOW_GROUP_COMMANDS", "").split(",") if s.strip()}
 
-class GroupGate(BaseMiddleware):
+def _extract_command(m: Message) -> str | None:
     """
-    Режет ВСЕ групповые апдейты, кроме явно разрешённых команд.
-    Работает и для message, и для callback_query (на всякий случай).
+    Возвращает команду в виде '/xxx' без '@username', если она есть в тексте.
+    Работает корректно для /cmd и /cmd@Bot.
     """
-    async def __call__(self, handler, event: Update, data):
-        msg: Message | None = None
-        if isinstance(event, Message):
-            msg = event
-        elif isinstance(event, CallbackQuery):
+    if not m.text or not m.entities:
+        return None
+    for ent in m.entities:
+        if ent.type == "bot_command":
+            raw = m.text[ent.offset : ent.offset + ent.length]
+            return raw.split("@", 1)[0]  # '/menu@Bot' -> '/menu'
+    return None
+
+
+class GroupCommandGate(BaseMiddleware):
+    """
+    Режим: в группах пропускаем только команды из whitelist.
+    Всё остальное — глушим, не передаём хендлерам.
+    В личке — не вмешиваемся.
+    """
+
+    def __init__(self, allowed_commands: Iterable[str]):
+        self.allowed = {c.strip() for c in allowed_commands if c and c.strip()}
+
+    async def __call__(
+        self,
+        handler: Callable[[Message | CallbackQuery, Dict[str, Any]], Awaitable[Any]],
+        event: Message | CallbackQuery,
+        data: Dict[str, Any],
+    ) -> Any:
+        # Нормализуем до Message
+        msg: Message | None
+        if isinstance(event, CallbackQuery):
             msg = event.message
+        elif isinstance(event, Message):
+            msg = event
+        else:
+            msg = None
 
-        if not msg:
+        if msg is None:
             return await handler(event, data)
 
-        chat_type = getattr(msg.chat, "type", "private")
-        if chat_type in ("group", "supergroup"):
-            text = (msg.text or msg.caption or "").strip()
-            # пропускаем только если сообщение начинается с одной из разрешённых команд
-            if not any(text.startswith(cmd) for cmd in ALLOW):
-                return  # молча отсекаем
+        # Фильтруем только группы
+        if msg.chat.type in {ChatType.GROUP, ChatType.SUPERGROUP}:
+            cmd = _extract_command(msg)
+            if cmd and cmd in self.allowed:
+                return await handler(event, data)
+            # Глушим всё остальное (включая /menu, /start и т.п.)
+            return
+
+        # Личные — пропускаем
         return await handler(event, data)
