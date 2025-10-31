@@ -31,7 +31,7 @@ START_TS = time.time()
 def _include_optional_routers(_app: FastAPI) -> None:
     """
     Динамически подключаем веб-роутеры (FastAPI).
-    Модули могут отсутствовать — логируем и идём дальше.
+    Модули могут отсутствовать — просто логируем и идём дальше.
     """
     router_modules = [
         # === существующие веб-роутеры проекта ===
@@ -53,7 +53,7 @@ def _include_optional_routers(_app: FastAPI) -> None:
         "app.routers.apply",
         # "app.routers.diag",
 
-        # === ВНУТРЕННЯЯ СЦЕНА (новое) ===
+        # === внутренняя сцена (если есть) ===
         "app.scene.intro",
         "app.scene.reflect",
         "app.scene.transition",
@@ -73,7 +73,6 @@ def _include_optional_routers(_app: FastAPI) -> None:
 
 # Подключаем, если доступны
 _include_optional_routers(app)
-
 
 # ---------- служебные эндпоинты
 
@@ -112,24 +111,16 @@ def status_json() -> JSONResponse:
     }
     return JSONResponse(payload)
 
-
 # ---------- точка входа воркера (aiogram polling)
 
 async def run_worker() -> None:
-    """
-    Aiogram-polling воркер: подключаем все ботовые роутеры (включая сцены).
-    Здесь же настраиваем КОМАНДЫ только для приватных чатов.
-    """
+    """Aiogram-polling воркер: подключаем все ботовые роутеры (включая сцены)."""
     from aiogram import Bot, Dispatcher
     from aiogram.client.default import DefaultBotProperties
     from aiogram.enums import ParseMode
-    from aiogram.types import (
-        BotCommand,
-        BotCommandScopeAllPrivateChats,
-        BotCommandScopeDefault,
-        BotCommandScopeAllGroupChats,
-        BotCommandScopeAllChatAdministrators,
-    )
+
+    # Глобальный антишум мидлварь
+    from app.middlewares.chat_scope import PrivateOnlyMiddleware
 
     token = os.getenv("TG_BOT_TOKEN")
     if not token:
@@ -138,26 +129,16 @@ async def run_worker() -> None:
     bot = Bot(token=token, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
     dp = Dispatcher()
 
-    # --- Команды бота: публикуем ТОЛЬКО в приватных чатах
-    private_commands = [
-        BotCommand(command="menu", description="Главное меню"),
-        BotCommand(command="training", description="Тренировка дня"),
-        BotCommand(command="progress", description="Мой прогресс"),
-        BotCommand(command="leader", description="Путь лидера"),
-        BotCommand(command="faq", description="Помощь / FAQ"),
-        BotCommand(command="privacy", description="Политика"),
-    ]
+    # ===== Антишум в группах =====
+    # Разрешаем только эти команды в группах (остальное — глушим):
+    allow_raw = os.getenv("ALLOW_GROUP_COMMANDS", "/hq,/healthz")
+    allow_in_groups = [s.strip() for s in allow_raw.split(",") if s.strip()]
+    scope_mw = PrivateOnlyMiddleware(allow_in_groups=allow_in_groups)
 
-    # Ставим команды для приватных чатов
-    await bot.set_my_commands(private_commands, scope=BotCommandScopeAllPrivateChats())
+    dp.message.middleware(scope_mw)
+    dp.callback_query.middleware(scope_mw)
+    # ==============================
 
-    # А в группах/супергруппах и по умолчанию — очищаем,
-    # чтобы меню и команды не торчали и не провоцировали «шум»
-    await bot.delete_my_commands(scope=BotCommandScopeAllGroupChats())
-    await bot.delete_my_commands(scope=BotCommandScopeAllChatAdministrators())
-    await bot.delete_my_commands(scope=BotCommandScopeDefault())
-
-    # --- Подключаем роутеры
     modules = [
         # === существующие хендлеры ===
         "app.routers.faq",
@@ -178,7 +159,7 @@ async def run_worker() -> None:
         "app.routers.apply",
         # "app.routers.diag",
 
-        # === ВНУТРЕННЯЯ СЦЕНА (новое) ===
+        # === внутренняя сцена (если есть) ===
         "app.scene.intro",
         "app.scene.reflect",
         "app.scene.transition",
@@ -197,7 +178,6 @@ async def run_worker() -> None:
 
     log.info("🧭 Start polling…")
     await dp.start_polling(bot)
-
 
 # ---------- точка запуска (Render вызывает через entrypoint.sh)
 
