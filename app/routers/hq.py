@@ -1,57 +1,85 @@
 from __future__ import annotations
-
+import json
 import os
-from aiogram import Router, types
+import textwrap
+from datetime import datetime, timezone
+
+from aiogram import Router, types, F
 from aiogram.filters import Command
 
 router = Router(name="hq")
 
-def _render_info() -> dict:
-    # мягко читаем переменные окружения — если чего-то нет, покажем «–»
-    return {
-        "Branch": os.getenv("RENDER_GIT_BRANCH", "–"),
-        "Commit": os.getenv("RENDER_GIT_COMMIT", "–"),
-        "Status": os.getenv("RENDER_SERVICE_STATUS", "–"),
-        "Created": os.getenv("RENDER_SERVICE_CREATED_AT", "–"),
-        "Updated": os.getenv("RENDER_SERVICE_UPDATED_AT", "–"),
-    }
+def _render_services() -> list[tuple[str, str]]:
+    # ENV переменные ты уже заполнил на Render
+    ids = os.getenv("RENDER_SERVICE_ID", "")
+    labels = os.getenv("RENDER_SERVICE_LABELS", "")
+    id_list = [s.strip() for s in ids.split(",") if s.strip()]
+    label_list = [s.strip() for s in labels.split(",") if s.strip()]
+    out = []
+    for i, sid in enumerate(id_list):
+        lbl = label_list[i] if i < len(label_list) else f"service-{i+1}"
+        out.append((lbl, sid))
+    return out
 
-@router.message(Command("start"))
-async def cmd_start(m: types.Message):
-    text = (
-        "Привет! Я HQ-бот Элайи.\n\n"
-        "Доступные команды:\n"
-        "• /hq — короткая техническая сводка\n"
-        "• /healthz — проверка доступности\n"
-        "• /menu — показать это меню"
-    )
-    await m.answer(text)
-
-@router.message(Command("menu"))
-async def cmd_menu(m: types.Message):
-    await cmd_start(m)
+@router.message(Command("ping"))
+async def cmd_ping(msg: types.Message):
+    await msg.reply("pong 🟢")
 
 @router.message(Command("healthz"))
-async def cmd_healthz(m: types.Message):
-    await m.answer("✅ ok")
+async def cmd_healthz(msg: types.Message):
+    await msg.reply("ok ✅")
 
 @router.message(Command("hq"))
-async def cmd_hq(m: types.Message):
-    info = _render_info()
+async def cmd_hq(msg: types.Message):
+    """
+    Короткая тех. сводка по Render-сервисам (по ENV).
+    """
+    services = _render_services()
+    now = datetime.now(timezone.utc).astimezone()
     lines = [
-        "🧭 <b>Render Build</b>",
-        f"• Branch: {info['Branch']}",
-        f"• Commit: {info['Commit']}",
-        f"• Status: {info['Status']}",
-        f"• Created: {info['Created']}",
-        f"• Updated: {info['Updated']}",
+        "🛰 <b>Штабные отчёты</b>",
+        f"<i>{now:%Y-%m-%d %H:%M:%S %Z}</i>",
+        "",
+        "• <b>Render Build</b>",
+        "  Branch: –",
+        "  Commit: –",
+        "  Status: –",
+        "  Created: –",
+        "  Updated: –",
+        "",
+        "• <b>Services</b>",
     ]
-    # Подсказка, если не заведены ключи для Render API
-    missing = []
-    if not os.getenv("RENDER_API_KEY"):
-        missing.append("RENDER_API_KEY")
-    if not os.getenv("RENDER_SERVICE_ID"):
-        missing.append("RENDER_SERVICE_ID")
-    if missing:
-        lines.append(f"\n⚠️ Не настроены {', '.join(missing)}.")
-    await m.answer("\n".join(lines))
+    if services:
+        for lbl, sid in services:
+            lines.append(f"  — {lbl}: <code>{sid}</code>")
+    else:
+        lines.append("  — (не настроены RENDER_SERVICE_ID / RENDER_SERVICE_LABELS)")
+
+    await msg.reply("\n".join(lines))
+
+@router.message(Command("status"))
+async def cmd_status(msg: types.Message):
+    """
+    Плейсхолдер под будущий REST-опрос Render API (когда добавим ключ и клиент).
+    Пока просто отображаем, что ключей нет — чтобы сообщение в группе было читабельным.
+    """
+    api_key = os.getenv("RENDER_API_KEY", "")
+    if not api_key:
+        await msg.reply("⚠️ Не настроены RENDER_API_KEY и RENDER_SERVICE_ID.")
+        # и всё равно отдаём аккуратный блок:
+        await msg.reply(
+            textwrap.dedent(
+                """\
+                <b>Render Build</b>
+                Branch: –
+                Commit: –
+                Status: –
+                Created: –
+                Updated: –
+                """
+            )
+        )
+        return
+
+    # Если добавишь клиент — здесь можно будет реально ходить в Render API.
+    await msg.reply("🔧 API-ключ есть, но клиент ещё не подключён.")
