@@ -1,35 +1,23 @@
 from __future__ import annotations
-
 import os
-from typing import Literal, Optional
+from dataclasses import dataclass
 
+def _get(name: str, default: str | None = None) -> str:
+    v = os.getenv(name, default)
+    if v is None:
+        raise RuntimeError(f"ENV {name} is required")
+    return v
 
-def _env(name: str, default: Optional[str] = None, required: bool = False) -> str:
-    val = os.getenv(name, default)
-    if required and (val is None or val == ""):
-        raise RuntimeError(f"ENV {name} is not set")
-    return val
-
-
+@dataclass(frozen=True)
 class Settings:
-    # Режим запуска (влияет на entrypoint через ENV, но дублируем для логов/поведения)
-    MODE: Literal["worker", "web"] = _env("MODE", "web")
-
-    # Токен бота: ИСПОЛЬЗУЕМ ИМЕННО BOT_TOKEN (по скринам у тебя так)
-    BOT_TOKEN: str = _env("BOT_TOKEN", required=True)
-
-    # Парс-мод по умолчанию — нужен для aiogram.DefaultBotProperties
-    PARSE_MODE: str = _env("PARSE_MODE", "HTML")  # HTML | MarkdownV2
-
-    # Базовый URL веб-сервиса (для линков в HQ-отчёте и т.п.)
-    WEB_BASE_URL: str = _env("WEB_BASE_URL", "http://localhost:8000")
-
-    # Метки билда/деплоя (если Render их прокидывает — используем, иначе safe default)
-    RENDER_GIT_COMMIT: str = os.getenv("RENDER_GIT_COMMIT", "manual")
-    RENDER_SERVICE_NAME: str = os.getenv("RENDER_SERVICE_NAME", "local")
-
-    # Прочие ID чатов/метрики и т.п. — оставь как у тебя заведено:
-    TG_STATUS_CHAT_ID: Optional[str] = os.getenv("TG_STATUS_CHAT_ID")  # не required
-
+    token: str = _get("TG_BOT_TOKEN")
+    env: str = os.getenv("ENV", "staging")
+    mode: str = os.getenv("MODE", "worker")
+    build_mark: str = os.getenv("BUILD_MARK", "manual")
+    # Render envs (если есть — красиво покажем в /hq)
+    render_git_commit: str = os.getenv("RENDER_GIT_COMMIT", "")
+    render_service: str = os.getenv("RENDER_SERVICE_NAME", "")
+    render_instance: str = os.getenv("RENDER_INSTANCE_ID", "")
+    render_region: str = os.getenv("RENDER_REGION", "")
 
 settings = Settings()
