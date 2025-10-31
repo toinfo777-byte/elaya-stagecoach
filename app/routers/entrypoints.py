@@ -1,27 +1,40 @@
-from __future__ import annotations
+import os
+import sys
+import subprocess
+import logging
 
-from aiogram import Router, F
-from aiogram.filters import Command
-from aiogram.enums import ChatType
-from aiogram.types import Message, ReplyKeyboardRemove
+MODE = os.getenv("MODE", "worker").lower()
+ENV = os.getenv("ENV", "develop")
+PORT = os.getenv("PORT", "8000")
 
-router = Router(name="entrypoints")
+logging.basicConfig(level=logging.INFO)
+log = logging.getLogger("entrypoint")
 
-# /start и /menu — ТОЛЬКО в личке
-@router.message(Command("start", "menu"), F.chat.type == ChatType.PRIVATE)
-async def start_menu_private(m: Message) -> None:
-    text = (
-        "Команды и разделы: выбери нужное 🧭\n"
-        "🏅 Тренировка дня — ежедневная рутина 5–15 мин.\n"
-        "📈 Мой прогресс — стрик и эпизоды за 7 дней.\n"
-        "🛰️ Мини-кастинг · 🧭 Путь лидера\n"
-        "❓ Помощь / FAQ · ⚙️ Настройки\n"
-        "🔐 Политика · ⭐️ Расширенная версия"
-    )
-    await m.answer(text, reply_markup=ReplyKeyboardRemove())
+log.info(f"🚀 Starting Elaya container | MODE={MODE} | ENV={ENV}")
 
+try:
+    if MODE == "worker":
+        # режим бота (polling)
+        log.info("🔁 Launching HQ Worker Bot (polling mode)...")
+        subprocess.run([sys.executable, "-m", "app.main"], check=True)
 
-# /healthz — можно везде (для проверки), остальное — отрежет middleware
-@router.message(Command("healthz"))
-async def healthz_cmd(m: Message) -> None:
-    await m.answer("ok ✅")
+    elif MODE == "web":
+        # режим вебхуков / web API
+        log.info(f"🌐 Launching Web server on port {PORT} ...")
+        subprocess.run([
+            "uvicorn", "app.main:fastapi",
+            "--host", "0.0.0.0",
+            "--port", PORT,
+            "--log-level", "info"
+        ], check=True)
+
+    else:
+        log.error(f"❌ Unknown MODE '{MODE}'. Expected 'worker' or 'web'.")
+        sys.exit(1)
+
+except subprocess.CalledProcessError as e:
+    log.error(f"💥 Subprocess exited with error code {e.returncode}")
+    sys.exit(e.returncode)
+except Exception as e:
+    log.exception(f"⚠️ Unexpected exception: {e}")
+    sys.exit(1)
