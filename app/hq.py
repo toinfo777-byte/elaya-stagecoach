@@ -1,9 +1,11 @@
 from __future__ import annotations
 import time
+import aiohttp
 from textwrap import dedent
 from app.config import settings
 
 _started = time.time()
+
 
 def uptime_human() -> str:
     sec = int(time.time() - _started)
@@ -16,6 +18,7 @@ def uptime_human() -> str:
     if m: parts.append(f"{m}m")
     if s or not parts: parts.append(f"{s}s")
     return " ".join(parts)
+
 
 def build_hq_message() -> str:
     lines = [
@@ -38,8 +41,47 @@ def build_hq_message() -> str:
         lines.append("• Render: " + " ".join(render_bits))
 
     lines.append(f"• Uptime: `{uptime_human()}`")
-
-    # Подсказка где искать детальные отчёты (если у тебя есть daily/post-deploy)
     lines.append("• Отчёт: не найден (проверьте daily/post-deploy отчёты)")
 
     return dedent("\n".join(lines))
+
+
+async def get_render_status() -> str:
+    """Возвращает краткий отчёт о последнем билде Render."""
+    if not settings.render_api_key or not settings.render_service_id:
+        return "⚠️ Не настроены RENDER_API_KEY и RENDER_SERVICE_ID."
+
+    url = f"https://api.render.com/v1/services/{settings.render_service_id}/deploys"
+    headers = {"Authorization": f"Bearer {settings.render_api_key}"}
+
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url, headers=headers, timeout=15) as resp:
+                if resp.status != 200:
+                    return f"⚠️ Render API error: {resp.status}"
+                data = await resp.json()
+    except Exception as e:
+        return f"⚠️ Ошибка при запросе Render API: {e}"
+
+    if not data:
+        return "Нет данных о билдах."
+
+    latest = data[0]
+    commit = latest.get("commit", "—")
+    branch = latest.get("branch", "—")
+    status = latest.get("status", "—")
+    created = latest.get("createdAt", "—")
+    updated = latest.get("updatedAt", "—")
+
+    msg = dedent(
+        f"""
+        🧱 **Render Build**
+        • Branch: `{branch}`
+        • Commit: `{commit[:8]}`
+        • Status: `{status}`
+        • Created: `{created}`
+        • Updated: `{updated}`
+        """
+    ).strip()
+
+    return msg
