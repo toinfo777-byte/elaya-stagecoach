@@ -1,4 +1,3 @@
-# app/main.py
 from __future__ import annotations
 
 import asyncio
@@ -31,7 +30,7 @@ START_TS = time.time()
 def _include_optional_routers(_app: FastAPI) -> None:
     """
     Динамически подключаем веб-роутеры (FastAPI).
-    Модули могут отсутствовать — просто логируем и идём дальше.
+    Модули могут отсутствовать — в этом случае просто логируем и продолжаем.
     """
     router_modules = [
         # === существующие веб-роутеры проекта ===
@@ -53,7 +52,7 @@ def _include_optional_routers(_app: FastAPI) -> None:
         "app.routers.apply",
         # "app.routers.diag",
 
-        # === внутренняя сцена (если есть) ===
+        # === ВНУТРЕННЯЯ СЦЕНА (если есть)
         "app.scene.intro",
         "app.scene.reflect",
         "app.scene.transition",
@@ -73,6 +72,7 @@ def _include_optional_routers(_app: FastAPI) -> None:
 
 # Подключаем, если доступны
 _include_optional_routers(app)
+
 
 # ---------- служебные эндпоинты
 
@@ -111,6 +111,7 @@ def status_json() -> JSONResponse:
     }
     return JSONResponse(payload)
 
+
 # ---------- точка входа воркера (aiogram polling)
 
 async def run_worker() -> None:
@@ -119,25 +120,19 @@ async def run_worker() -> None:
     from aiogram.client.default import DefaultBotProperties
     from aiogram.enums import ParseMode
 
-    # Глобальный антишум мидлварь
-    from app.middlewares.chat_scope import PrivateOnlyMiddleware
-
-    token = os.getenv("TG_BOT_TOKEN")
+    token = os.getenv("TG_BOT_TOKEN") or os.getenv("BOT_TOKEN")
     if not token:
-        raise RuntimeError("TG_BOT_TOKEN is not set")
+        raise RuntimeError("TG_BOT_TOKEN/BOT_TOKEN is not set")
 
     bot = Bot(token=token, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
     dp = Dispatcher()
 
-    # ===== Антишум в группах =====
-    # Разрешаем только эти команды в группах (остальное — глушим):
-    allow_raw = os.getenv("ALLOW_GROUP_COMMANDS", "/hq,/healthz")
-    allow_in_groups = [s.strip() for s in allow_raw.split(",") if s.strip()]
-    scope_mw = PrivateOnlyMiddleware(allow_in_groups=allow_in_groups)
-
-    dp.message.middleware(scope_mw)
-    dp.callback_query.middleware(scope_mw)
-    # ==============================
+    # === МИДЛВАРЬ, запрещающая групповой шум (кроме ALLOW_GROUP_COMMANDS)
+    from app.middlewares.group_gate import GroupGate
+    # на всякий случай ставим на разные уровни:
+    dp.update.outer_middleware(GroupGate())
+    dp.message.middleware(GroupGate())
+    dp.callback_query.middleware(GroupGate())
 
     modules = [
         # === существующие хендлеры ===
@@ -159,7 +154,7 @@ async def run_worker() -> None:
         "app.routers.apply",
         # "app.routers.diag",
 
-        # === внутренняя сцена (если есть) ===
+        # === ВНУТРЕННЯЯ СЦЕНА (если есть)
         "app.scene.intro",
         "app.scene.reflect",
         "app.scene.transition",
@@ -178,6 +173,7 @@ async def run_worker() -> None:
 
     log.info("🧭 Start polling…")
     await dp.start_polling(bot)
+
 
 # ---------- точка запуска (Render вызывает через entrypoint.sh)
 
