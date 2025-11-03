@@ -1,113 +1,78 @@
-# app/entrypoint_web.py
 from __future__ import annotations
 
-import asyncio
-import json
 import logging
-import os
-from typing import Optional
+from fastapi import FastAPI, Request
+from fastapi.responses import PlainTextResponse, JSONResponse
 
-from fastapi import FastAPI, Request, HTTPException
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 from aiogram.types import Update
 
-# ⚙️ ваши конфиги
-try:
-    from app.config import settings  # у вас уже есть
-    TG_TOKEN = settings.TG_BOT_TOKEN
-    LOG_LEVEL = getattr(logging, settings.LOG_LEVEL.upper(), logging.INFO)
-except Exception:
-    TG_TOKEN = os.getenv("TG_BOT_TOKEN", "")
-    LOG_LEVEL = getattr(logging, os.getenv("LOG_LEVEL", "INFO").upper(), logging.INFO)
+from app.config import settings
+from app.build import BUILD_MARK, BUILD_SHA
+from app.routers import hq_status
 
-logging.basicConfig(level=LOG_LEVEL, format="%(asctime)s | %(levelname)s | %(name)s | %(message)s")
-log = logging.getLogger("entrypoint_web")
+logging.basicConfig(level=getattr(logging, settings.LOG_LEVEL.upper(), logging.INFO))
+log = logging.getLogger("elaya.web")
 
-# ⬇️ собираем ваши роутеры (оставь то, что реально используете сейчас)
-from app.routers import (
-    cmd_aliases,
-    onboarding,
-    system,
-    help as help_router,
-    minicasting,
-    leader,
-    training,
-    progress,
-    privacy,
-    settings as settings_mod,
-    extended,
-    casting,
-    apply,
-    faq,
-    devops_sync,
-    panic,
+# --- aiogram core
+bot = Bot(
+    token=settings.BOT_TOKEN,
+    default=DefaultBotProperties(parse_mode=ParseMode.HTML),
 )
-
-# наш «универсальный» статус для приват/групп:
-from app.routers.hq_status import router as hq_public_router
-
-
-# --- core objects ---
-app = FastAPI(title="Elaya Webhook")
-bot = Bot(TG_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
 dp = Dispatcher()
+dp.include_router(hq_status.router)
 
-# Подключаем роутеры бота
-dp.include_router(help_router.router)
-dp.include_router(cmd_aliases.router)
-dp.include_router(onboarding.router)
-dp.include_router(system.router)
-dp.include_router(minicasting.router)
-dp.include_router(leader.router)
-dp.include_router(training.router)
-dp.include_router(progress.router)
-dp.include_router(privacy.router)
-dp.include_router(settings_mod.router)
-dp.include_router(extended.router)
-dp.include_router(casting.router)
-dp.include_router(apply.router)
-dp.include_router(faq.router)
-dp.include_router(devops_sync.router)
-dp.include_router(panic.router)
-dp.include_router(hq_public_router)  # наш статус-хендлер
+# --- fastapi app
+app = FastAPI(title="Elaya StageCoach Webhook")
 
-# --- health ---
-@app.get("/healthz")
+@app.get("/healthz", response_class=PlainTextResponse)
 async def healthz():
-    loop = asyncio.get_event_loop()
-    return {"ok": True, "uptime_s": int(loop.time())}
+    return "OK"
 
-# --- webhook ---
-WEBHOOK_PATH = os.getenv("WEBHOOK_PATH", "/tg/webhook")
-WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET")  # опционально
-ALLOWED_UPDATES = json.loads(os.getenv("ALLOWED_UPDATES", '["message"]'))
+@app.get("/")
+async def root():
+    return {
+        "service": "elaya-stagecoach-web",
+        "env": settings.ENV,
+        "mode": settings.MODE,
+        "build": BUILD_SHA or BUILD_MARK,
+    }
 
-@app.post(WEBHOOK_PATH)
-async def tg_webhook(request: Request):
-    # (опционально) проверяем подпись/секрет
-    if WEBHOOK_SECRET:
-        if request.headers.get("X-Telegram-Bot-Api-Secret-Token") != WEBHOOK_SECRET:
-            raise HTTPException(status_code=403, detail="Bad secret")
+@app.post(settings.WEBHOOK_PATH)
+async def telegram_webhook(request: Request):
     data = await request.json()
     update = Update.model_validate(data)
-    await dp.feed_update(bot, update)
-    return {"ok": True}
+    await dp.feed_webhook_update(bot, update)
+    return JSONResponse({"ok": True})
 
-# --- авто-установка webhook (по желанию через env) ---
-@app.on_event("startup")
-async def _set_webhook_on_start():
-    auto = os.getenv("AUTO_SET_WEBHOOK", "0").lower() in {"1", "true", "yes"}
-    base_url = os.getenv("PUBLIC_BASE_URL")  # например: https://elaya-stagecoach-web.onrender.com
-    if not auto or not base_url:
-        log.info("Webhook auto-set skipped (AUTO_SET_WEBHOOK=%s, PUBLIC_BASE_URL=%s)", auto, base_url)
+async def _ensure_webhook():
+    """Ставит/обновляет webhook, если передан PUBLIC_BASE_URL и не выключен AUTO_SET_WEBHOOK."""
+    if not settings.PUBLIC_BASE_URL or not settings.AUTO_SET_WEBHOOK:
+        log.info("Webhook auto-set disabled or no PUBLIC_BASE_URL")
         return
+    url = settings.PUBLIC_BASE_URL.rstrip("/") + settings.WEBHOOK_PATH
+    info = await bot.get_webhook_info()
+    if info.url != url:
+        await bot.set_webhook(url, allowed_updates=["message"])
+        log.info("Webhook set: %s", url)
+    else:
+        log.info("Webhook already set: %s", url)
 
-    url = base_url.rstrip("/") + WEBHOOK_PATH
-    kwargs = {}
-    if WEBHOOK_SECRET:
-        kwargs["secret_token"] = WEBHOOK_SECRET
-    await bot.delete_webhook(drop_pending_updates=True)
-    await bot.set_webhook(url=url, allowed_updates=ALLOWED_UPDATES, **kwargs)
-    log.info("Webhook set to %s (allowed_updates=%s)", url, ALLOWED_UPDATES)
+@app.on_event("startup")
+async def on_startup():
+    log.info(
+        "Starting Elaya web | ENV=%s MODE=%s BUILD=%s",
+        settings.ENV, settings.MODE, BUILD_SHA or BUILD_MARK
+    )
+    await _ensure_webhook()
+
+@app.on_event("shutdown")
+async def on_shutdown():
+    await bot.session.close()
+
+# локальный запуск:  python -m app.entrypoint_web
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run("app.entrypoint_web:app", host="0.0.0.0", port=settings.PORT, reload=False)
