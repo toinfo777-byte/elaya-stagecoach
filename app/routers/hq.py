@@ -1,35 +1,54 @@
 from __future__ import annotations
-import json
+
 import os
 import textwrap
 from datetime import datetime, timezone
+from typing import List, Tuple
 
 from aiogram import Router, types, F
 from aiogram.filters import Command
+from aiogram.enums import ChatType
 
 router = Router(name="hq")
 
-def _render_services() -> list[tuple[str, str]]:
-    # ENV переменные ты уже заполнил на Render
+
+def _render_services() -> List[Tuple[str, str]]:
+    # ENV переменные уже заполнены на Render
     ids = os.getenv("RENDER_SERVICE_ID", "")
     labels = os.getenv("RENDER_SERVICE_LABELS", "")
     id_list = [s.strip() for s in ids.split(",") if s.strip()]
     label_list = [s.strip() for s in labels.split(",") if s.strip()]
-    out = []
+    out: List[Tuple[str, str]] = []
     for i, sid in enumerate(id_list):
         lbl = label_list[i] if i < len(label_list) else f"service-{i+1}"
         out.append((lbl, sid))
     return out
 
-@router.message(Command("ping"))
+
+# --- Команды открыты для private + group/supergroup
+CHAT_SCOPE = {ChatType.PRIVATE, ChatType.GROUP, ChatType.SUPERGROUP}
+
+
+@router.message(
+    Command("ping", ignore_mention=True),
+    F.chat.type.in_(CHAT_SCOPE),
+)
 async def cmd_ping(msg: types.Message):
     await msg.reply("pong 🟢")
 
-@router.message(Command("healthz"))
+
+@router.message(
+    Command("healthz", ignore_mention=True),
+    F.chat.type.in_(CHAT_SCOPE),
+)
 async def cmd_healthz(msg: types.Message):
     await msg.reply("ok ✅")
 
-@router.message(Command("hq"))
+
+@router.message(
+    Command("hq", ignore_mention=True),
+    F.chat.type.in_(CHAT_SCOPE),
+)
 async def cmd_hq(msg: types.Message):
     """
     Короткая тех. сводка по Render-сервисам (по ENV).
@@ -57,7 +76,11 @@ async def cmd_hq(msg: types.Message):
 
     await msg.reply("\n".join(lines))
 
-@router.message(Command("status"))
+
+@router.message(
+    Command("status", ignore_mention=True),
+    F.chat.type.in_(CHAT_SCOPE),
+)
 async def cmd_status(msg: types.Message):
     """
     Плейсхолдер под будущий REST-опрос Render API (когда добавим ключ и клиент).
