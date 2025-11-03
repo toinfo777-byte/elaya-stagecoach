@@ -3,36 +3,33 @@ import sys
 import subprocess
 import logging
 
-MODE = os.getenv("MODE", "worker").lower()
-ENV = os.getenv("ENV", "develop")
-PORT = os.getenv("PORT", "8000")
+MODE = os.getenv("MODE", "web").lower()
+ENV = os.getenv("ENV", "staging")
+PORT = int(os.getenv("PORT", "10000"))
 
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)s | %(message)s")
 log = logging.getLogger("entrypoint")
 
-log.info(f"🚀 Starting Elaya container | MODE={MODE} | ENV={ENV}")
+log.info("🚀 Starting Elaya container | MODE=%s | ENV=%s", MODE, ENV)
 
 try:
-    if MODE == "worker":
-        log.info("🔁 Launching HQ Worker Bot (polling mode)...")
+    if MODE == "web":
+        log.info("🌐 Launching Web server on port %s ...", PORT)
+        # Стартуем uvicorn на объекте FastAPI "app" в модуле app.main
+        subprocess.run(
+            [sys.executable, "-m", "uvicorn", "app.main:app",
+             "--host", "0.0.0.0", "--port", str(PORT)],
+            check=True
+        )
+
+    elif MODE == "worker":
+        log.info("🤖 Launching HQ Worker Bot (polling mode)...")
+        # Внутри app.main есть __main__ со стартом poll’инга (run_app())
         subprocess.run([sys.executable, "-m", "app.main"], check=True)
 
-    elif MODE == "web":
-        log.info(f"🌐 Launching Web server on port {PORT} ...")
-        subprocess.run([
-            "uvicorn", "app.main:fastapi",
-            "--host", "0.0.0.0",
-            "--port", PORT,
-            "--log-level", "info"
-        ], check=True)
-
     else:
-        log.error(f"❌ Unknown MODE '{MODE}'. Expected 'worker' or 'web'.")
-        sys.exit(1)
+        raise RuntimeError(f"Unknown MODE={MODE!r}")
 
 except subprocess.CalledProcessError as e:
-    log.error(f"💥 Subprocess exited with error code {e.returncode}")
-    sys.exit(e.returncode)
-except Exception as e:
-    log.exception(f"⚠️ Unexpected exception: {e}")
-    sys.exit(1)
+    log.error("Subprocess exited with error code %s", e.returncode)
+    raise
