@@ -1,75 +1,66 @@
 from __future__ import annotations
 
-import asyncio
-import logging
+import hmac
 import os
-from typing import Optional
+from hashlib import sha256
+from typing import Any
 
-from fastapi import FastAPI, Request
 from aiogram import Bot, Dispatcher
-from aiogram.client.default import DefaultBotProperties
-from aiogram.enums import ParseMode
 from aiogram.types import Update
+from fastapi import FastAPI, Header, HTTPException, Request
+from fastapi.responses import PlainTextResponse
 
-# подключаем ваши роутеры
-from app.routers import hq_status  # <- этот файл выше
+from app.routers import hq_status  # <-- наш роутер
 
-# ===== базовая конфигурация =====
+BOT_TOKEN = os.environ["BOT_TOKEN"]  # обязательно в переменных окружения
+BASE_URL = os.getenv("WEB_BASE_URL")  # напр.: https://elaya-stagecoach-web.onrender.com
+WEBHOOK_PATH = "/tg/webhook"
+SECRET_TOKEN = os.getenv("WEBHOOK_SECRET", "")  # опционально
 
-BOT_TOKEN = os.environ["HQ_BOT_TOKEN"]  # у вас уже есть в env
-WEBHOOK_BASE = os.getenv("WEBHOOK_URL_BASE")  # напр. https://elaya-stagecoach-web.onrender.com
-WEBHOOK_PATH = os.getenv("WEBHOOK_PATH", "/tg/webhook")
-WEBHOOK_URL = (WEBHOOK_BASE + WEBHOOK_PATH) if WEBHOOK_BASE else None
-
-# Важно: для групповых команд лучше сразу разрешить parse_mode=HTML
-bot = Bot(BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
+bot = Bot(BOT_TOKEN, parse_mode="HTML")
 dp = Dispatcher()
-
-# Подключаем роутеры
 dp.include_router(hq_status.router)
 
-app = FastAPI(title="Elaya Stagecoach — Webhook")
+app = FastAPI(title="Elaya Webhook")
 
-
-@app.get("/healthz")
-async def healthz() -> dict:
-    return {"status": "ok"}
-
+@app.get("/healthz", response_class=PlainTextResponse)
+async def healthz() -> str:
+    return "OK"
 
 @app.on_event("startup")
 async def on_startup() -> None:
-    logging.info("Starting FastAPI + Aiogram (webhook mode)")
-
-    # Установим вебхук только если указан WEBHOOK_URL
-    if WEBHOOK_URL:
-        # Говорим Telegram слать только message-апдейты (вам этого сейчас достаточно)
-        await bot.set_webhook(
-            url=WEBHOOK_URL,
-            allowed_updates=["message"],
-            max_connections=40,
-            drop_pending_updates=False,
-        )
-        logging.info("Webhook set to %s", WEBHOOK_URL)
-    else:
-        logging.warning("WEBHOOK_URL_BASE не задан — webhook не установлен")
-
+    # Ставим вебхук только если BASE_URL задан (в Render — должен быть)
+    if not BASE_URL:
+        return
+    target = f"{BASE_URL}{WEBHOOK_PATH}"
+    await bot.set_webhook(
+        url=target,
+        allowed_updates=["message"],  # нам этого достаточно для /status, /ping
+        secret_token=SECRET_TOKEN or None,
+        drop_pending_updates=True,
+    )
 
 @app.on_event("shutdown")
 async def on_shutdown() -> None:
-    # На Render это не обязательно, но аккуратно снять вебхук полезно.
+    # Отвяжем вебхук корректно (не обязательно)
     try:
         await bot.delete_webhook(drop_pending_updates=False)
-    except Exception:  # noqa: BLE001
+    except Exception:
         pass
-    await bot.session.close()
-
 
 @app.post(WEBHOOK_PATH)
-async def telegram_webhook(request: Request):
-    """
-    Единая точка входа для апдейтов от Telegram.
-    """
-    raw = await request.body()
-    update = Update.model_validate_json(raw)
+async def tg_webhook(
+    request: Request,
+    x_telegram_bot_api_secret_token: str | None = Header(default=None),
+) -> Any:
+    # Если секрет задан — проверяем
+    if SECRET_TOKEN:
+        if not x_telegram_bot_api_secret_token:
+            raise HTTPException(status_code=401, detail="Missing secret")
+        if not hmac.compare_digest(x_telegram_bot_api_secret_token, SECRET_TOKEN):
+            raise HTTPException(status_code=403, detail="Bad secret")
+
+    data = await request.json()
+    update = Update.model_validate(data)
     await dp.feed_update(bot, update)
     return {"ok": True}
