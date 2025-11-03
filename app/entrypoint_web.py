@@ -1,66 +1,53 @@
+# app/entrypoint_web.py
 from __future__ import annotations
 
-import hmac
+import logging
 import os
-from hashlib import sha256
-from typing import Any
+
+from fastapi import FastAPI, Request
+import uvicorn
 
 from aiogram import Bot, Dispatcher
+from aiogram.client.default import DefaultBotProperties
+from aiogram.enums import ParseMode
 from aiogram.types import Update
-from fastapi import FastAPI, Header, HTTPException, Request
-from fastapi.responses import PlainTextResponse
 
-from app.routers import hq_status  # <-- наш роутер
+from app.routers import hq_status  # наш роутер команд
+from app.config import settings  # если нет — замени прямым os.getenv
 
-BOT_TOKEN = os.environ["BOT_TOKEN"]  # обязательно в переменных окружения
-BASE_URL = os.getenv("WEB_BASE_URL")  # напр.: https://elaya-stagecoach-web.onrender.com
-WEBHOOK_PATH = "/tg/webhook"
-SECRET_TOKEN = os.getenv("WEBHOOK_SECRET", "")  # опционально
+logger = logging.getLogger(__name__)
+logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"))
 
-bot = Bot(BOT_TOKEN, parse_mode="HTML")
+# --- FastAPI + Aiogram
+app = FastAPI(title="Elaya Stagecoach Web")
+
+BOT_TOKEN = os.getenv("BOT_TOKEN") or os.getenv("TELEGRAM_TOKEN") or getattr(settings, "telegram_token", None)
+if not BOT_TOKEN:
+    raise RuntimeError("BOT_TOKEN is not set")
+
+bot = Bot(BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
 dp = Dispatcher()
-dp.include_router(hq_status.router)
-
-app = FastAPI(title="Elaya Webhook")
-
-@app.get("/healthz", response_class=PlainTextResponse)
-async def healthz() -> str:
-    return "OK"
+dp.include_router(hq_status.router)  # подключаем команды
 
 @app.on_event("startup")
-async def on_startup() -> None:
-    # Ставим вебхук только если BASE_URL задан (в Render — должен быть)
-    if not BASE_URL:
-        return
-    target = f"{BASE_URL}{WEBHOOK_PATH}"
-    await bot.set_webhook(
-        url=target,
-        allowed_updates=["message"],  # нам этого достаточно для /status, /ping
-        secret_token=SECRET_TOKEN or None,
-        drop_pending_updates=True,
-    )
+async def on_startup():
+    logger.info("Startup: webhook mode (Render)")
+    # на Render мы работаем через webhook, polling НЕ запускаем
 
-@app.on_event("shutdown")
-async def on_shutdown() -> None:
-    # Отвяжем вебхук корректно (не обязательно)
-    try:
-        await bot.delete_webhook(drop_pending_updates=False)
-    except Exception:
-        pass
+@app.get("/healthz")
+async def healthz():
+    return {"status": "ok"}
 
-@app.post(WEBHOOK_PATH)
-async def tg_webhook(
-    request: Request,
-    x_telegram_bot_api_secret_token: str | None = Header(default=None),
-) -> Any:
-    # Если секрет задан — проверяем
-    if SECRET_TOKEN:
-        if not x_telegram_bot_api_secret_token:
-            raise HTTPException(status_code=401, detail="Missing secret")
-        if not hmac.compare_digest(x_telegram_bot_api_secret_token, SECRET_TOKEN):
-            raise HTTPException(status_code=403, detail="Bad secret")
-
+@app.post("/tg/webhook")
+async def telegram_webhook(request: Request):
     data = await request.json()
     update = Update.model_validate(data)
     await dp.feed_update(bot, update)
     return {"ok": True}
+
+def main():
+    port = int(os.getenv("PORT", "10000"))
+    uvicorn.run(app, host="0.0.0.0", port=port, log_level="info")
+
+if __name__ == "__main__":
+    main()
