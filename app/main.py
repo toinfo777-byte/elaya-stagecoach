@@ -1,7 +1,6 @@
 from __future__ import annotations
 import asyncio
 import logging
-import os
 from typing import Optional
 
 from fastapi import FastAPI
@@ -10,12 +9,9 @@ from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 from aiogram.exceptions import TelegramConflictError, TelegramBadRequest
 
-# важное: импортируем настройки ОДИН раз
 from app.config import settings
 from app.build import BUILD_MARK
 
-# Роутеры подключаем ТОЛЬКО в режиме worker
-# чтобы web- приложение не тащило aiogram и не стартовало поллинг случайно.
 dp: Optional[Dispatcher] = None
 bot: Optional[Bot] = None
 
@@ -23,36 +19,34 @@ logging.basicConfig(
     level=getattr(logging, settings.LOG_LEVEL.upper(), logging.INFO),
     format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
 )
-
 logger = logging.getLogger("elaya.main")
 
+# FastAPI-приложение (ВАЖНО: объект называется app)
 app = FastAPI(title="Elaya StageCoach", version=BUILD_MARK)
-
 
 @app.get("/healthz")
 async def healthz():
-    # лёгкий health для Render
-    return {"ok": True, "uptime_s": int(asyncio.get_event_loop().time())}
-
+    # Простой healthcheck для Render
+    loop = asyncio.get_event_loop()
+    return {"ok": True, "uptime_s": int(loop.time())}
 
 async def start_polling() -> None:
     global dp, bot
-    # Явно гасим вебхук, чтобы не было конфликта webhook vs getUpdates
     bot = Bot(
         token=settings.TG_BOT_TOKEN,
         default=DefaultBotProperties(parse_mode=ParseMode.HTML),
     )
     try:
+        # Снимаем вебхук, чтобы не конфликтовал с getUpdates
         try:
             await bot.delete_webhook(drop_pending_updates=True)
             logger.info("Webhook deleted (drop_pending_updates=True).")
         except TelegramBadRequest as e:
-            # если вебхука не было — это ок
-            logger.warning("delete_webhook: %s", e)
+            logger.warning("delete_webhook: %s (ignored)", e)
 
         dp = Dispatcher()
 
-        # РОУТЕРЫ ПОДКЛЮЧАЕМ ЗДЕСЬ, чтобы web не импортировал их
+        # Роутеры подключаем только тут, чтобы web-процесс их не тянул
         from app.routers import (
             entrypoints,
             help as help_router,
@@ -71,9 +65,8 @@ async def start_polling() -> None:
             faq,
             devops_sync,
             panic,
-            hq,  # HQ-репорт/статус
+            hq,
         )
-
         dp.include_router(entrypoints.router)
         dp.include_router(help_router.router)
         dp.include_router(cmd_aliases.router)
@@ -91,24 +84,19 @@ async def start_polling() -> None:
         dp.include_router(faq.router)
         dp.include_router(devops_sync.router)
         dp.include_router(panic.router)
-        dp.include_router(hq.router)  # команды /hq, /status, /healthz (бота)
+        dp.include_router(hq.router)
 
         logger.info(
             "bot router loaded; ENV=%s MODE=%s BUILD=%s",
-            settings.ENV,
-            settings.MODE,
-            BUILD_MARK,
+            settings.ENV, settings.MODE, BUILD_MARK,
         )
-
         await dp.start_polling(bot)
 
     except TelegramConflictError as e:
         logger.error(
-            "TelegramConflictError: %s. "
-            "Скорее всего, запущен второй процесс с тем же токеном.",
+            "TelegramConflictError: %s. Вероятен параллельный процесс с тем же токеном.",
             e,
         )
-        # Спим чуть-чуть, чтобы Render не устроил быструю перезапуск-карусель
         await asyncio.sleep(5)
         raise
     finally:
@@ -117,25 +105,20 @@ async def start_polling() -> None:
         if bot:
             await bot.session.close()
 
-
 def run_app():
     """
-    Точка входа для Render.
-
-    MODE=web    -> поднимаем только FastAPI (никаких импортов aiogram-роутеров)
-    MODE=worker -> запускаем aiogram-поллинг с предварительным delete_webhook
+    Точка входа при запуске как модуля.
+    MODE=web    -> вернём FastAPI app (uvicorn стартует из entrypoint.py)
+    MODE=worker -> запустим aiogram polling
     """
     if settings.MODE.lower() == "web":
-        # Render сам вызовет uvicorn согласно Dockerfile/CMD.
         logger.info("Starting WEB app... ENV=%s MODE=web BUILD=%s", settings.ENV, BUILD_MARK)
-        return app  # для uvicorn:app
+        return app
     elif settings.MODE.lower() == "worker":
         logger.info("Starting BOT polling... ENV=%s MODE=worker BUILD=%s", settings.ENV, BUILD_MARK)
         asyncio.run(start_polling())
     else:
         raise RuntimeError(f"Unknown MODE={settings.MODE!r}")
 
-
-# Если процесс запускается через `python -m app.main` — стартуем согласно MODE
 if __name__ == "__main__":
     run_app()
