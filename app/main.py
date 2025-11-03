@@ -1,4 +1,5 @@
 from __future__ import annotations
+
 import asyncio
 import logging
 from typing import Optional
@@ -15,6 +16,7 @@ from app.build import BUILD_MARK
 dp: Optional[Dispatcher] = None
 bot: Optional[Bot] = None
 
+# Базовая настройка логгера: уровень берём из ENV LOG_LEVEL (например, DEBUG)
 logging.basicConfig(
     level=getattr(logging, settings.LOG_LEVEL.upper(), logging.INFO),
     format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
@@ -23,6 +25,7 @@ logger = logging.getLogger("elaya.main")
 
 # --- FastAPI-приложение (используется Render WEB) ---
 app = FastAPI(title="Elaya StageCoach", version=BUILD_MARK)
+
 
 @app.get("/healthz")
 async def healthz():
@@ -48,7 +51,7 @@ async def start_polling() -> None:
 
         dp = Dispatcher()
 
-        # Подключаем только нужные роутеры (без entrypoints)
+        # Подключаем роутеры
         from app.routers import (
             help as help_router,
             cmd_aliases,
@@ -66,7 +69,8 @@ async def start_polling() -> None:
             faq,
             devops_sync,
             panic,
-            hq,  # HQ-репорт/статус
+            hq,      # HQ-репорт/статус (обновлён: поддержка групп)
+            debug,   # ВРЕМЕННЫЙ лог апдейтов (messages) для отладки
         )
 
         dp.include_router(help_router.router)
@@ -86,13 +90,18 @@ async def start_polling() -> None:
         dp.include_router(devops_sync.router)
         dp.include_router(panic.router)
         dp.include_router(hq.router)
+        dp.include_router(debug.router)  # <-- снять после проверки
 
         logger.info(
-            "bot router loaded; ENV=%s MODE=%s BUILD=%s",
+            "bot routers loaded; ENV=%s MODE=%s BUILD=%s",
             settings.ENV, settings.MODE, BUILD_MARK,
         )
 
-        await dp.start_polling(bot)
+        # Разрешаем все типы апдейтов, которые реально используются подключёнными хендлерами
+        used = dp.resolve_used_update_types()
+        logger.info("allowed_updates=%s", used)
+
+        await dp.start_polling(bot, allowed_updates=used)
 
     except TelegramConflictError as e:
         logger.error(
