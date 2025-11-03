@@ -2,19 +2,21 @@ FROM python:3.12-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    PIP_NO_CACHE_DIR=1 \
-    PYTHONPATH=/app
+    PIP_NO_CACHE_DIR=1
 
 WORKDIR /app
 
 COPY requirements.txt .
-RUN python -m pip install --upgrade pip && pip install --no-cache-dir -r requirements.txt
+RUN pip install -r requirements.txt
 
 COPY app ./app
 COPY entrypoint.py ./entrypoint.py
 
+# Значения можно переопределить в Render → Environment
 ENV ENV=staging \
-    MODE=worker \
+    MODE=web \
+    PORT=10000 \
     BUILD_MARK=manual
 
-CMD ["python", "entrypoint.py"]
+# Старт через entrypoint.py (он сам запустит uvicorn или polling)
+CMD ["python", "-m", "entrypoint"]
