@@ -1,58 +1,39 @@
 from __future__ import annotations
-
 import os
 import textwrap
 from datetime import datetime, timezone
-from typing import List, Tuple
 
-from aiogram import Router, types, F
+from aiogram import Router, F
 from aiogram.filters import Command
-from aiogram.enums import ChatType
+from aiogram.types import Message
 
 router = Router(name="hq")
 
+ALLOWED_CHATS = {"private", "group", "supergroup"}
 
-def _render_services() -> List[Tuple[str, str]]:
-    # ENV переменные уже заполнены на Render
+def _render_services() -> list[tuple[str, str]]:
     ids = os.getenv("RENDER_SERVICE_ID", "")
     labels = os.getenv("RENDER_SERVICE_LABELS", "")
     id_list = [s.strip() for s in ids.split(",") if s.strip()]
     label_list = [s.strip() for s in labels.split(",") if s.strip()]
-    out: List[Tuple[str, str]] = []
+    out = []
     for i, sid in enumerate(id_list):
         lbl = label_list[i] if i < len(label_list) else f"service-{i+1}"
         out.append((lbl, sid))
     return out
 
-
-# --- Команды открыты для private + group/supergroup
-CHAT_SCOPE = {ChatType.PRIVATE, ChatType.GROUP, ChatType.SUPERGROUP}
-
-
-@router.message(
-    Command("ping", ignore_mention=True),
-    F.chat.type.in_(CHAT_SCOPE),
-)
-async def cmd_ping(msg: types.Message):
+# --- базовые пинги (работают в приватах и группах) ---
+@router.message(Command(commands={"ping"}) & F.chat.type.in_(ALLOWED_CHATS))
+async def cmd_ping(msg: Message):
     await msg.reply("pong 🟢")
 
-
-@router.message(
-    Command("healthz", ignore_mention=True),
-    F.chat.type.in_(CHAT_SCOPE),
-)
-async def cmd_healthz(msg: types.Message):
+@router.message(Command(commands={"healthz"}) & F.chat.type.in_(ALLOWED_CHATS))
+async def cmd_healthz(msg: Message):
     await msg.reply("ok ✅")
 
-
-@router.message(
-    Command("hq", ignore_mention=True),
-    F.chat.type.in_(CHAT_SCOPE),
-)
-async def cmd_hq(msg: types.Message):
-    """
-    Короткая тех. сводка по Render-сервисам (по ENV).
-    """
+# --- HQ краткая сводка ---
+@router.message(Command(commands={"hq"}) & F.chat.type.in_(ALLOWED_CHATS))
+async def cmd_hq(msg: Message):
     services = _render_services()
     now = datetime.now(timezone.utc).astimezone()
     lines = [
@@ -73,36 +54,21 @@ async def cmd_hq(msg: types.Message):
             lines.append(f"  — {lbl}: <code>{sid}</code>")
     else:
         lines.append("  — (не настроены RENDER_SERVICE_ID / RENDER_SERVICE_LABELS)")
-
     await msg.reply("\n".join(lines))
 
-
-@router.message(
-    Command("status", ignore_mention=True),
-    F.chat.type.in_(CHAT_SCOPE),
-)
-async def cmd_status(msg: types.Message):
-    """
-    Плейсхолдер под будущий REST-опрос Render API (когда добавим ключ и клиент).
-    Пока просто отображаем, что ключей нет — чтобы сообщение в группе было читабельным.
-    """
+# --- /status (без настоящего Render API пока) ---
+@router.message(Command(commands={"status"}) & F.chat.type.in_(ALLOWED_CHATS))
+async def cmd_status(msg: Message):
     api_key = os.getenv("RENDER_API_KEY", "")
     if not api_key:
         await msg.reply("⚠️ Не настроены RENDER_API_KEY и RENDER_SERVICE_ID.")
-        # и всё равно отдаём аккуратный блок:
-        await msg.reply(
-            textwrap.dedent(
-                """\
-                <b>Render Build</b>
-                Branch: –
-                Commit: –
-                Status: –
-                Created: –
-                Updated: –
-                """
-            )
-        )
+        await msg.reply(textwrap.dedent("""\
+            <b>Render Build</b>
+            Branch: –
+            Commit: –
+            Status: –
+            Created: –
+            Updated: –
+        """))
         return
-
-    # Если добавишь клиент — здесь можно будет реально ходить в Render API.
     await msg.reply("🔧 API-ключ есть, но клиент ещё не подключён.")
