@@ -8,4 +8,4 @@ COPY app ./app
 ENV ENV=staging MODE=web PORT=10000 BUILD_MARK=manual
 EXPOSE 10000
 
-CMD ["python", "-m", "app.entrypoint"]
++ CMD ["uvicorn", "app.entrypoint_web:app", "--host", "0.0.0.0", "--port", "10000"]
