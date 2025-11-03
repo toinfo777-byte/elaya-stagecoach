@@ -1,78 +1,75 @@
 from __future__ import annotations
 
+import asyncio
 import logging
-from fastapi import FastAPI, Request
-from fastapi.responses import PlainTextResponse, JSONResponse
+import os
+from typing import Optional
 
+from fastapi import FastAPI, Request
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 from aiogram.types import Update
 
-from app.config import settings
-from app.build import BUILD_MARK, BUILD_SHA
-from app.routers import hq_status
+# подключаем ваши роутеры
+from app.routers import hq_status  # <- этот файл выше
 
-logging.basicConfig(level=getattr(logging, settings.LOG_LEVEL.upper(), logging.INFO))
-log = logging.getLogger("elaya.web")
+# ===== базовая конфигурация =====
 
-# --- aiogram core
-bot = Bot(
-    token=settings.BOT_TOKEN,
-    default=DefaultBotProperties(parse_mode=ParseMode.HTML),
-)
+BOT_TOKEN = os.environ["HQ_BOT_TOKEN"]  # у вас уже есть в env
+WEBHOOK_BASE = os.getenv("WEBHOOK_URL_BASE")  # напр. https://elaya-stagecoach-web.onrender.com
+WEBHOOK_PATH = os.getenv("WEBHOOK_PATH", "/tg/webhook")
+WEBHOOK_URL = (WEBHOOK_BASE + WEBHOOK_PATH) if WEBHOOK_BASE else None
+
+# Важно: для групповых команд лучше сразу разрешить parse_mode=HTML
+bot = Bot(BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
 dp = Dispatcher()
+
+# Подключаем роутеры
 dp.include_router(hq_status.router)
 
-# --- fastapi app
-app = FastAPI(title="Elaya StageCoach Webhook")
+app = FastAPI(title="Elaya Stagecoach — Webhook")
 
-@app.get("/healthz", response_class=PlainTextResponse)
-async def healthz():
-    return "OK"
 
-@app.get("/")
-async def root():
-    return {
-        "service": "elaya-stagecoach-web",
-        "env": settings.ENV,
-        "mode": settings.MODE,
-        "build": BUILD_SHA or BUILD_MARK,
-    }
+@app.get("/healthz")
+async def healthz() -> dict:
+    return {"status": "ok"}
 
-@app.post(settings.WEBHOOK_PATH)
-async def telegram_webhook(request: Request):
-    data = await request.json()
-    update = Update.model_validate(data)
-    await dp.feed_webhook_update(bot, update)
-    return JSONResponse({"ok": True})
-
-async def _ensure_webhook():
-    """Ставит/обновляет webhook, если передан PUBLIC_BASE_URL и не выключен AUTO_SET_WEBHOOK."""
-    if not settings.PUBLIC_BASE_URL or not settings.AUTO_SET_WEBHOOK:
-        log.info("Webhook auto-set disabled or no PUBLIC_BASE_URL")
-        return
-    url = settings.PUBLIC_BASE_URL.rstrip("/") + settings.WEBHOOK_PATH
-    info = await bot.get_webhook_info()
-    if info.url != url:
-        await bot.set_webhook(url, allowed_updates=["message"])
-        log.info("Webhook set: %s", url)
-    else:
-        log.info("Webhook already set: %s", url)
 
 @app.on_event("startup")
-async def on_startup():
-    log.info(
-        "Starting Elaya web | ENV=%s MODE=%s BUILD=%s",
-        settings.ENV, settings.MODE, BUILD_SHA or BUILD_MARK
-    )
-    await _ensure_webhook()
+async def on_startup() -> None:
+    logging.info("Starting FastAPI + Aiogram (webhook mode)")
+
+    # Установим вебхук только если указан WEBHOOK_URL
+    if WEBHOOK_URL:
+        # Говорим Telegram слать только message-апдейты (вам этого сейчас достаточно)
+        await bot.set_webhook(
+            url=WEBHOOK_URL,
+            allowed_updates=["message"],
+            max_connections=40,
+            drop_pending_updates=False,
+        )
+        logging.info("Webhook set to %s", WEBHOOK_URL)
+    else:
+        logging.warning("WEBHOOK_URL_BASE не задан — webhook не установлен")
+
 
 @app.on_event("shutdown")
-async def on_shutdown():
+async def on_shutdown() -> None:
+    # На Render это не обязательно, но аккуратно снять вебхук полезно.
+    try:
+        await bot.delete_webhook(drop_pending_updates=False)
+    except Exception:  # noqa: BLE001
+        pass
     await bot.session.close()
 
-# локальный запуск:  python -m app.entrypoint_web
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run("app.entrypoint_web:app", host="0.0.0.0", port=settings.PORT, reload=False)
+
+@app.post(WEBHOOK_PATH)
+async def telegram_webhook(request: Request):
+    """
+    Единая точка входа для апдейтов от Telegram.
+    """
+    raw = await request.body()
+    update = Update.model_validate_json(raw)
+    await dp.feed_update(bot, update)
+    return {"ok": True}
