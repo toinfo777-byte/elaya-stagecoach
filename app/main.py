@@ -21,15 +21,17 @@ logging.basicConfig(
 )
 logger = logging.getLogger("elaya.main")
 
-# FastAPI-приложение (ВАЖНО: объект называется app)
+# --- FastAPI-приложение (используется Render WEB) ---
 app = FastAPI(title="Elaya StageCoach", version=BUILD_MARK)
 
 @app.get("/healthz")
 async def healthz():
-    # Простой healthcheck для Render
+    """Простой healthcheck для Render."""
     loop = asyncio.get_event_loop()
     return {"ok": True, "uptime_s": int(loop.time())}
 
+
+# --- Telegram Bot worker ---
 async def start_polling() -> None:
     global dp, bot
     bot = Bot(
@@ -46,9 +48,8 @@ async def start_polling() -> None:
 
         dp = Dispatcher()
 
-        # Роутеры подключаем только тут, чтобы web-процесс их не тянул
+        # Подключаем только нужные роутеры (без entrypoints)
         from app.routers import (
-            entrypoints,
             help as help_router,
             cmd_aliases,
             onboarding,
@@ -65,9 +66,9 @@ async def start_polling() -> None:
             faq,
             devops_sync,
             panic,
-            hq,
+            hq,  # HQ-репорт/статус
         )
-        dp.include_router(entrypoints.router)
+
         dp.include_router(help_router.router)
         dp.include_router(cmd_aliases.router)
         dp.include_router(onboarding.router)
@@ -90,6 +91,7 @@ async def start_polling() -> None:
             "bot router loaded; ENV=%s MODE=%s BUILD=%s",
             settings.ENV, settings.MODE, BUILD_MARK,
         )
+
         await dp.start_polling(bot)
 
     except TelegramConflictError as e:
@@ -105,11 +107,13 @@ async def start_polling() -> None:
         if bot:
             await bot.session.close()
 
+
+# --- Главная точка входа ---
 def run_app():
     """
-    Точка входа при запуске как модуля.
-    MODE=web    -> вернём FastAPI app (uvicorn стартует из entrypoint.py)
-    MODE=worker -> запустим aiogram polling
+    Точка входа для Render.
+    MODE=web    -> запускаем только FastAPI.
+    MODE=worker -> запускаем Telegram polling.
     """
     if settings.MODE.lower() == "web":
         logger.info("Starting WEB app... ENV=%s MODE=web BUILD=%s", settings.ENV, BUILD_MARK)
@@ -119,6 +123,7 @@ def run_app():
         asyncio.run(start_polling())
     else:
         raise RuntimeError(f"Unknown MODE={settings.MODE!r}")
+
 
 if __name__ == "__main__":
     run_app()
