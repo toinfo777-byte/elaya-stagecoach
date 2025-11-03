@@ -3,7 +3,6 @@ import os
 from datetime import datetime, timezone
 
 async def make_nightly_report() -> str:
-    # сюда можно подтягивать реальные метрики, Sentry, Render API и т. п.
     env = os.getenv("ENV", os.getenv("ENVIRONMENT", "unknown"))
     build = os.getenv("BUILD_MARK", os.getenv("RENDER_GIT_COMMIT", "manual"))
 
