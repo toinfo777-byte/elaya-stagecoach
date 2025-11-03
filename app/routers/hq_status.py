@@ -1,34 +1,40 @@
+# app/routers/hq_status.py
 from __future__ import annotations
-import time
+
 import os
-from fastapi import APIRouter
+from datetime import datetime, timezone
 
-try:
-    from app.build import BUILD_MARK
-except Exception:
-    BUILD_MARK = "unknown"
+from aiogram import Router, F
+from aiogram.filters import Command
+from aiogram.types import Message
 
-router = APIRouter()
-_START_TS = time.time()
+router = Router(name="hq-public")
 
-def _uptime_str() -> str:
-    secs = int(time.time() - _START_TS)
-    h, rem = divmod(secs, 3600)
-    m, _ = divmod(rem, 60)
-    return f"{h}h {m}m"
+def _now_str() -> str:
+    return datetime.now(timezone.utc).astimezone().strftime("%Y-%m-%d %H:%M:%S %Z")
 
-def _env(name: str, default: str) -> str:
-    v = os.getenv(name)
-    return v if v and v.strip() else default
+@router.message(Command(commands={"ping"}) & F.chat.type.in_({"private", "group", "supergroup"}))
+async def cmd_ping(msg: Message):
+    await msg.reply(f"pong 🟢  {_now_str()}")
 
-@router.get("/status_json")
-def status_json():
-    return {
-        "status_emoji": _env("HQ_STATUS_EMOJI", "🌞"),
-        "status_word":  _env("HQ_STATUS_WORD",  "Stable"),
-        "build":        _env("HQ_STATUS_BUILD", BUILD_MARK),
-        "uptime":       _uptime_str(),
-        "focus":        _env("HQ_STATUS_FOCUS", "Система в ритме дыхания"),
-        "note":         _env("HQ_STATUS_NOTE",  "Web и Bot синхронны; пульс ровный."),
-        "quote":        _env("HQ_STATUS_QUOTE", "«Ноябрь — дыхание изнутри.»"),
-    }
+@router.message(Command(commands={"status"}) & F.chat.type.in_({"private", "group", "supergroup"}))
+async def cmd_status(msg: Message):
+    env = os.getenv("ENV", os.getenv("ENVIRONMENT", "unknown"))
+    mode = os.getenv("MODE", "webhook")
+    build = os.getenv("BUILD_MARK", os.getenv("RENDER_GIT_COMMIT", "manual"))
+    await msg.reply(
+        "\n".join(
+            [
+                "🧭 <b>HQ Status</b>",
+                f"Env: <code>{env}</code>",
+                f"Mode: <code>{mode}</code>",
+                f"Build: <code>{build}</code>",
+                f"Chat: <code>{msg.chat.type}</code>",
+                f"Time: <code>{_now_str()}</code>",
+            ]
+        )
+    )
+
+@router.message(Command(commands={"hq"}) & F.chat.type.in_({"private", "group", "supergroup"}))
+async def cmd_hq(msg: Message):
+    await msg.reply("Штаб: онлайн. Выбирай команду: /status, /ping.")
