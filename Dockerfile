@@ -18,5 +18,6 @@ ENV ENV=staging \
     PORT=10000 \
     BUILD_MARK=manual
 
-# Старт через entrypoint.py (он сам запустит uvicorn или polling)
-CMD ["python", "-m", "entrypoint"]
+# 🟢 Ключевая правка:
+# Запускаем entrypoint только если RUN_CONTEXT=render
+CMD ["bash", "-c", "if [ \"$RUN_CONTEXT\" = 'render' ]; then python -m entrypoint; else echo 'Skipping bot run (build context detected)'; fi"]
