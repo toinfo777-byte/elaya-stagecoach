@@ -10,7 +10,7 @@ router = Router(name="hq")
 async def cmd_status(msg: Message):
     me = await msg.bot.get_me()
     await msg.answer(
-        "🧭 DevOps-cycle · live\n"
+        "🟢 DevOps-cycle · live\n"
         f"Bot: @{me.username}\n"
         f"Build: <code>{BUILD_MARK}</code>\n"
         "Status: ok ✅"
@@ -20,11 +20,24 @@ async def cmd_status(msg: Message):
 async def cmd_webhookinfo(msg: Message):
     info = await msg.bot.get_webhook_info()
     txt = [
-        f"url: <code>{info.url or '—'}</code>",
-        f"pending: {info.pending_update_count}",
-        f"ip_address: {getattr(info, 'ip_address', '—')}",
-        f"has_cert: {getattr(info, 'has_custom_certificate', False)}",
-        f"max_connections: {getattr(info, 'max_connections', '—')}",
-        f"allowed_updates: {', '.join(info.allowed_updates or []) or '—'}",
+        "🔗 Webhook info",
+        f"url: <code>{info.url or '–'}</code>",
+        f"has_custom_certificate: {info.has_custom_certificate}",
+        f"pending_update_count: {info.pending_update_count}",
+        f"ip_address: {info.ip_address or '–'}",
+        f"allowed_updates: {','.join(info.allowed_updates or []) or '–'}",
     ]
-    await msg.answer("Webhook info:\n" + "\n".join(txt))
+    await msg.answer("\n".join(txt))
+
+@router.message(Command("getme"))
+async def cmd_getme(msg: Message):
+    me = await msg.bot.get_me()
+    await msg.answer(
+        f"id: <code>{me.id}</code>\n"
+        f"username: @{me.username}\n"
+        f"name: {me.full_name}"
+    )
+
+@router.message(Command("build"))
+async def cmd_build(msg: Message):
+    await msg.answer(f"Build: <code>{BUILD_MARK}</code>")
