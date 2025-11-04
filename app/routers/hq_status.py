@@ -1,28 +1,23 @@
-from __future__ import annotations
-
-from aiogram import F, Router
+from aiogram import Router, F
 from aiogram.types import Message
+from aiogram.filters import Command
+from aiogram.utils.markdown import hcode
 
 router = Router()
 
-# ─────────────────────────────────────────────────────────────────────────────
-# ГЛУШИТЕЛЬ: в группах пропускаем ВСЁ, что не начинается с '/' (не команда)
-# ─────────────────────────────────────────────────────────────────────────────
-@router.message(F.chat.type.in_({"group", "supergroup"}) & ~F.text.startswith("/"))
-async def _ignore_non_commands(_: Message) -> None:
-    return
+@router.message(Command("status"))
+async def cmd_status(message: Message):
+    await message.answer("🟢 HQ online: вебхук активен, ядро отвечает.")
 
-
-# Ниже — твои обычные команды. Ничего не менял, только оставил примеры.
-@router.message(F.text.as_("t") & F.text.startswith("/ping"))
-async def cmd_ping(m: Message, t: str) -> None:
-    await m.reply("pong")
-
-@router.message(F.text.as_("t") & F.text.startswith("/status"))
-async def cmd_status(m: Message, t: str) -> None:
-    await m.reply("✅ Я на месте. Webhook online.")
-
-@router.message(F.text.as_("t") & F.text.startswith("/hq"))
-async def cmd_hq(m: Message, t: str) -> None:
-    # тут оставь свою сборку «штабного» блока/клавиатуры
-    await m.reply("Команды и разделы: выбери нужное ⚙️")
+@router.message(Command("webhookinfo"))
+async def cmd_webhookinfo(message: Message):
+    info = await message.bot.get_webhook_info()
+    text = (
+        "🔗 <b>Webhook info</b>\n"
+        f"url: {hcode(info.url or '-')} \n"
+        f"has_custom_certificate: {info.has_custom_certificate}\n"
+        f"pending_update_count: {info.pending_update_count}\n"
+        f"ip_address: {hcode(info.ip_address or '-')}\n"
+        f"allowed_updates: {', '.join(info.allowed_updates or []) or '-'}"
+    )
+    await message.answer(text)
