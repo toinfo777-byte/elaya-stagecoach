@@ -35,71 +35,64 @@ async def healthz():
     loop = asyncio.get_event_loop()
     return {"ok": True, "uptime_s": int(loop.time())}
 
-
 # ---------- Профильные роутеры ----------
 def _include_routers_for_profile(_dp: Dispatcher, profile: str) -> None:
+    # базовые системные
     from app.routers import system, hq
-    # временный дебаг (можно убрать)
-    try:
-        from app.routers import debug
-        _dp.include_router(debug.router)
-    except Exception as e:
-        logger.warning("debug router not loaded: %s", e)
     _dp.include_router(system.router)
     _dp.include_router(hq.router)
 
     profile = (profile or "hq").lower()
     if profile == "trainer":
-        from app.routers import (
-            help as help_router,
-            cmd_aliases,
-            onboarding,
-            minicasting,
-            leader,
-            training,
-            progress,
-            privacy,
-            settings as settings_mod,
-            extended,
-            casting,
-            apply,
-            faq,
-            devops_sync,
-            panic,
-        )
-        _dp.include_router(help_router.router)
-        _dp.include_router(cmd_aliases.router)
-        _dp.include_router(onboarding.router)
-        _dp.include_router(minicasting.router)
-        _dp.include_router(leader.router)
-        _dp.include_router(training.router)
-        _dp.include_router(progress.router)
-        _dp.include_router(privacy.router)
-        _dp.include_router(settings_mod.router)
-        _dp.include_router(extended.router)
-        _dp.include_router(casting.router)
-        _dp.include_router(apply.router)
-        _dp.include_router(faq.router)
-        _dp.include_router(devops_sync.router)
-        _dp.include_router(panic.router)
-    elif profile == "web":
-        pass
-    else:
-        pass
-
+        # при необходимости подключайте остальные тренерские роутеры
+        try:
+            from app.routers import (
+                help as help_router,
+                cmd_aliases,
+                onboarding,
+                minicasting,
+                leader,
+                training,
+                progress,
+                privacy,
+                settings as settings_mod,
+                extended,
+                casting,
+                apply,
+                faq,
+                devops_sync,
+                panic,
+            )
+            _dp.include_router(help_router.router)
+            _dp.include_router(cmd_aliases.router)
+            _dp.include_router(onboarding.router)
+            _dp.include_router(minicasting.router)
+            _dp.include_router(leader.router)
+            _dp.include_router(training.router)
+            _dp.include_router(progress.router)
+            _dp.include_router(privacy.router)
+            _dp.include_router(settings_mod.router)
+            _dp.include_router(extended.router)
+            _dp.include_router(casting.router)
+            _dp.include_router(apply.router)
+            _dp.include_router(faq.router)
+            _dp.include_router(devops_sync.router)
+            _dp.include_router(panic.router)
+        except Exception as e:
+            logger.warning("Trainer routers not loaded: %s", e)
 
 # ---------- WEBHOOK-МОД (MODE=web) ----------
 WEBHOOK_PATH = os.getenv("WEBHOOK_PATH", "/tg/webhook")
-WEBHOOK_BASE = os.getenv("WEBHOOK_BASE", "")          # например: https://elaya-stagecoach-web.onrender.com
-WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET", "")      # любая длинная строка
+WEBHOOK_BASE = os.getenv("WEB_BASE_URL", os.getenv("WEBHOOK_BASE", ""))  # поддержка обоих имён
+WEBHOOK_SECRET = os.getenv("TELEGRAM_WEBHOOK_SECRET", os.getenv("WEBHOOK_SECRET", ""))
 
 async def _web_startup():
     """
     Инициализация бота/диспетчера и установка webhook.
     """
     global dp, bot
-    assert WEBHOOK_BASE, "WEBHOOK_BASE is required in MODE=web"
-    assert WEBHOOK_SECRET, "WEBHOOK_SECRET is required in MODE=web"
+    assert WEBHOOK_BASE, "WEBHOOK_BASE/WEB_BASE_URL is required in MODE=web"
+    assert WEBHOOK_SECRET, "WEBHOOK_SECRET/TELEGRAM_WEBHOOK_SECRET is required in MODE=web"
 
     bot = Bot(
         token=settings.TG_BOT_TOKEN,
@@ -115,22 +108,21 @@ async def _web_startup():
     logger.info("WEB: allowed_updates=%s", used)
 
     full_url = f"{WEBHOOK_BASE.rstrip('/')}{WEBHOOK_PATH}"
-    # Снимем старый, на всякий
+
+    # Снимем старый (на всякий случай)
     try:
         await bot.delete_webhook(drop_pending_updates=True)
     except TelegramBadRequest:
         pass
 
-    # Ставим новый вебхук с секретом (Telegram будет присылать заголовок)
-    await bot.set_webhook(url=full_url, secret_token=WEBHOOK_SECRET)
+    # Новый вебхук с секретом
+    await bot.set_webhook(url=full_url, secret_token=WEBHOOK_SECRET, allowed_updates=used)
     logger.info("Webhook set: %s", full_url)
-
 
 @app.on_event("startup")
 async def _on_startup():
     if settings.MODE.lower() == "web":
         await _web_startup()
-
 
 @app.on_event("shutdown")
 async def _on_shutdown():
@@ -145,7 +137,6 @@ async def _on_shutdown():
     if bot:
         await bot.session.close()
 
-
 @app.post(WEBHOOK_PATH)
 async def tg_webhook(request: Request, x_telegram_bot_api_secret_token: str = Header(None)):
     """
@@ -153,11 +144,14 @@ async def tg_webhook(request: Request, x_telegram_bot_api_secret_token: str = He
     """
     if not WEBHOOK_SECRET or x_telegram_bot_api_secret_token != WEBHOOK_SECRET:
         raise HTTPException(status_code=403, detail="forbidden")
+
     data = await request.json()
+    # временный лог можно оставить на время отладки
+    # print("🔹 UPDATE:", data)
+
     update = Update.model_validate(data)
     await dp.feed_update(bot, update)
     return {"ok": True}
-
 
 # ---------- POLLING-МОД (MODE=worker) ----------
 async def start_polling() -> None:
@@ -216,7 +210,6 @@ async def start_polling() -> None:
         if bot:
             await bot.session.close()
 
-
 # ---------- Точка входа ----------
 def run_app():
     mode = settings.MODE.lower()
@@ -228,7 +221,6 @@ def run_app():
         asyncio.run(start_polling())
     else:
         raise RuntimeError(f"Unknown MODE={settings.MODE!r}")
-
 
 if __name__ == "__main__":
     run_app()
