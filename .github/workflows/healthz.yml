@@ -1,8 +1,13 @@
-name: Ping healthz
+name: healthz
+
 on:
-  workflow_dispatch: {}
+  workflow_dispatch:
+
 jobs:
-  ping:
+  check:
     runs-on: ubuntu-latest
     steps:
-      - run: curl -sS https://elaya-stagecoach-web.onrender.com/healthz && echo
+      - name: Ping /healthz
+        run: |
+          set -e
+          curl -fsS "${{ secrets.STAGECOACH_WEB_URL }}/healthz" | cat
