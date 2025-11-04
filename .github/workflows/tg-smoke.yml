@@ -1,0 +1,28 @@
+name: TG smoke
+
+on:
+  workflow_dispatch:
+    inputs:
+      chat_id:
+        description: "HQ chat id"
+        required: true
+        type: string
+      text:
+        description: "Text"
+        required: false
+        default: "🔍 TG smoke: webhook path alive"
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Send message
+        env:
+          TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          CHAT_ID: ${{ inputs.chat_id }}
+          TEXT: ${{ inputs.text }}
+        run: |
+          curl -sS -X POST "https://api.telegram.org/bot${TOKEN}/sendMessage" \
+            -d chat_id="${CHAT_ID}" \
+            -d text="${TEXT}" \
+            -d parse_mode="HTML" | jq .
