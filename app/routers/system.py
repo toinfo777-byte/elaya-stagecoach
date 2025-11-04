@@ -1,44 +1,35 @@
 from aiogram import Router, F
 from aiogram.types import Message
-from aiogram.filters import Command, CommandStart
+from aiogram.filters import CommandStart, Command
 
 from app.build import BUILD_MARK
-from app.config import settings
 
 router = Router(name="system")
 
 @router.message(CommandStart())
-async def cmd_start(m: Message):
-    await m.answer(
-        "🫶 Привет! Я HQ-бот Элайи.\n"
-        "Доступные быстрые команды:\n"
-        "• /status — состояние ядра\n"
-        "• /healthz — быстрый пинг\n"
-        "• /webhookinfo — информация о вебхуке"
-    )
-
-@router.message(Command("status"))
-async def cmd_status(m: Message):
-    await m.answer(
-        f"🧭 DevOps-cycle\n"
-        f"ENV: <b>{settings.ENV}</b>\n"
-        f"MODE: <b>{settings.MODE}</b>\n"
-        f"BUILD: <code>{BUILD_MARK}</code>"
+async def cmd_start(msg: Message):
+    await msg.answer(
+        "Команды и разделы: выбери нужное 🧭\n\n"
+        "🏋️ Тренировка дня — ежедневная рутина 5–15 мин.\n"
+        "📈 Мой прогресс — стрик и эпизоды за 7 дней.\n"
+        "🎭 Мини-кастинг · 🧭 Путь лидера\n"
+        "🆘 Помощь / FAQ · ⚙️ Настройки\n"
+        "🔐 Политика · ⭐️ Расширенная версия"
     )
 
 @router.message(Command("healthz"))
-async def cmd_healthz(m: Message):
-    await m.answer("✅ ok")
+async def cmd_healthz(msg: Message):
+    await msg.answer("ok")
 
-@router.message(Command("webhookinfo"))
-async def cmd_webhookinfo(m: Message):
-    info = await m.bot.get_webhook_info()
-    txt = (
-        "🔗 <b>Webhook info</b>\n"
-        f"url: <code>{info.url or '-'}</code>\n"
-        f"has_custom_certificate: {info.has_custom_certificate}\n"
-        f"pending_update_count: {info.pending_update_count}\n"
-        f"ip_address: {getattr(info, 'ip_address', '-')}\n"
-        f"allowed_updates: {', '.join(info.allowed_updates or []) or '-'}"
-    )
-    await m.answer(txt)
+@router.message(Command("getme"))
+async def cmd_getme(msg: Message):
+    me = await msg.bot.get_me()
+    await msg.answer(f"id: <code>{me.id}</code>\nusername: @{me.username}\nbuild: <code>{BUILD_MARK}</code>")
+
+# fallback на обычный текст — чтобы проверить, что апдейты доходят
+@router.message(F.text)
+async def echo_hint(msg: Message):
+    # Ничего «не шумим» — только короткая подсказка на прямой текст
+    if msg.text and msg.text.startswith("/"):
+        return
+    await msg.answer("Я здесь. Напиши /start или /status.")
