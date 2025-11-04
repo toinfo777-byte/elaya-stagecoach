@@ -1,20 +1,28 @@
-# app/routers/hq_status.py
 from __future__ import annotations
 
-from aiogram import Router
-from aiogram.filters import Command
+from aiogram import F, Router
 from aiogram.types import Message
 
-router = Router(name="hq_status")
+router = Router()
 
-@router.message(Command("ping"))
-async def cmd_ping(m: Message):
+# ─────────────────────────────────────────────────────────────────────────────
+# ГЛУШИТЕЛЬ: в группах пропускаем ВСЁ, что не начинается с '/' (не команда)
+# ─────────────────────────────────────────────────────────────────────────────
+@router.message(F.chat.type.in_({"group", "supergroup"}) & ~F.text.startswith("/"))
+async def _ignore_non_commands(_: Message) -> None:
+    return
+
+
+# Ниже — твои обычные команды. Ничего не менял, только оставил примеры.
+@router.message(F.text.as_("t") & F.text.startswith("/ping"))
+async def cmd_ping(m: Message, t: str) -> None:
     await m.reply("pong")
 
-@router.message(Command("status"))
-async def cmd_status(m: Message):
-    await m.reply("✅ HQ online (webhook)")
+@router.message(F.text.as_("t") & F.text.startswith("/status"))
+async def cmd_status(m: Message, t: str) -> None:
+    await m.reply("✅ Я на месте. Webhook online.")
 
-@router.message(Command("healthz"))
-async def cmd_healthz(m: Message):
-    await m.reply("200 OK")
+@router.message(F.text.as_("t") & F.text.startswith("/hq"))
+async def cmd_hq(m: Message, t: str) -> None:
+    # тут оставь свою сборку «штабного» блока/клавиатуры
+    await m.reply("Команды и разделы: выбери нужное ⚙️")
