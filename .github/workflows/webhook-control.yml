@@ -18,29 +18,26 @@ jobs:
   run:
     runs-on: ubuntu-latest
     steps:
-      - name: Ensure gh
-        uses: cli/gh-action@v2
-      - name: Act
+      - name: Telegram webhook control
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TG_TOKEN:  ${{ secrets.TELEGRAM_TOKEN }}
+          BOT_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          ACTION: ${{ github.event.inputs.action }}
+          URL: ${{ github.event.inputs.url }}
+          SECRET: ${{ github.event.inputs.secret }}
         run: |
-          case "${{ github.event.inputs.action }}" in
-            get)
-              gh api -X POST "https://api.telegram.org/bot${TG_TOKEN}/getWebhookInfo" -H "Content-Type: application/json" -f '{}' || true
-              ;;
-            set)
-              if [ -z "${{ github.event.inputs.url }}" ]; then
-                echo "url is required for action=set"; exit 1
-              fi
-              gh api -X POST "https://api.telegram.org/bot${TG_TOKEN}/setWebhook" \
-                -F url="${{ github.event.inputs.url }}" \
-                -F secret_token="${{ github.event.inputs.secret }}"
-              ;;
-            delete)
-              gh api -X POST "https://api.telegram.org/bot${TG_TOKEN}/deleteWebhook"
-              ;;
-            *)
-              echo "unknown action"; exit 1
-              ;;
-          esac
+          set -e
+          API="https://api.telegram.org/bot${BOT_TOKEN}"
+          echo "→ Action: $ACTION"
+          
+          if [ "$ACTION" = "get" ]; then
+            curl -s "$API/getWebhookInfo" | jq .
+          elif [ "$ACTION" = "set" ]; then
+            curl -s -X POST "$API/setWebhook" \
+              -d "url=${URL}" \
+              ${SECRET:+-d "secret_token=${SECRET}"} | jq .
+          elif [ "$ACTION" = "delete" ]; then
+            curl -s -X POST "$API/deleteWebhook" | jq .
+          else
+            echo "❌ Unknown action: $ACTION"
+            exit 1
+          fi
