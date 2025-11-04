@@ -1,6 +1,3 @@
-# app/routers/__init__.py
-# Экспортируем подключаемые роутеры, чтобы main мог их импортировать
-from . import system, hq
-
-__all__ = ["system", "hq"]
-
+# просто маркер пакета + удобный импорт
+from . import system  # noqa: F401
+from . import debug   # noqa: F401
