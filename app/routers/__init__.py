@@ -1,3 +1,3 @@
-# просто маркер пакета + удобный импорт
-from . import system  # noqa: F401
-from . import debug   # noqa: F401
+from . import system, hq, debug  # noqa
+
+__all__ = ["system", "hq", "debug"]
