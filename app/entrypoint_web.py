@@ -8,6 +8,7 @@ from fastapi import FastAPI, Request, Response
 from aiogram import Bot, Dispatcher
 from aiogram.types import Update
 from aiogram.enums import ParseMode
+from aiogram.client.default import DefaultBotProperties  # ← важно для 3.7+
 
 # Роутеры проекта
 from app.routers import hq_status  # ← наш файл выше
@@ -32,7 +33,16 @@ SEND_STARTUP_BANNER = os.getenv("SEND_STARTUP_BANNER", "0") == "1"
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("elaya.web")
 
-bot = Bot(BOT_TOKEN, parse_mode=ParseMode.HTML)
+# aiogram 3.7+: parse_mode передаём через DefaultBotProperties
+bot = Bot(
+    BOT_TOKEN,
+    default=DefaultBotProperties(
+        parse_mode=ParseMode.HTML,
+        # при необходимости можно включить:
+        # link_preview_is_disabled=True,
+        # protect_content=False,
+    ),
+)
 dp = Dispatcher()
 
 # Подключаем твои роутеры
@@ -74,7 +84,6 @@ async def on_startup() -> None:
 
     if SEND_STARTUP_BANNER and not DISABLE_TG:
         try:
-            # сюда можно подставить ID твоего HQ-чата/группы (env: HQ_CHAT_ID)
             chat_id = os.getenv("HQ_CHAT_ID")
             if chat_id:
                 text = (
