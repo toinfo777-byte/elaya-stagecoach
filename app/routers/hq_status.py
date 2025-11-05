@@ -1,12 +1,10 @@
 from __future__ import annotations
 
-import os
-from aiogram import Router, F
-from aiogram.types import Message
+from aiogram import Router, types
 from aiogram.filters import Command
 
 from app.config import settings
-from app.core.status_utils import (
+from app.status_utils import (
     build_hq_message,
     uptime_human,
     get_render_status,
@@ -15,72 +13,81 @@ from app.core.status_utils import (
 router = Router(name="hq_status")
 
 
-# /status — короткий пинг “ядро отвечает”
+def _service_bits() -> str:
+    bits: list[str] = []
+    if settings.service_name:
+        bits.append(f"service_name=`{settings.service_name}`")
+    if settings.render_instance:
+        bits.append(f"instance_id=`{settings.render_instance}`")
+    if settings.render_git_commit:
+        bits.append(f"sha=`{settings.render_git_commit[:8]}`")
+    return " ".join(bits)
+
+
 @router.message(Command("status"))
-async def cmd_status(msg: Message) -> None:
-    await msg.answer("🟢 HQ online: вебхук активен, ядро отвечает.")
-
-
-# /webhookinfo — подробная сводка (env/build/uptime/Render)
-@router.message(Command("webhookinfo"))
-async def cmd_webhookinfo(msg: Message) -> None:
-    text = build_hq_message()
-    await msg.answer(text)
-
-
-# /getme — ответ от Telegram API с данными бота
-@router.message(Command("getme"))
-async def cmd_getme(msg: Message) -> None:
-    me = await msg.bot.get_me()
-    await msg.answer(
-        "\n".join(
-            [
-                "🤖 <b>getMe</b>",
-                f"id=<code>{me.id}</code>",
-                f"username=<code>{me.username}</code>",
-                f"name=<code>{me.first_name}</code>",
-            ]
-        )
-    )
-
-
-# /panic — тест аварийной цепочки (Sentry + HQ alert)
-@router.message(Command("panic"))
-async def cmd_panic(msg: Message) -> None:
-    await msg.answer("⚠️ Запускаю тест аварийного оповещения…")
-    # намеренно бросаем исключение, которое поймает middleware/uvicorn
-    raise ValueError("Manual panic test: branch B")
-
-
-# /version — компактная версия/билд-отчёт
-@router.message(Command("version"))
-async def cmd_version(msg: Message) -> None:
-    sha = settings.render_git_commit or settings.build_mark or "manual"
-    sha_short = sha[:8]
-    svc = settings.render_service or os.getenv("RENDER_SERVICE_NAME") or "—"
-    inst = settings.render_instance or os.getenv("RENDER_INSTANCE_ID") or "—"
-    region = settings.render_region or os.getenv("RENDER_REGION") or "—"
-
+async def cmd_status(message: types.Message) -> None:
+    """
+    Краткая HQ-сводка — для ручной проверки в чатах/PM.
+    """
     lines = [
-        "📦 <b>Version</b>",
-        f"env=<code>{settings.env}</code>  mode=<code>{settings.mode}</code>",
-        f"build=<code>{settings.build_mark}</code>  sha=<code>{sha_short}</code>",
-        f"service=<code>{svc}</code>  instance=<code>{inst}</code>  region=<code>{region}</code>",
-        f"uptime=<code>{uptime_human()}</code>",
+        "🛰 <b>Штабной отчёт — Online</b>",
+        f"<code>env={settings.env} build={settings.build_mark}</code>",
     ]
-    await msg.answer("\n".join(lines))
+    sb = _service_bits()
+    if sb:
+        lines.append(sb)
+    lines.append(f"uptime= `{uptime_human()}`")
+
+    await message.answer("\n".join(lines))
 
 
-# /reboot — символическое подтверждение “перезапуска”
-@router.message(Command("reboot"))
-async def cmd_reboot(msg: Message) -> None:
-    # Это не настоящий рестарт Render; мы фиксируем команду и шлём свежий снэпшот.
-    await msg.answer("🔄 HQ restart acknowledged — обновляю сводку…")
-    await msg.answer(build_hq_message())
+@router.message(Command("version"))
+async def cmd_version(message: types.Message) -> None:
+    """
+    Детали версии/окружения + последний билд Render (если токены заданы).
+    """
+    head = [
+        "🧭 <b>Version / Env</b>",
+        f"env=`{settings.env}` mode=`{settings.mode}` build=`{settings.build_mark}`",
+    ]
+    sb = _service_bits()
+    if sb:
+        head.append(sb)
+    head.append(f"uptime=`{uptime_human()}`")
+
+    render = await get_render_status()
+    text = "\n".join(head) + "\n\n" + render
+    await message.answer(text)
 
 
-# /render — краткий статус последнего билда Render (если настроен API)
-@router.message(Command("render"))
-async def cmd_render(msg: Message) -> None:
-    report = await get_render_status()
-    await msg.answer(report)
+@router.message(Command("panic"))
+async def cmd_panic(message: types.Message) -> None:
+    """
+    Тест аварийного оповещения в админ-чат.
+    Отправляет 3 тестовых сообщения в ADMIN_ALERT_CHAT_ID.
+    """
+    admin_chat = settings.admin_alert_chat_id
+    if not admin_chat:
+        await message.answer("⚠️ ADMIN_ALERT_CHAT_ID не настроен — оповещение не отправлено.")
+        return
+
+    await message.answer("⚠️ Запускаю тест аварийного оповещения…")
+
+    base = (
+        "<b>Webhook alert</b>\n"
+        f"env={settings.env} build={settings.build_mark}\n"
+        "ValueError('Manual panic test: branch B')"
+    )
+    # Три коротких сообщения, как в примере
+    for _ in range(3):
+        try:
+            await message.bot.send_message(admin_chat, base)
+        except Exception as e:
+            await message.answer(f"Не удалось отправить в ADMIN_ALERT_CHAT_ID: {e}")
+            break
+
+
+# Необязательная команда, чтобы посмотреть «полную» HQ-сводку из status_utils
+@router.message(Command("hq"))
+async def cmd_hq(message: types.Message) -> None:
+    await message.answer(build_hq_message())
