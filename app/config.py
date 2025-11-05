@@ -16,9 +16,14 @@ class Settings(BaseSettings):
     MODE: str = os.getenv("MODE", "worker")
     LOG_LEVEL: str = os.getenv("LOG_LEVEL", "INFO")
 
+    # Профиль бота: 'hq' | 'trainer'
+    BOT_PROFILE: str = os.getenv("BOT_PROFILE", "hq")
+
     # ───────────────────────────────
     # Telegram
     # ───────────────────────────────
+    # Поддерживаем несколько имён, чтобы не ломать старые окружения
+    TELEGRAM_TOKEN: str | None = os.getenv("TELEGRAM_TOKEN")
     TG_BOT_TOKEN: str | None = os.getenv("TG_BOT_TOKEN")
     BOT_TOKEN: str | None = os.getenv("BOT_TOKEN")
     ADMIN_IDS: str | None = os.getenv("ADMIN_IDS")
