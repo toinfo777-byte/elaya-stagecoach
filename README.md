@@ -6,6 +6,9 @@
 
 <!-- ELAYA_PULSE_LINK -->
 
+[Пульс · 2025-11-05](docs/hq/pulse/2025/11/2025-11-05.md)
+
+
 [Пульс · 2025-11-04](docs/hq/pulse/2025/11/2025-11-04.md)
 
 <!-- HQ_PULSE:START -->
