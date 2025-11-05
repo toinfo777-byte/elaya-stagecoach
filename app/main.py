@@ -92,30 +92,32 @@ async def on_shutdown():
     if bot:
         try:
             await bot.delete_webhook(drop_pending_updates=False)
-        except Exception:
-            pass
-        await bot.session.close()
-        bot = None
-    log.info("Shutdown complete and client session closed.")
-
+        except Exception as e:
+            log.warning(f"delete_webhook failed: {e}")
+        try:
+            await bot.session.close()  # гарантированное закрытие aiohttp
+            log.info("Bot session closed successfully.")
+        except Exception as e:
+            log.warning(f"Bot session close error: {e}")
+        finally:
+            bot = None
+    log.info("Shutdown complete.")
 
 # --------------------------
 # Endpoints
 # --------------------------
+
 @app.get("/", response_class=PlainTextResponse)
 async def root():
     return "Elaya StageCoach web is alive."
-
 
 @app.get("/healthz", response_class=PlainTextResponse)
 async def healthz():
     return "ok"
 
-
 @app.get("/build")
 async def build():
     return JSONResponse({"build": BUILD_MARK, "profile": settings.BOT_PROFILE})
-
 
 @app.post(WEBHOOK_PATH)
 async def tg_webhook(request: Request) -> Response:
@@ -129,4 +131,13 @@ async def tg_webhook(request: Request) -> Response:
         await dp.feed_update(bot, update)
     except Exception as e:
         log.exception(f"update error: {e}")
+    finally:
+        # добавим принудительное закрытие висящих соединений после обработки апдейта
+        if bot and bot.session and bot.session.closed is False:
+            try:
+                await bot.session.close()
+                log.debug("Client session auto-closed after update.")
+            except Exception:
+                pass
+
     return Response(status_code=status.HTTP_200_OK)
