@@ -1,143 +1,196 @@
+# app/main.py
 from __future__ import annotations
 
-import os
 import asyncio
 import logging
+import os
 from typing import Optional
 
-from fastapi import FastAPI, Request, Header, HTTPException
+from fastapi import FastAPI, Request, Response, status
+from fastapi.responses import PlainTextResponse, JSONResponse
+
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
-from aiogram.exceptions import TelegramBadRequest, TelegramConflictError
 from aiogram.types import Update
 
-from app.config import settings
-from app.build import BUILD_MARK
+# опциональные импорты — не обязательны для запуска
+try:
+    from app.build import BUILD_MARK  # метка сборки, если есть
+except Exception:  # pragma: no cover
+    BUILD_MARK = "dev"
 
-dp: Optional[Dispatcher] = None
-bot: Optional[Bot] = None
+try:
+    # инициализация схемы БД, если есть реализация
+    from app.storage.repo import ensure_schema  # type: ignore
+except Exception:  # pragma: no cover
+    async def ensure_schema() -> None:
+        return None
 
-# ---------- Логи ----------
+
+# --------------------------
+# Логирование
+# --------------------------
 logging.basicConfig(
-    level=getattr(logging, settings.LOG_LEVEL.upper(), logging.INFO),
+    level=os.getenv("LOG_LEVEL", "INFO"),
     format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
 )
-logger = logging.getLogger("elaya.main")
+log = logging.getLogger("elaya.main")
 
-# ---------- FastAPI ----------
-app = FastAPI(title="Elaya StageCoach", version=BUILD_MARK)
 
-@app.get("/healthz")
-async def healthz():
-    loop = asyncio.get_event_loop()
-    return {"ok": True, "uptime_s": int(loop.time())}
+# --------------------------
+# Конфиг из окружения
+# --------------------------
+BOT_PROFILE: str = os.getenv("BOT_PROFILE", "hq").strip()
+TELEGRAM_TOKEN: Optional[str] = os.getenv("TELEGRAM_TOKEN")
+BASE_URL: Optional[str] = os.getenv("STAGECOACH_WEB_URL")  # напр., https://elaya-trainer-bot.onrender.com
+WEBHOOK_PATH = "/tg/webhook"
+WEBHOOK_URL: Optional[str] = f"{BASE_URL}{WEBHOOK_PATH}" if BASE_URL else None
 
-# ---------- Профильные роутеры ----------
-def _include_routers_for_profile(_dp: Dispatcher, profile: str) -> None:
-    from app.routers import system, debug  # <— важно: подтягиваем наши роутеры
-    _dp.include_router(system.router)
-    _dp.include_router(debug.router)
 
-    profile = (profile or "hq").lower()
-    if profile == "trainer":
-        # тут позже подключишь остальное
-        pass
+# --------------------------
+# Глобальные объекты
+# --------------------------
+app = FastAPI(title="Elaya StageCoach", version="1.0")
 
-# ---------- WEBHOOK-МОД (MODE=web) ----------
-WEBHOOK_PATH   = os.getenv("WEBHOOK_PATH", "/tg/webhook")
-WEBHOOK_BASE   = os.getenv("WEBHOOK_BASE", "")          # например: https://elaya-stagecoach-web.onrender.com
-WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET", "")        # любая длинная строка
+bot: Optional[Bot] = None
+dp: Optional[Dispatcher] = None
 
-async def _web_startup():
-    """Инициализация бота/диспетчера и установка webhook."""
-    global dp, bot
-    assert WEBHOOK_BASE,   "WEBHOOK_BASE is required in MODE=web"
-    assert WEBHOOK_SECRET, "WEBHOOK_SECRET is required in MODE=web"
+
+# --------------------------
+# Подключение роутеров по профилю
+# --------------------------
+def _safe_include(module_path: str) -> None:
+    """Безопасно заимпортировать модуль и включить его router, если он есть."""
+    global dp
+    if dp is None:
+        return
+    try:
+        module = __import__(module_path, fromlist=["router"])
+        router = getattr(module, "router", None)
+        if router:
+            dp.include_router(router)
+            log.info("Router loaded: %s", module_path)
+        else:
+            log.warning("No `router` in %s — skipped.", module_path)
+    except Exception as e:
+        log.warning("Cannot import %s: %s", module_path, e)
+
+
+def include_profile_routers(profile: str) -> None:
+    """
+    Для hq: системные и штабные.
+    Для trainer: пользовательские (меню/тренировки/прогресс) + системные.
+    """
+    if dp is None:
+        return
+
+    # всегда полезно иметь базовый system
+    _safe_include("app.routers.system")
+
+    if profile == "hq":
+        _safe_include("app.routers.hq")
+        _safe_include("app.routers.debug")
+    else:  # trainer (или любой иной — трактуем как внешний контур)
+        _safe_include("app.routers.menu")
+        _safe_include("app.routers.training")
+        _safe_include("app.routers.progress")
+        # отладочный быстрый пинг (если есть)
+        _safe_include("app.routers.debug")
+
+
+# --------------------------
+# Жизненный цикл
+# --------------------------
+@app.on_event("startup")
+async def on_startup() -> None:
+    global bot, dp
+
+    # инициализируем БД, если есть
+    await ensure_schema()
+
+    if not TELEGRAM_TOKEN:
+        log.error("Env TELEGRAM_TOKEN is not set — bot disabled, web will work.")
+        return
 
     bot = Bot(
-        token=settings.TG_BOT_TOKEN,
+        token=TELEGRAM_TOKEN,
         default=DefaultBotProperties(parse_mode=ParseMode.HTML),
     )
     dp = Dispatcher()
 
-    profile = os.getenv("BOT_PROFILE", "hq")
-    logger.info("WEB: Launching with BOT_PROFILE=%s", profile)
-    _include_routers_for_profile(dp, profile)
-    logger.info("Routers included: %s", [r.name for r in dp.routers])
+    # роутеры под профиль
+    include_profile_routers(BOT_PROFILE)
 
-    used = dp.resolve_used_update_types()
-    logger.info("WEB: allowed_updates=%s", used)
+    # вебхук
+    if WEBHOOK_URL:
+        try:
+            await bot.set_webhook(WEBHOOK_URL, drop_pending_updates=True, allowed_updates=["message"])
+            me = await bot.get_me()
+            log.info("Webhook set for @%s → %s", me.username, WEBHOOK_URL)
+        except Exception as e:  # pragma: no cover
+            log.exception("Failed to set webhook: %s", e)
+    else:
+        log.warning("STAGECOACH_WEB_URL is not set — webhook URL cannot be computed.")
 
-    full_url = f"{WEBHOOK_BASE.rstrip('/')}{WEBHOOK_PATH}"
-    try:
-        await bot.delete_webhook(drop_pending_updates=True)
-    except TelegramBadRequest:
-        pass
+    log.info("Startup complete | profile=%s | build=%s", BOT_PROFILE, BUILD_MARK)
 
-    await bot.set_webhook(url=full_url, secret_token=WEBHOOK_SECRET, allowed_updates=used)
-    logger.info("Webhook set: %s", full_url)
-
-@app.on_event("startup")
-async def _on_startup():
-    if settings.MODE.lower() == "web":
-        await _web_startup()
 
 @app.on_event("shutdown")
-async def _on_shutdown():
-    global dp, bot
+async def on_shutdown() -> None:
     if bot:
         try:
             await bot.delete_webhook(drop_pending_updates=False)
-        except TelegramBadRequest:
+        except Exception:
             pass
-    if dp:
-        await dp.storage.close()
-    if bot:
         await bot.session.close()
+    log.info("Shutdown complete.")
+
+
+# --------------------------
+# HTTP эндпоинты
+# --------------------------
+@app.get("/", response_class=PlainTextResponse)
+async def root() -> str:
+    return "Elaya StageCoach web is alive."
+
+
+@app.get("/healthz", response_class=PlainTextResponse)
+async def healthz() -> str:
+    return "ok"
+
+
+@app.get("/build")
+async def build() -> JSONResponse:
+    return JSONResponse({"build": BUILD_MARK, "profile": BOT_PROFILE})
+
 
 @app.post(WEBHOOK_PATH)
-async def tg_webhook(request: Request, x_telegram_bot_api_secret_token: str = Header(None)):
-    """Точка входа для Telegram. Проверяем секрет, парсим Update и отдаём в aiogram."""
-    if not WEBHOOK_SECRET or x_telegram_bot_api_secret_token != WEBHOOK_SECRET:
-        raise HTTPException(status_code=403, detail="forbidden")
+async def tg_webhook(request: Request) -> Response:
+    """
+    Общая точка входа вебхука Telegram.
+    """
+    global bot, dp
+
+    if bot is None or dp is None:
+        # бот не инициализирован (нет токена)
+        return Response(status_code=status.HTTP_503_SERVICE_UNAVAILABLE)
 
     data = await request.json()
-    logger.info("🔹 UPDATE: %s", data)  # диагностический лог
-    update = Update.model_validate(data)
-    await dp.feed_update(bot, update)
-    return {"ok": True}
-
-# ---------- POLLING-МОД (MODE=worker) ----------
-async def start_polling() -> None:
-    global dp, bot
-    bot = Bot(
-        token=settings.TG_BOT_TOKEN,
-        default=DefaultBotProperties(parse_mode=ParseMode.HTML),
-    )
     try:
-        await bot.delete_webhook(drop_pending_updates=True)
-    except TelegramBadRequest:
-        pass
+        update = Update.model_validate(data)
+        await dp.feed_update(bot, update)
+    except Exception as e:
+        log.exception("Failed to process update: %s | payload=%s", e, data)
+        # Telegram ожидает 200/204, иначе будет ретрайть.
+    return Response(status_code=status.HTTP_200_OK)
 
-    dp = Dispatcher()
-    profile = os.getenv("BOT_PROFILE", "hq")
-    _include_routers_for_profile(dp, profile)
 
-    used = dp.resolve_used_update_types()
-    await dp.start_polling(bot, allowed_updates=used)
+# --------------------------
+# Локальный запуск (опционально)
+# --------------------------
+if __name__ == "__main__":  # pragma: no cover
+    import uvicorn
 
-# ---------- Точка входа ----------
-def run_app():
-    mode = settings.MODE.lower()
-    if mode == "web":
-        logger.info("Starting WEB app... ENV=%s MODE=web BUILD=%s", settings.ENV, BUILD_MARK)
-        return app
-    elif mode == "worker":
-        logger.info("Starting BOT polling... ENV=%s MODE=worker BUILD=%s", settings.ENV, BUILD_MARK)
-        asyncio.run(start_polling())
-    else:
-        raise RuntimeError(f"Unknown MODE={settings.MODE!r}")
-
-if __name__ == "__main__":
-    run_app()
+    # локально удобно дергать http://localhost:8000/healthz
+    uvicorn.run("app.main:app", host="0.0.0.0", port=int(os.getenv("PORT", "8000")), reload=False)
