@@ -1,45 +1,88 @@
-from aiogram import Router
+from __future__ import annotations
+
+import os
+import time
+import random
+from textwrap import dedent
+
+from aiogram import Router, types, Bot
 from aiogram.filters import Command
-from aiogram.types import Message, ReplyKeyboardRemove
 
-from app.build import BUILD_MARK
+router = Router()
 
-router = Router(name="hq")
+_started_at = time.time()
+_last_report_state: dict[str, str] = {}  # анти-дубликат по ключу env:build
+
+
+def _uptime() -> str:
+    sec = int(time.time() - _started_at)
+    d, sec = divmod(sec, 86400)
+    h, sec = divmod(sec, 3600)
+    m, s = divmod(sec, 60)
+    parts = []
+    if d: parts.append(f"{d}d")
+    if h: parts.append(f"{h}h")
+    if m: parts.append(f"{m}m")
+    if s or not parts: parts.append(f"{s}s")
+    return " ".join(parts)
+
+
+def _env() -> str:
+    return os.getenv("ENV") or os.getenv("ENVIRONMENT") or "unknown"
+
+
+def _build() -> str:
+    return os.getenv("BUILD_MARK") or os.getenv("RENDER_GIT_COMMIT") or "manual"
+
+
+def _render_bits() -> str:
+    bits = []
+    for k in ("RENDER_SERVICE_NAME", "RENDER_INSTANCE_ID", "RENDER_REGION"):
+        v = os.getenv(k)
+        if v:
+            key = k.replace("RENDER_", "").lower()
+            bits.append(f"{key}=`{v}`")
+    return " ".join(bits)
+
+
+def build_hq_text(state: str = "Online") -> str:
+    env = _env()
+    build = _build()
+    sha = os.getenv("RENDER_GIT_COMMIT") or ""
+    render = _render_bits()
+
+    lines = [
+        f"🛰 Штабной отчёт — <b>{state}</b>",
+        f"<code>env={env}</code> <code>build={build}</code>",
+    ]
+    if sha:
+        lines.append(f"<code>sha={sha[:8]}</code>")
+    if render:
+        lines.append(render)
+    lines.append(f"uptime=`{_uptime()}`")
+    return dedent("\n".join(lines)).strip()
+
+
+async def send_hq_report(bot: Bot, chat_id: int, state: str) -> None:
+    """Публикуем отчёт только если состояние изменилось."""
+    key = f"{_env()}:{_build()}"
+    prev = _last_report_state.get(key)
+    if prev == state:
+        return
+    _last_report_state[key] = state
+    await bot.send_message(chat_id, build_hq_text(state))
+
 
 @router.message(Command("status"))
-async def cmd_status(msg: Message):
-    me = await msg.bot.get_me()
-    await msg.answer(
-        "🟢 DevOps-cycle · live\n"
-        f"Bot: @{me.username}\n"
-        f"Build: <code>{BUILD_MARK}</code>\n"
-        "Status: ok ✅",
-        reply_markup=ReplyKeyboardRemove()
-    )
+async def cmd_status(m: types.Message) -> None:
+    await m.answer(build_hq_text("Online"))
 
-@router.message(Command("webhookinfo"))
-async def cmd_webhookinfo(msg: Message):
-    info = await msg.bot.get_webhook_info()
-    txt = [
-        "🔗 Webhook info",
-        f"url: <code>{info.url or '–'}</code>",
-        f"has_custom_certificate: {info.has_custom_certificate}",
-        f"pending_update_count: {info.pending_update_count}",
-        f"ip_address: {info.ip_address or '–'}",
-        f"allowed_updates: {','.join(info.allowed_updates or []) or '–'}",
-    ]
-    await msg.answer("\n".join(txt), reply_markup=ReplyKeyboardRemove())
 
-@router.message(Command("getme"))
-async def cmd_getme(msg: Message):
-    me = await msg.bot.get_me()
-    await msg.answer(
-        f"id: <code>{me.id}</code>\n"
-        f"username: @{me.username}\n"
-        f"name: {me.full_name}",
-        reply_markup=ReplyKeyboardRemove()
-    )
-
-@router.message(Command("build"))
-async def cmd_build(msg: Message):
-    await msg.answer(f"Build: <code>{BUILD_MARK}</code>", reply_markup=ReplyKeyboardRemove())
+@router.message(Command("panic"))
+async def cmd_panic(m: types.Message) -> None:
+    """Тест аварийки: шлёт исключение в Sentry и падает."""
+    await m.answer("⚠️ Запускаю тест аварийного оповещения…")
+    # имитируем разные ветки падения
+    if random.choice([True, False]):
+        raise RuntimeError("Manual panic test: branch A")
+    raise ValueError("Manual panic test: branch B")
