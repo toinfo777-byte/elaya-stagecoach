@@ -1,0 +1,81 @@
+name: Daily HQ Pulse
+
+on:
+  schedule:
+    # 23:59 Europe/Moscow = 20:59 UTC
+    - cron: "59 20 * * *"
+  workflow_dispatch: {}
+
+jobs:
+  build-pulse:
+    runs-on: ubuntu-latest
+    env:
+      TZ: Europe/Moscow
+      WEB_URL: ${{ secrets.STAGECOACH_WEB_URL }}
+      TRAINER_URL: ${{ secrets.TRAINER_WEB_URL }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Collect health
+        id: ping
+        run: |
+          set -e
+          # Пинги без падения job, даже если сервис недоступен
+          web_code=$(curl -s -o /dev/null -w "%{http_code}" "${WEB_URL}/healthz" || echo "000")
+          trn_code=$(curl -s -o /dev/null -w "%{http_code}" "${TRAINER_URL}/healthz" || echo "000")
+
+          # Формируем человекочитаемые статусы
+          web_status=$([ "$web_code" = "200" ] && echo "🟢 200 OK" || echo "🔴 ${web_code}")
+          trn_status=$([ "$trn_code" = "200" ] && echo "🟢 200 OK" || echo "🔴 ${trn_code}")
+
+          echo "web_status=$web_status"   >> $GITHUB_OUTPUT
+          echo "trn_status=$trn_status"   >> $GITHUB_OUTPUT
+          echo "web_code=$web_code"       >> $GITHUB_OUTPUT
+          echo "trn_code=$trn_code"       >> $GITHUB_OUTPUT
+          echo "today=$(date +%F)"        >> $GITHUB_OUTPUT
+          echo "now_hm=$(date +'%H:%M')"  >> $GITHUB_OUTPUT
+
+      - name: Generate markdown
+        id: md
+        run: |
+          set -e
+          DATE="${{ steps.ping.outputs.today }}"
+          NOW="${{ steps.ping.outputs.now_hm }}"
+          WEB="${{ steps.ping.outputs.web_status }}"
+          TRN="${{ steps.ping.outputs.trn_status }}"
+
+          mkdir -p docs/hq/pulse
+
+          cat > "docs/hq/pulse/${DATE}.md" <<EOF
+# 🩵 HQ Pulse — ${DATE}
+**Сборка:** staging · scheduled  
+**Время (MSK):** ${NOW}
+
+## 🧭 DevOps-cycle
+**Status:** $( [ "${WEB#* }" = "200" ] && [ "${TRN#* }" = "200" ] && echo "stable ✅" || echo "degraded ⚠️" )
+**Key event:** nightly heartbeat
+
+## 🤖 Bots Status
+| Узел | /healthz |
+|:-----|:---------|
+| Web (Stagecoach) | ${WEB} |
+| Trainer Bot      | ${TRN} |
+
+## Заметки
+- Отчёт сгенерирован GitHub Actions по расписанию (23:59 MSK).
+- Источник проверки — публичные /healthz Render-сервисов.
+
+_Элайя дышит._
+EOF
+
+          # Обновляем «текущий» сводный файл
+          cp "docs/hq/pulse/${DATE}.md" docs/hq/pulse/Elaya_Current_Status_Q4_2025.md
+
+      - name: Commit & push
+        run: |
+          git config user.name  "elaya-hq-bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add docs/hq/pulse/
+          git commit -m "🩵 HQ Pulse: nightly snapshot ($(date +%F))" || echo "Nothing to commit"
+          git push
