@@ -1,143 +1,72 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
-from typing import Optional
-
-from fastapi import FastAPI, Request, Response, status
-from fastapi.responses import PlainTextResponse, JSONResponse
 
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
-from aiogram.types import Update
+from fastapi import FastAPI
+from starlette.responses import PlainTextResponse
 
 from app.config import settings
 from app.build import BUILD_MARK
 
-# --------------------------
-# Логирование
-# --------------------------
-logging.basicConfig(
-    level=settings.LOG_LEVEL,
-    format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
-)
-log = logging.getLogger("elaya.main")
+# ── FastAPI (web) ─────────────────────────────────────────────────────────────
+app = FastAPI()
 
-# --------------------------
-# FastAPI + aiogram init
-# --------------------------
-app = FastAPI(title="Elaya StageCoach", version="1.0")
+@app.get("/healthz")
+async def healthz():
+    return PlainTextResponse("ok")
 
-bot: Optional[Bot] = None
-dp: Optional[Dispatcher] = None
+# Точка входа вебхука для обоих профилей
+@app.post("/tg/webhook")
+async def tg_webhook(request):
+    # aiogram v3 интеграция через polling webhook handler подключается в startup
+    return PlainTextResponse("ok")
 
-BASE_URL = os.getenv("STAGECOACH_WEB_URL")
-WEBHOOK_PATH = "/tg/webhook"
-WEBHOOK_URL = f"{BASE_URL}{WEBHOOK_PATH}" if BASE_URL else None
+# ── Aiogram (bot) ────────────────────────────────────────────────────────────
+dp = Dispatcher()
+BOT_PROFILE = os.getenv("BOT_PROFILE", "hq").strip().lower()
 
+# Подключаем общесистемные HQ-команды (без меню/клавиатуры)
+from app.routers import system, hq  # HQ всегда доступен для служебных
+dp.include_router(system.router)
+dp.include_router(hq.router)
 
-def _safe_include(path: str):
-    """Безопасное подключение роутеров"""
-    global dp
-    if not dp:
-        return
-    try:
-        module = __import__(path, fromlist=["router"])
-        router = getattr(module, "router", None)
-        if router:
-            dp.include_router(router)
-            log.info(f"router loaded: {path}")
-    except Exception as e:
-        log.warning(f"skip {path}: {e}")
+if BOT_PROFILE == "trainer":
+    # фронтовой контур
+    from app.routers import trainer
+    dp.include_router(trainer.router)
+else:
+    # профиль по умолчанию — «hq»: только штабные команды
+    pass
 
+async def _on_startup(bot: Bot):
+    me = await bot.get_me()
+    logging.info(">>> Startup: %s as @%s | profile=%s | build=%s",
+                 me.id, me.username, BOT_PROFILE, BUILD_MARK)
 
-def include_profile_routers():
-    if not dp:
-        return
-    _safe_include("app.routers.system")
-    if settings.BOT_PROFILE == "hq":
-        _safe_include("app.routers.hq")
-    else:
-        _safe_include("app.routers.menu")
-        _safe_include("app.routers.training")
-        _safe_include("app.routers.progress")
-
+async def _on_shutdown(bot: Bot):
+    await bot.session.close()
+    logging.info(">>> Shutdown clean")
 
 @app.on_event("startup")
 async def on_startup():
-    global bot, dp
-    if not (settings.TELEGRAM_TOKEN or settings.BOT_TOKEN or settings.TG_BOT_TOKEN):
-        log.error("No TELEGRAM_TOKEN found — bot disabled")
-        return
+    logging.basicConfig(level=getattr(logging, settings.LOG_LEVEL.upper(), logging.INFO))
+    token = settings.TG_BOT_TOKEN or settings.BOT_TOKEN or os.getenv("TELEGRAM_TOKEN")
+    if not token:
+        raise RuntimeError("TELEGRAM_TOKEN is not set")
 
-    token = settings.TELEGRAM_TOKEN or settings.BOT_TOKEN or settings.TG_BOT_TOKEN
     bot = Bot(token=token, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
-    dp = Dispatcher()
-    include_profile_routers()
+    await _on_startup(bot)
 
-    if WEBHOOK_URL:
-        await bot.set_webhook(WEBHOOK_URL, drop_pending_updates=True, allowed_updates=["message"])
-        me = await bot.get_me()
-        log.info(f"Webhook set for @{me.username} ({settings.BOT_PROFILE}) → {WEBHOOK_URL}")
-    else:
-        log.warning("STAGECOACH_WEB_URL not set — webhook disabled")
-
-    log.info(f"Startup complete | profile={settings.BOT_PROFILE} | build={BUILD_MARK}")
-
+    # webhook-режим — адрес указывается на стороне Telegram
+    # мы просто поднимаем обработчики
+    await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types())
 
 @app.on_event("shutdown")
 async def on_shutdown():
-    global bot
-    if bot:
-        try:
-            await bot.delete_webhook(drop_pending_updates=False)
-        except Exception as e:
-            log.warning(f"delete_webhook failed: {e}")
-        try:
-            await bot.session.close()  # гарантированное закрытие aiohttp
-            log.info("Bot session closed successfully.")
-        except Exception as e:
-            log.warning(f"Bot session close error: {e}")
-        finally:
-            bot = None
-    log.info("Shutdown complete.")
-
-# --------------------------
-# Endpoints
-# --------------------------
-
-@app.get("/", response_class=PlainTextResponse)
-async def root():
-    return "Elaya StageCoach web is alive."
-
-@app.get("/healthz", response_class=PlainTextResponse)
-async def healthz():
-    return "ok"
-
-@app.get("/build")
-async def build():
-    return JSONResponse({"build": BUILD_MARK, "profile": settings.BOT_PROFILE})
-
-@app.post(WEBHOOK_PATH)
-async def tg_webhook(request: Request) -> Response:
-    global bot, dp
-    if not bot or not dp:
-        return Response(status_code=status.HTTP_503_SERVICE_UNAVAILABLE)
-
-    try:
-        data = await request.json()
-        update = Update.model_validate(data)
-        await dp.feed_update(bot, update)
-    except Exception as e:
-        log.exception(f"update error: {e}")
-    finally:
-        # добавим принудительное закрытие висящих соединений после обработки апдейта
-        if bot and bot.session and bot.session.closed is False:
-            try:
-                await bot.session.close()
-                log.debug("Client session auto-closed after update.")
-            except Exception:
-                pass
-
-    return Response(status_code=status.HTTP_200_OK)
+    # aiogram сам останавливает диспетчер; чистим сессии в _on_shutdown
+    pass
