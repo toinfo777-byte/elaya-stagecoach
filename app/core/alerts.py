@@ -1,4 +1,3 @@
-# app/core/alerts.py
 from __future__ import annotations
 
 import os
@@ -37,7 +36,7 @@ async def _should_send(key: str) -> bool:
         if now - ts < _DEDUP_WINDOW:
             return False
         _last_sent[key] = now
-        # Чистка редкая (ленивая)
+        # Ленивая чистка
         if len(_last_sent) > 256:
             cutoff = now - (_DEDUP_WINDOW * 2)
             for k, v in list(_last_sent.items()):
@@ -55,8 +54,8 @@ async def send_admin_alert(
 ) -> bool:
     """
     Отправляет алерт в админ-чат с дедупликацией.
-    dedup_key по умолчанию = f"{_SOURCE}:{text[:120]}",
-    что отсекает дубли из тренера и веба за окно времени.
+    dedup_key по умолчанию = f"{_SOURCE}:{text[:120]}", —
+    это отсекает дубли из тренера и веба в заданном окне времени.
     """
     key = dedup_key or f"{_SOURCE}:{text[:120]}"
     if not await _should_send(key):
