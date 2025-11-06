@@ -66,5 +66,7 @@ async def send_admin_alert(
     key = dedup_key or f"{_SOURCE}:{text[:120]}"
     if not await _should_send(key):
         return False
-    await bot.send_message(_admin_chat_id(), text, parse_mode=parse_mode)
-    return True
+    if os.getenv("ALERT_SOURCE", "web") == "trainer":
+    return True  # тренер не шлёт в общий чат
+await bot.send_message(_admin_chat_id(), text, parse_mode=parse_mode)
+
