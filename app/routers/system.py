@@ -1,24 +1,23 @@
-from aiogram import Router
-from aiogram.filters import Command
-from aiogram.types import Message, ReplyKeyboardRemove
+# app/routers/system.py
+from __future__ import annotations
 
-from app.build import BUILD_MARK
+from aiogram import Router, types
+from aiogram.filters import CommandStart
+
+from app.config import settings
 
 router = Router(name="system")
 
-@router.message(Command("healthz"))
-async def cmd_healthz(msg: Message):
-    await msg.answer("ok", reply_markup=ReplyKeyboardRemove())
 
-@router.message(Command("help"))
-async def cmd_help(msg: Message):
-    await msg.answer(
-        "HQ:\n"
-        "• /status — статус ядра и билд\n"
-        "• /webhookinfo — параметры вебхука\n"
-        "• /healthz — быстрая проверка\n"
-        "• /build — номер билда\n"
-        "• /getme — инфо о боте\n"
-        f"\nBuild: <code>{BUILD_MARK}</code>",
-        reply_markup=ReplyKeyboardRemove()
-    )
+@router.message(CommandStart())
+async def cmd_start(message: types.Message):
+    if settings.bot_profile == "hq":
+        # Никаких клавиатур — просто лаконичный текст
+        await message.answer(
+            "Привет! Я HQ-бот. Готов принимать команды статуса и оповещений."
+        )
+        return
+
+    # Профиль trainer — показываем меню (как у тебя было)
+    kb = ...  # твоя клавиатура тренера
+    await message.answer("Меню тренировки:", reply_markup=kb)
