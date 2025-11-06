@@ -1,30 +1,36 @@
-# app/config.py
 from __future__ import annotations
+from typing import Optional
 
-import os
+from pydantic_settings import BaseSettings, SettingsConfigDict
 from pydantic import Field
-from pydantic_settings import BaseSettings  # <-- новая правильная импорт-точка
 
 
 class Settings(BaseSettings):
-    env: str = Field(default=os.getenv("ENV", "staging"))
-    build_mark: str = Field(default=os.getenv("BUILD_MARK", "manual"))
+    # базовые
+    env: str = Field(default="staging", alias="ENV")
+    log_level: str = Field(default="INFO", alias="LOG_LEVEL")
+    bot_profile: str = Field(default="hq", alias="BOT_PROFILE")
 
-    bot_profile: str = Field(default=os.getenv("BOT_PROFILE", "hq"))
+    # токены
+    tg_bot_token: Optional[str] = Field(default=None, alias="TELEGRAM_TOKEN")
+    bot_token: Optional[str] = Field(default=None, alias="BOT_TOKEN")
 
-    admin_alert_chat_id: int | None = Field(
-        default=None,
-        description="ID админ-чата (отрицательное значение для групп).",
+    # админ-уведомления
+    admin_alert_chat_id: Optional[int] = Field(default=None, alias="ADMIN_ALERT_CHAT_ID")
+    alert_dedup_window_sec: int = Field(default=15, alias="ALERT_DEDUP_WINDOW_SEC")
+
+    # вебхук (дефолтный путь теперь жестко в роутере, но оставим на будущее)
+    webhook_base: Optional[str] = Field(default=None, alias="WEBHOOK_BASE")
+    webhook_secret: Optional[str] = Field(default=None, alias="WEBHOOK_SECRET")
+
+    # рендер/сборка (для статусов)
+    build_mark: Optional[str] = Field(default=None, alias="BUILD_MARK")
+
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        extra="ignore",           # лишние переменные не падают
+        case_sensitive=False,
     )
-
-    alert_dedup_window_sec: int = Field(
-        default=int(os.getenv("ALERT_DEDUP_WINDOW_SEC", "15"))
-    )
-
-    disable_tg: bool = Field(default=os.getenv("DISABLE_TG", "0") == "1")
-
-    class Config:
-        env_prefix = ""
 
 
 settings = Settings()
