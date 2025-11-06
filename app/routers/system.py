@@ -1,4 +1,3 @@
-# app/routers/system.py
 from __future__ import annotations
 
 from aiogram import Router, types
@@ -8,16 +7,17 @@ from app.config import settings
 
 router = Router(name="system")
 
-
 @router.message(CommandStart())
 async def cmd_start(message: types.Message):
     if settings.bot_profile == "hq":
-        # Никаких клавиатур — просто лаконичный текст
+        # HQ: без клавиатур и меню
         await message.answer(
-            "Привет! Я HQ-бот. Готов принимать команды статуса и оповещений."
+            "Привет! Я HQ-бот. Доступно: /status, /version, /panic."
         )
         return
 
-    # Профиль trainer — показываем меню (как у тебя было)
-    kb = ...  # твоя клавиатура тренера
-    await message.answer("Меню тренировки:", reply_markup=kb)
+    # TRAINER: показываем «фронтовое» меню
+    # (здесь подключай свою реальную клавиатуру)
+    # from app.ui.kb import trainer_menu_kb
+    # await message.answer("Меню тренировки:", reply_markup=trainer_menu_kb())
+    await message.answer("Меню тренировки:", reply_markup=None)  # временная заглушка
