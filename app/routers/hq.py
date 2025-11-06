@@ -2,11 +2,12 @@ from __future__ import annotations
 
 import os
 import time
-import random
 from textwrap import dedent
 
 from aiogram import Router, types, Bot
 from aiogram.filters import Command
+
+from app.core.alerts import send_admin_alert
 
 router = Router()
 
@@ -20,19 +21,15 @@ def _uptime() -> str:
     h, sec = divmod(sec, 3600)
     m, s = divmod(sec, 60)
     parts = []
-    if d:
-        parts.append(f"{d}d")
-    if h:
-        parts.append(f"{h}h")
-    if m:
-        parts.append(f"{m}m")
-    if s or not parts:
-        parts.append(f"{s}s")
+    if d: parts.append(f"{d}d")
+    if h: parts.append(f"{h}h")
+    if m: parts.append(f"{m}m")
+    if s or not parts: parts.append(f"{s}s")
     return " ".join(parts)
 
 
 def _env() -> str:
-    return os.getenv("ENV") or os.getenv("ENVIRONMENT") or "staging"
+    return os.getenv("ENV") or os.getenv("ENVIRONMENT") or "unknown"
 
 
 def _build() -> str:
@@ -67,31 +64,29 @@ def build_hq_text(state: str = "Online") -> str:
     return dedent("\n".join(lines)).strip()
 
 
-async def send_hq_report(bot: Bot, chat_id: int, state: str) -> None:
-    """Публикуем отчёт только если состояние изменилось."""
-    key = f"{_env()}:{_build()}"
-    prev = _last_report_state.get(key)
-    if prev == state:
-        return
-    _last_report_state[key] = state
-    await bot.send_message(chat_id, build_hq_text(state))
-
-
 @router.message(Command("status"))
 async def cmd_status(m: types.Message) -> None:
     await m.answer(build_hq_text("Online"))
 
 
-@router.message(Command("version"))
-async def cmd_version(m: types.Message) -> None:
-    await m.answer(build_hq_text("Version / Env"))
-
-
 @router.message(Command("panic"))
-async def cmd_panic(m: types.Message) -> None:
-    """Тест аварийки: шлёт исключение в Sentry и падает."""
+async def cmd_panic(m: types.Message, bot: Bot) -> None:
+    """
+    Безопасный тест аварийного оповещения.
+    НИЧЕГО не роняем (никаких исключений), поэтому Telegram не ретраит,
+    и спама не будет. Дедуп — на стороне send_admin_alert.
+    """
     await m.answer("⚠️ Запускаю тест аварийного оповещения…")
-    # имитируем разные ветки падения
-    if random.choice([True, False]):
-        raise RuntimeError("Manual panic test: branch A")
-    raise ValueError("Manual panic test: branch B")
+
+    env = _env()
+    build = _build()
+    text = (
+        "<b>Emergency alert</b>\n"
+        f"env={env} build={build}\n"
+        "Manual panic test"
+    )
+    await send_admin_alert(
+        bot,
+        text,
+        dedup_key=f"panic:{env}:{build}",
+    )
