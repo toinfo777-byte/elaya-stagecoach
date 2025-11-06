@@ -4,21 +4,26 @@ import os
 import time
 import asyncio
 from typing import Optional
+
 from aiogram import Bot
 
+# Куда слать алерты
 _ADMIN_CHAT_ID: Optional[int] = None
+# Окно дедупликации (сек)
 _DEDUP_WINDOW = max(1, int(os.getenv("ALERT_DEDUP_WINDOW_SEC", "15")))
-_SOURCE = os.getenv("ALERT_SOURCE", "web")  # 'web' или 'bot'
+# Маркер источника (web|bot|trainer)
+_SOURCE = os.getenv("ALERT_SOURCE", "web")
 
-# Память на процесс: ключ -> ts последней отправки
+# Память процесса: ключ -> ts последней отправки
 _last_sent: dict[str, float] = {}
 _lock = asyncio.Lock()
 
 
 def _admin_chat_id() -> int:
+    """Лениво получаем ID админ-чата из ENV."""
     global _ADMIN_CHAT_ID
     if _ADMIN_CHAT_ID is None:
-        raw = os.getenv("ADMIN_ALERT_CHAT_ID", "").strip()
+        raw = (os.getenv("ADMIN_ALERT_CHAT_ID") or "").strip()
         if not raw:
             raise RuntimeError("ADMIN_ALERT_CHAT_ID is not set")
         _ADMIN_CHAT_ID = int(raw)
@@ -30,6 +35,7 @@ def _now() -> float:
 
 
 async def _should_send(key: str) -> bool:
+    """Дедупликация сообщений в рамках процесса."""
     now = _now()
     async with _lock:
         ts = _last_sent.get(key, 0.0)
@@ -54,8 +60,8 @@ async def send_admin_alert(
 ) -> bool:
     """
     Отправляет алерт в админ-чат с дедупликацией.
-    dedup_key по умолчанию = f"{_SOURCE}:{text[:120]}", —
-    это отсекает дубли из тренера и веба в заданном окне времени.
+    По умолчанию ключ = f"{_SOURCE}:{text[:120]}" — это убирает дубли,
+    приходящие из разных сервисов за заданное окно.
     """
     key = dedup_key or f"{_SOURCE}:{text[:120]}"
     if not await _should_send(key):
