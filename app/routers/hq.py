@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import os
 import time
-import random
 from textwrap import dedent
 
 from aiogram import Router, types, Bot
 from aiogram.filters import Command
+
+# NEW: централизованная отправка с дедупликацией
+from app.core.alerts import send_admin_alert
 
 router = Router()
 
@@ -80,9 +82,21 @@ async def cmd_status(m: types.Message) -> None:
 
 @router.message(Command("panic"))
 async def cmd_panic(m: types.Message) -> None:
-    """Тест аварийки: шлёт исключение в Sentry и падает."""
+    """
+    Тест аварийки: шлём админ-алерт с дедупликацией.
+    Процесс НЕ падает (чтобы не плодить триггеры и дубли).
+    Если хочется уметь «уронить» по флагу — см. PANIC_RAISE ниже.
+    """
     await m.answer("⚠️ Запускаю тест аварийного оповещения…")
-    # имитируем разные ветки падения
-    if random.choice([True, False]):
-        raise RuntimeError("Manual panic test: branch A")
-    raise ValueError("Manual panic test: branch B")
+
+    text = (
+        "<b>⚠️ Emergency alert</b>\n"
+        f"env={_env()} build={_build()}\n"
+        "Manual panic test"
+    )
+    # ключ учитывает окружение/сборку, чтобы не летели дубликаты
+    await send_admin_alert(m.bot, text, dedup_key=f"panic:{_env()}:{_build()}")
+
+    # Опционально: разрешить «падение» через env-флаг
+    if (os.getenv("PANIC_RAISE") or "").lower() in {"1", "true", "yes"}:
+        raise RuntimeError("Manual panic test (forced by PANIC_RAISE)")
