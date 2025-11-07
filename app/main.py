@@ -22,7 +22,7 @@ async def healthz():
     return PlainTextResponse("ok")
 
 
-# Заглушка вебхука (мы работаем в polling; эндпоинт может пригодиться позже)
+# Заглушка вебхука — мы работаем в polling, но endpoint пусть будет
 @app.post("/tg/webhook")
 async def tg_webhook(_: Request):
     return PlainTextResponse("ok")
@@ -40,27 +40,21 @@ except Exception as e:
 dp = Dispatcher()
 PROFILE = os.getenv("BOT_PROFILE", "hq").strip().lower()
 
-# Служебные/HQ-роутеры доступны в любом профиле
-from app.routers import system, hq  # noqa: E402
-
-dp.include_router(system.router)
-dp.include_router(hq.router)
-
-# Профильные подключения
+# Подключаем роутеры строго по профилю, чтобы исключить любые сайд-эффекты
 if PROFILE == "trainer":
-    # Тонкий портал: весь интеллект — в веб-ядре
+    # ТОЛЬКО тренерский портал (никаких HQ/leader etc.)
     from app.routers import trainer  # noqa: E402
     dp.include_router(trainer.router)
 
 elif PROFILE == "hq":
-    # HQ-профиль: можешь подключить нужные штабные модули по мере надобности
-    # Пример (раскомментируй необходимые):
-    # from app.routers import entrypoints, onboarding, leader, training, progress, ...
-    # dp.include_router(entrypoints.router)
-    # dp.include_router(onboarding.router)
-    # dp.include_router(leader.router)
-    # dp.include_router(training.router)
-    pass
+    # HQ-профиль: служебные команды
+    from app.routers import system, hq  # noqa: E402
+    dp.include_router(system.router)
+    dp.include_router(hq.router)
+
+else:
+    # fallback: ничего не подключаем
+    logging.getLogger(__name__).warning("Unknown BOT_PROFILE=%s", PROFILE)
 
 # Храним бота и фоновой таск polling в состоянии приложения
 app.state.bot: Bot | None = None
@@ -71,11 +65,20 @@ async def _on_startup(bot: Bot):
     me = await bot.get_me()
     logging.info(
         ">>> Startup: %s as @%s | profile=%s | build=%s",
-        me.id,
-        me.username,
-        PROFILE,
-        BUILD_MARK,
+        me.id, me.username, PROFILE, BUILD_MARK,
     )
+    # жёстко выключаем вебхуки (если вдруг были настроены)
+    try:
+        await bot.delete_webhook(drop_pending_updates=False)
+        logging.info("Webhook deleted (polling mode enforced)")
+    except Exception as e:
+        logging.warning("delete_webhook failed: %s", e)
+    # логим подключённые роутеры
+    try:
+        router_names = [r.name for r in dp.routers]
+        logging.info("Routers attached: %s", router_names)
+    except Exception:
+        pass
 
 
 async def _on_shutdown(bot: Bot | None):
