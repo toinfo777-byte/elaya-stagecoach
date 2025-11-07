@@ -26,6 +26,9 @@ from app.routers import system, hq  # базовые штабные
 dp.include_router(system.router)
 dp.include_router(hq.router)
 
+from app.routers import diag
+app.include_router(diag.router)
+
 if BOT_PROFILE == "trainer":
     from app.routers import trainer  # фронтовой контур
     dp.include_router(trainer.router)
