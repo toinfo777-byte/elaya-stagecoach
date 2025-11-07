@@ -1,6 +1,8 @@
-# app/routers/trainer.py
 from __future__ import annotations
-import os, aiohttp
+
+import logging
+import os
+import aiohttp
 from aiogram import Router, F
 from aiogram.filters import Command
 from aiogram.types import Message
@@ -19,11 +21,13 @@ async def _post_scene(path: str, payload: dict) -> str:
     try:
         async with aiohttp.ClientSession() as s:
             async with s.post(url, json=payload, headers=headers, timeout=15) as r:
+                logging.info("core call %s -> %s", path, r.status)
                 if r.status != 200:
                     return "⚠️ Сейчас тихо. Повтори позже."
                 data = await r.json()
                 return data.get("reply", "…")
-    except Exception:
+    except Exception as e:
+        logging.warning("core call failed: %s %s", path, e)
         return "⚠️ Портал перегружается. Попробуй ещё раз."
 
 
@@ -61,6 +65,7 @@ async def scene_transition(m: Message):
 
 @router.message(F.text & ~F.via_bot)
 async def any_text(m: Message):
+    # по умолчанию текст — заметка для reflect
     reply = await _post_scene("/api/scene/reflect", {
         "user_id": m.from_user.id, "chat_id": m.chat.id, "text": m.text, "scene": "reflect"
     })
