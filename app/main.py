@@ -15,6 +15,7 @@ from starlette.responses import PlainTextResponse
 
 from app.build import BUILD_MARK
 from app.config import settings
+from app.core import store  # ← init DB + антидубли
 
 # --- FastAPI core -----------------------------------------------------------
 app = FastAPI(title="Elaya StageCoach", version=BUILD_MARK)
@@ -85,7 +86,15 @@ async def tg_webhook(request: Request) -> Response:
     except Exception:
         return Response(status_code=status.HTTP_400_BAD_REQUEST)
 
-    # 3) прокормить апдейт диспетчеру
+    # 3) антидубли по update_id — подтверждаем дубль молча
+    if getattr(update, "update_id", None) is not None:
+        try:
+            if store.is_duplicate_update(int(update.update_id)):
+                return Response(status_code=status.HTTP_200_OK)
+        except Exception:
+            logging.exception("duplicate check failed")
+
+    # 4) прокормить апдейт диспетчеру
     bot = get_bot()
     try:
         await dp.feed_update(bot, update)
@@ -99,6 +108,12 @@ async def tg_webhook(request: Request) -> Response:
 # --- lifecycle --------------------------------------------------------------
 @app.on_event("startup")
 async def on_startup() -> None:
+    # инициализация БД (создание таблиц и служебных индексов)
+    try:
+        store.init_db()
+    except Exception:
+        logging.exception("store.init_db failed")
+
     logging.getLogger(__name__).info(
         "Startup: id=%s profile=%s build=%s",
         settings.BOT_ID,
