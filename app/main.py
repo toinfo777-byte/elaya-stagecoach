@@ -16,6 +16,10 @@ from app.build import BUILD_MARK
 
 # ── FastAPI (web) ─────────────────────────────────────────────────────────────
 app = FastAPI()
+
+from app.mw_sentry import SentryBreadcrumbs
+app.add_middleware(SentryBreadcrumbs)
+
 dp = Dispatcher()
 
 BOT_PROFILE = os.getenv("BOT_PROFILE", "hq").strip().lower()
