@@ -4,126 +4,111 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
-import time
 from typing import Any
 
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
-from aiogram.types import Request
-from fastapi import FastAPI, Request
+from aiogram.types import Update
+from fastapi import FastAPI, Request, Response, status
 from starlette.responses import PlainTextResponse
 
 from app.build import BUILD_MARK
 from app.config import settings
 
-# Роутеры
-from app.routers import system, hq  # базовые штабные
-from app.routers import trainer  # фронтовой контур
-from app.routers import diag  # диагностика
-
-# Core API (новый)
-from app.core_api import router as core_api_router
-
-# Middleware Sentry
-from app.mw_sentry import SentryBreadcrumbs
-
-# ---------------------------------------------------------------------------
-
-app = FastAPI()
-app.add_middleware(SentryBreadcrumbs)
-
+# --- FastAPI core -----------------------------------------------------------
+app = FastAPI(title="Elaya StageCoach", version=BUILD_MARK)
 dp = Dispatcher()
 
 BOT_PROFILE = os.getenv("BOT_PROFILE", "hq").strip().lower()
 WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET", "").strip()
 
-# Подключаем базовые и безопасные роутеры
-app.include_router(system.router)
-app.include_router(hq.router)
-app.include_router(diag.router)
-app.include_router(core_api_router)
+# --- Routers подключаем БЕЗ сайд-эффектов ----------------------------------
+# aiogram-роутеры (внутренние сценарии бота)
+from app.routers import system, hq  # базовые штабные
+dp.include_router(system.router)
+dp.include_router(hq.router)
 
 if BOT_PROFILE == "trainer":
+    # фронтовой контур «Тренер сцены»
+    from app.routers import trainer
     dp.include_router(trainer.router)
 
-# ---------------------------------------------------------------------------
+# fastapi-роутеры (HTTP API)
+from app import core_api as core_api_router
+from app.routers import diag
 
+app.include_router(diag.router)
+app.include_router(core_api_router.router)
+
+# Sentry breadcrumbs (мягкая трассировка запросов)
+try:
+    from app.mw_sentry import SentryBreadcrumbs
+    app.add_middleware(SentryBreadcrumbs)
+except Exception:
+    # не падаем, если модуль отсутствует на ранних этапах
+    logging.getLogger(__name__).warning("Sentry middleware not attached")
+
+# --- singletons -------------------------------------------------------------
+_bot: Bot | None = None
+
+
+def get_bot() -> Bot:
+    global _bot
+    if _bot is None:
+        _bot = Bot(
+            token=settings.TELEGRAM_TOKEN,
+            default=DefaultBotProperties(parse_mode=ParseMode.HTML),
+        )
+    return _bot
+
+
+# --- health ----------------------------------------------------------------
 @app.get("/healthz")
 async def healthz() -> PlainTextResponse:
-    return PlainTextResponse("ok")
-
-# ---------------------------------------------------------------------------
-# Webhook endpoint (универсальный, для Telegram)
-# ---------------------------------------------------------------------------
-
-from aiogram.types import Update
-import sentry_sdk
+    return PlainTextResponse("OK", status_code=200)
 
 
+# --- webhook ---------------------------------------------------------------
 @app.post("/tg/webhook")
-async def tg_webhook(request: Request):
-    """
-    Принимает Telegram Update и передаёт его в Aiogram Dispatcher.
-    """
-    if request.headers.get("x-telegram-bot-api-secret-token") != WEBHOOK_SECRET:
-        return PlainTextResponse("forbidden", status_code=403)
+async def tg_webhook(request: Request) -> Response:
+    # 1) секрет (если включён)
+    if WEBHOOK_SECRET:
+        req_secret = request.headers.get("X-Telegram-Bot-Api-Secret-Token", "")
+        if req_secret != WEBHOOK_SECRET:
+            return Response(status_code=status.HTTP_403_FORBIDDEN)
 
-    data = await request.json()
+    # 2) валидация апдейта
     try:
+        data: dict[str, Any] = await request.json()
         update = Update.model_validate(data)
     except Exception:
-        return PlainTextResponse("bad update", status_code=400)
+        return Response(status_code=status.HTTP_400_BAD_REQUEST)
 
-    # Добавляем breadcrumbs в Sentry
-    uid = getattr(getattr(update, "message", None), "from_user", None)
-    uid = getattr(uid, "id", None)
-    sentry_sdk.add_breadcrumb(
-        category="tg.update",
-        message="incoming update",
-        level="info",
-        data={
-            "chat_id": getattr(getattr(update, "message", None), "chat", None)
-            and update.message.chat.id,
-            "user_id": uid,
-            "has_text": bool(
-                getattr(getattr(update, "message", None), "text", None)
-            ),
-        },
-    )
+    # 3) прокормить апдейт диспетчеру
+    bot = get_bot()
+    try:
+        await dp.feed_update(bot, update)
+    except Exception:
+        logging.exception("dp.feed_update failed")
+        return Response(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-    bot = Bot(
-        token=settings.TELEGRAM_TOKEN,
-        default=DefaultBotProperties(parse_mode=ParseMode.HTML),
-    )
+    return Response(status_code=status.HTTP_200_OK)
 
-    await dp.feed_update(bot, update)
-    return PlainTextResponse("ok", status_code=200)
 
-# ---------------------------------------------------------------------------
-# События запуска и завершения
-# ---------------------------------------------------------------------------
-
+# --- lifecycle --------------------------------------------------------------
 @app.on_event("startup")
-async def on_startup():
-    logging.info(">>> Startup: build=%s profile=%s", BUILD_MARK, BOT_PROFILE)
+async def on_startup() -> None:
+    logging.getLogger(__name__).info(
+        "Startup: id=%s profile=%s build=%s",
+        settings.BOT_ID,
+        BOT_PROFILE,
+        BUILD_MARK,
+    )
 
 
 @app.on_event("shutdown")
-async def on_shutdown():
-    logging.info(">>> Shutdown complete.")
-
-
-# ---------------------------------------------------------------------------
-# Для Render (Uvicorn)
-# ---------------------------------------------------------------------------
-
-if __name__ == "__main__":
-    import uvicorn
-
-    uvicorn.run(
-        "app.main:app",
-        host="0.0.0.0",
-        port=int(os.getenv("PORT", 10000)),
-        log_level="info",
-    )
+async def on_shutdown() -> None:
+    bot = _bot
+    if bot:
+        await bot.session.close()
