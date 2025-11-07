@@ -2,6 +2,9 @@
 from __future__ import annotations
 
 import logging
+import inspect
+from typing import Any
+
 from aiogram import Router, F
 from aiogram.filters import Command
 from aiogram.types import Message
@@ -26,20 +29,32 @@ except Exception as e:
     ) -> None:  # type: ignore
         log.info("[fallback] save_premium_request(uid=%s, plan=%s, note=%s, meta=%s)", user_id, plan, note, meta or {})
 
+# --- универсальный вызов sync/async функций ---
+async def _maybe_call(fn, *args: Any, **kwargs: Any) -> Any:
+    """Если fn — coroutine function или возвращает awaitable — подождём; иначе вызовем синхронно."""
+    if inspect.iscoroutinefunction(fn):
+        return await fn(*args, **kwargs)
+    result = fn(*args, **kwargs)
+    if inspect.isawaitable(result):
+        return await result
+    return result
+
 
 @router.message(Command("leader"))
 async def cmd_leader(message: Message):
     await message.reply("🏁 Путь лидера: пришли намерение текстом (например: «хочу в премиум»).")
+
 
 @router.message(F.text)
 async def any_text_as_intent(message: Message):
     intent = (message.text or "").strip()
     if not intent:
         return
-    save_leader_intent(message.from_user.id, intent, meta={"source": "text"})
+    await _maybe_call(save_leader_intent, message.from_user.id, intent, meta={"source": "text"})
     await message.reply("✅ Намерение зафиксировано.")
+
 
 @router.message(Command("premium"))
 async def cmd_premium(message: Message):
-    save_premium_request(message.from_user.id, plan="premium", meta={"source": "command"})
+    await _maybe_call(save_premium_request, message.from_user.id, plan="premium", meta={"source": "command"})
     await message.reply("✨ Заявка на премиум зафиксирована.")
