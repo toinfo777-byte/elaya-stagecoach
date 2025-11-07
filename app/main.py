@@ -16,59 +16,80 @@ from app.build import BUILD_MARK
 # ── FastAPI (web) ─────────────────────────────────────────────────────────────
 app = FastAPI()
 
+
 @app.get("/healthz")
 async def healthz():
     return PlainTextResponse("ok")
 
-# (заглушка — мы работаем в polling; эндпоинт оставим на будущее)
+
+# Заглушка вебхука (мы работаем в polling; эндпоинт может пригодиться позже)
 @app.post("/tg/webhook")
 async def tg_webhook(_: Request):
     return PlainTextResponse("ok")
 
-# Подключаем Core API (ядро сцен)
+
+# Core API (ядро сцен) — подключаем, если файл есть
 try:
-    from app.core_api import router as core_api_router
+    from app.core_api import router as core_api_router  # type: ignore
     app.include_router(core_api_router)
+    logging.getLogger(__name__).info("Core API router attached")
 except Exception as e:
-    # без core_api первый запуск тоже возможен; логируем мягко
-    logging.getLogger(__name__).warning("core_api not attached: %s", e)
+    logging.getLogger(__name__).warning("Core API not attached: %s", e)
 
 # ── Aiogram (bot) ────────────────────────────────────────────────────────────
 dp = Dispatcher()
-BOT_PROFILE = os.getenv("BOT_PROFILE", "hq").strip().lower()
+PROFILE = os.getenv("BOT_PROFILE", "hq").strip().lower()
 
-# Служебные/HQ роутеры
-from app.routers import system, hq
+# Служебные/HQ-роутеры доступны в любом профиле
+from app.routers import system, hq  # noqa: E402
+
 dp.include_router(system.router)
 dp.include_router(hq.router)
 
-if BOT_PROFILE == "trainer":
-    # фронтовой контур (тонкий портал)
-    from app.routers import trainer
+# Профильные подключения
+if PROFILE == "trainer":
+    # Тонкий портал: весь интеллект — в веб-ядре
+    from app.routers import trainer  # noqa: E402
     dp.include_router(trainer.router)
-else:
-    # профиль по умолчанию — «hq»: только штабные команды
+
+elif PROFILE == "hq":
+    # HQ-профиль: можешь подключить нужные штабные модули по мере надобности
+    # Пример (раскомментируй необходимые):
+    # from app.routers import entrypoints, onboarding, leader, training, progress, ...
+    # dp.include_router(entrypoints.router)
+    # dp.include_router(onboarding.router)
+    # dp.include_router(leader.router)
+    # dp.include_router(training.router)
     pass
 
-# будем хранить задачу и бота в состоянии приложения
-app.state.bot = None
-app.state.bot_task = None
+# Храним бота и фоновой таск polling в состоянии приложения
+app.state.bot: Bot | None = None
+app.state.bot_task: asyncio.Task | None = None
+
 
 async def _on_startup(bot: Bot):
     me = await bot.get_me()
     logging.info(
         ">>> Startup: %s as @%s | profile=%s | build=%s",
-        me.id, me.username, BOT_PROFILE, BUILD_MARK
+        me.id,
+        me.username,
+        PROFILE,
+        BUILD_MARK,
     )
+
 
 async def _on_shutdown(bot: Bot | None):
     if bot:
         await bot.session.close()
     logging.info(">>> Shutdown clean")
 
+
 @app.on_event("startup")
 async def on_startup():
-    logging.basicConfig(level=getattr(logging, settings.LOG_LEVEL.upper(), logging.INFO))
+    logging.basicConfig(
+        level=getattr(logging, settings.LOG_LEVEL.upper(), logging.INFO)
+    )
+
     token = settings.TG_BOT_TOKEN or settings.BOT_TOKEN or os.getenv("TELEGRAM_TOKEN")
     if not token:
         raise RuntimeError("TELEGRAM_TOKEN is not set")
@@ -77,10 +98,11 @@ async def on_startup():
     app.state.bot = bot
     await _on_startup(bot)
 
-    # Стартуем polling как фоновой таск, чтобы FastAPI не блокировался
+    # Запускаем polling в фоне, чтобы FastAPI оставался отзывчивым
     app.state.bot_task = asyncio.create_task(
         dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types())
     )
+
 
 @app.on_event("shutdown")
 async def on_shutdown():
@@ -92,4 +114,5 @@ async def on_shutdown():
             await task
         except Exception:
             pass
+
     await _on_shutdown(app.state.bot)
