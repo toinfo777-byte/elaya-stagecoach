@@ -1,0 +1,26 @@
+# render.yaml
+services:
+  - type: web
+    name: elaya-stagecoach-web
+    env: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: MODE
+        value: web
+      - key: CORE_API_TOKEN
+        sync: false  # выставишь вручную в Render
+  - type: worker
+    name: elaya-trainer-bot
+    env: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: python -m app.main
+    envVars:
+      - key: BOT_PROFILE
+        value: trainer
+      - key: CORE_API_BASE
+        sync: false
+      - key: CORE_API_TOKEN
+        sync: false
+      - key: SAFE_MODE
+        value: "true"
