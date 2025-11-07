@@ -1,59 +1,67 @@
+# app/routers/trainer.py
 from __future__ import annotations
-
+import os, aiohttp
 from aiogram import Router, F
-from aiogram.filters import CommandStart, Command
-from aiogram.types import Message, ReplyKeyboardRemove
-
-from app.build import BUILD_MARK
+from aiogram.filters import Command
+from aiogram.types import Message
 
 router = Router(name="trainer")
 
-MENU_TEXT = (
-    "🧭 Меню Элайи\n\n"
-    "🏋️ Тренировка дня — 5–15 минут\n"
-    "📈 Мой прогресс — стрики и эпизоды\n"
-    "🎯 Мини-кастинг • 🧭 Путь лидера\n"
-    "🆘 Помощь / FAQ • ⚙️ Настройки\n"
-    "📜 Политика • ⭐ Расширенная версия"
-)
+CORE_API_BASE = os.getenv("CORE_API_BASE", "").rstrip("/")
+CORE_API_TOKEN = os.getenv("CORE_API_TOKEN", "")
 
-@router.message(CommandStart())
-async def trainer_start(msg: Message):
-    # строго без прикреплённой клавиатуры, только текст
-    await msg.answer("Привет! Это тренер Элайи.\n" + MENU_TEXT, reply_markup=ReplyKeyboardRemove())
 
-@router.message(Command("menu"))
-async def trainer_menu(msg: Message):
-    await msg.answer(MENU_TEXT, reply_markup=ReplyKeyboardRemove())
+async def _post_scene(path: str, payload: dict) -> str:
+    if not CORE_API_BASE:
+        return "⚠️ Портал спит. Настрой адрес ядра."
+    url = f"{CORE_API_BASE}{path}"
+    headers = {"X-Core-Token": CORE_API_TOKEN} if CORE_API_TOKEN else {}
+    try:
+        async with aiohttp.ClientSession() as s:
+            async with s.post(url, json=payload, headers=headers, timeout=15) as r:
+                if r.status != 200:
+                    return "⚠️ Сейчас тихо. Повтори позже."
+                data = await r.json()
+                return data.get("reply", "…")
+    except Exception:
+        return "⚠️ Портал перегружается. Попробуй ещё раз."
 
-@router.message(Command("healthz"))
-async def trainer_health(msg: Message):
-    await msg.answer("ok", reply_markup=ReplyKeyboardRemove())
 
-@router.message(Command("status"))
-async def trainer_status(msg: Message):
-    me = await msg.bot.get_me()
-    await msg.answer(
-        "🟢 Trainer online · webhook\n"
-        f"Bot: @{me.username}\n"
-        f"Build: <code>{BUILD_MARK}</code>\n"
-        "Status: ok ✅",
-        reply_markup=ReplyKeyboardRemove()
-    )
+@router.message(Command("start"))
+async def cmd_start(m: Message):
+    reply = await _post_scene("/api/scene/enter", {
+        "user_id": m.from_user.id, "chat_id": m.chat.id, "text": None, "scene": "intro"
+    })
+    await m.answer("Меню тренировки:\n" + reply)
 
-# заглушки разделов — можно разворачивать по мере готовности
-@router.message(F.text.in_({"Тренировка", "Тренировка дня"}))
-@router.message(Command("training"))
-async def trainer_training(msg: Message):
-    await msg.answer("🏋️ Тренировка: сегодня — мягкое дыхание + центр звезды (5–10 мин).", reply_markup=ReplyKeyboardRemove())
 
-@router.message(Command("help"))
-async def trainer_help(msg: Message):
-    await msg.answer(
-        "Помощь:\n"
-        "• /menu — главное меню\n"
-        "• /training — начать тренировку\n"
-        "• /status — статус тренера\n"
-        "• /healthz — быстрая проверка",
-        reply_markup=ReplyKeyboardRemove()
-    )
+@router.message(Command("scene_intro"))
+async def scene_intro(m: Message):
+    reply = await _post_scene("/api/scene/enter", {
+        "user_id": m.from_user.id, "chat_id": m.chat.id, "text": None, "scene": "intro"
+    })
+    await m.answer(reply)
+
+
+@router.message(Command("scene_reflect"))
+async def scene_reflect(m: Message):
+    reply = await _post_scene("/api/scene/reflect", {
+        "user_id": m.from_user.id, "chat_id": m.chat.id, "text": None, "scene": "reflect"
+    })
+    await m.answer(reply)
+
+
+@router.message(Command("scene_transition"))
+async def scene_transition(m: Message):
+    reply = await _post_scene("/api/scene/transition", {
+        "user_id": m.from_user.id, "chat_id": m.chat.id, "text": None, "scene": "transition"
+    })
+    await m.answer(reply)
+
+
+@router.message(F.text & ~F.via_bot)
+async def any_text(m: Message):
+    reply = await _post_scene("/api/scene/reflect", {
+        "user_id": m.from_user.id, "chat_id": m.chat.id, "text": m.text, "scene": "reflect"
+    })
+    await m.answer(reply)
