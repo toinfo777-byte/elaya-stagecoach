@@ -2,87 +2,86 @@
 from __future__ import annotations
 
 import os
-from datetime import datetime, timezone
+from typing import Any, Dict
 
-from fastapi import APIRouter, HTTPException, Request
+import httpx
+from fastapi import APIRouter, Query
+from pydantic import BaseModel
 
-from aiogram import Router
-from aiogram.filters import Command
-from aiogram.types import Message
+from app.config import settings
+from app.build import BUILD_MARK
 
-# ───────────────────────── FastAPI (web) ─────────────────────────
-# Если у тебя есть web-сервис (uvicorn), этот роутер можно
-# подключить туда. Он даёт /status_json.
-api_router = APIRouter()
-
-STATUS_KEY = os.getenv("STATUS_KEY", "")
+router = APIRouter(prefix="/diag", tags=["diag"])
 
 
-def _bool_env(name: str, default: bool = True) -> bool:
-    val = os.getenv(name)
-    if val is None:
-        return default
-    return val.lower() not in {"0", "false", "no"}
+class WebhookInfo(BaseModel):
+    url: str
+    has_custom_certificate: bool
+    pending_update_count: int
+    ip_address: str | None = None
+    max_connections: int | None = None
 
 
-@api_router.get("/status_json")
-async def status_json(request: Request, key: str | None = None):
-    # Опциональная «защита» ключом
-    if STATUS_KEY and key != STATUS_KEY:
-        raise HTTPException(status_code=403, detail="forbidden")
-
-    # Параметры берём из ENV (или с дефолтами)
-    data = {
-        "env": os.getenv("ENV", "develop"),
-        "build": os.getenv("BUILD_MARK", "deploy-unknown"),
-        "sha": (os.getenv("GIT_SHA", "") or os.getenv("BUILD_SHA", ""))[:7],
-        "image": os.getenv("IMAGE", "ghcr.io/<owner>/<repo>:develop"),
-        "render_status": os.getenv("RENDER_STATUS", "live"),
-        "sentry_ok": _bool_env("SENTRY_OK", True),
-        "cronitor_ok": _bool_env("CRONITOR_OK", True),
-        "cronitor_last_ping_iso": os.getenv("CRONITOR_LAST_PING_ISO", ""),
-        "bot_time_iso": datetime.now(timezone.utc).isoformat(),
-        "uptime_sec": int(os.getenv("UPTIME_SEC", "0")),
-        "mode": os.getenv("MODE", "worker"),
-        "bot_id": os.getenv("BOT_ID", ""),
-    }
-    return data
+def _mask(s: str, keep: int = 4) -> str:
+    if not s:
+        return ""
+    if len(s) <= keep * 2:
+        return "*" * len(s)
+    return s[:keep] + "…" + s[-keep:]
 
 
-# ───────────────────── Aiogram (бот) ─────────────────────
-# Этот роутер подключается в Dispatcher (dp.include_router).
-bot_router = Router(name="diag")
+def _ok_guard(k: str | None) -> bool:
+    """
+    Примитивная защита от случайного публичного вызова:
+    требуется ключ ?k=<первые 10 символов WEBHOOK_SECRET>.
+    """
+    if not settings.WEBHOOK_SECRET:
+        return False
+    expected = settings.WEBHOOK_SECRET[:10]
+    return k == expected
 
 
-def _env_short() -> dict[str, str]:
+@router.get("/webhook", summary="Статус Telegram webhook (диагностика)")
+async def webhook_status(k: str | None = Query(default=None, description="guard key")) -> Dict[str, Any]:
+    if not _ok_guard(k):
+        return {"ok": False, "error": "forbidden"}
+
+    tg_token = settings.TELEGRAM_TOKEN
+    if not tg_token:
+        return {"ok": False, "error": "TELEGRAM_TOKEN is empty"}
+
+    api = f"https://api.telegram.org/bot{tg_token}/getWebhookInfo"
+
+    async with httpx.AsyncClient(timeout=8.0) as client:
+        r = await client.get(api)
+        data = r.json()
+
+    info_raw = data.get("result", {}) if isinstance(data, dict) else {}
+    info = WebhookInfo.model_validate(info_raw)
+
     return {
-        "env": os.getenv("ENV", "develop"),
-        "mode": os.getenv("MODE", "worker"),
-        "build": os.getenv("BUILD_MARK", "unknown"),
-        "sha": (os.getenv("GIT_SHA", "") or os.getenv("BUILD_SHA", ""))[:7],
-        "uptime": os.getenv("UPTIME_SEC", "n/a"),
+        "ok": True,
+        "service": {
+            "build": BUILD_MARK,
+            "profile": settings.BOT_PROFILE,
+            "mode": os.getenv("MODE", ""),
+            "env": settings.ENV,
+            "render_service_id": os.getenv("RENDER_SERVICE_ID", ""),
+        },
+        "webhook": info.model_dump(),
+        "checks": {
+            "webhook_url_matches_render": (
+                isinstance(info.url, str) and "onrender.com" in info.url
+            ),
+            "secret_configured": bool(settings.WEBHOOK_SECRET),
+        },
+        "secrets": {
+            "TELEGRAM_TOKEN": _mask(tg_token),
+            "WEBHOOK_SECRET": _mask(settings.WEBHOOK_SECRET or ""),
+        },
     }
 
 
-@bot_router.message(Command(commands=["ping"]))
-async def cmd_ping(message: Message) -> None:
-    await message.answer("🏓 pong")
-
-
-@bot_router.message(Command(commands=["who", "diag"]))
-async def cmd_who(message: Message) -> None:
-    info = _env_short()
-    text = (
-        "🔎 <b>Диагностика</b>\n"
-        f"• ENV: <code>{info['env']}</code>\n"
-        f"• MODE: <code>{info['mode']}</code>\n"
-        f"• BUILD: <code>{info['build']}</code>\n"
-        f"• SHA: <code>{info['sha'] or 'unknown'}</code>\n"
-        f"• Uptime: <code>{info['uptime']}</code>"
-    )
-    await message.answer(text)
-
-
-# На всякий случай — фабрика, если где-то ждут функцию.
-def get_router() -> Router:
-    return bot_router
+@router.get("/ping", summary="Быстрый пинг для liveness")
+async def ping() -> Dict[str, str]:
+    return {"status": "ok", "build": BUILD_MARK}
