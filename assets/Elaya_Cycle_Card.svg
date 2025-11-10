@@ -1,0 +1,49 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 720">
+  <defs>
+    <style>
+      .bg { fill: radial-gradient(circle at 50% 40%, #0e1428 0%, #050810 100%); }
+      .ring { fill: none; stroke-width: 10; opacity: .5; }
+      .phase { font: 600 22px/1.4 "Inter", ui-sans-serif; fill: #e8ecff; text-anchor: middle; }
+      .core  { font: 800 48px/1 "Inter", ui-sans-serif; fill: #f0f4ff; text-anchor: middle; }
+      .label { font: 500 16px/1.4 "Inter", ui-sans-serif; fill: #b9c5ff; text-anchor: middle; letter-spacing: .05em; }
+      .flow  { fill: none; stroke-width: 6; opacity: .9; }
+      .pulse { fill: #ffffff; }
+      .shadow{ filter: drop-shadow(0 0 12px rgba(0,0,0,.6)); }
+    </style>
+    <radialGradient id="grad-bg" cx="50%" cy="40%" r="80%">
+      <stop offset="0%" stop-color="#101b3b"/>
+      <stop offset="100%" stop-color="#040712"/>
+    </radialGradient>
+  </defs>
+
+  <rect width="1280" height="720" fill="url(#grad-bg)"/>
+
+  <!-- outer breathing ring -->
+  <circle cx="640" cy="360" r="280" stroke="#2f66ff" class="ring"/>
+  <circle cx="640" cy="360" r="230" stroke="#18c3b0" class="ring"/>
+  <circle cx="640" cy="360" r="180" stroke="#ffc857" class="ring"/>
+
+  <!-- flows -->
+  <path d="M640 80 C880 160 880 560 640 640 C400 560 400 160 640 80Z" stroke="#6ea8ff" class="flow"/>
+  <path d="M640 100 C860 180 860 540 640 620 C420 540 420 180 640 100Z" stroke="#53e0cf" class="flow"/>
+
+  <!-- central core -->
+  <circle cx="640" cy="360" r="60" fill="#ffffff08" stroke="#9fb3ff" stroke-width="3"/>
+  <text x="640" y="368" class="core">ELAYA</text>
+  <text x="640" y="404" class="label">Cycle · Breathing — Reflection — Integration</text>
+
+  <!-- phase labels -->
+  <text x="640" y="120" class="phase">Block E — Memory</text>
+  <text x="1060" y="360" class="phase">Block F — Diagnostics</text>
+  <text x="640" y="640" class="phase">Block G — Mirror of Perception</text>
+  <text x="220" y="360" class="phase">Block H — Integration Cycle</text>
+
+  <!-- luminous nodes -->
+  <circle cx="640" cy="120" r="8" fill="#2f66ff" class="pulse shadow"/>
+  <circle cx="1060" cy="360" r="8" fill="#8a5bff" class="pulse shadow"/>
+  <circle cx="640" cy="640" r="8" fill="#18c3b0" class="pulse shadow"/>
+  <circle cx="220" cy="360" r="8" fill="#ffc857" class="pulse shadow"/>
+
+  <!-- signature -->
+  <text x="640" y="690" class="label">HQ Elaya · 2025 — Cycle II · Map of Light</text>
+</svg>
