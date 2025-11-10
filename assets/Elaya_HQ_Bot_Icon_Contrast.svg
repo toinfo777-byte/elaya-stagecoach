@@ -1,0 +1,51 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <defs>
+    <!-- Свет ядра -->
+    <radialGradient id="core" cx="50%" cy="45%" r="60%">
+      <stop offset="0%" stop-color="#fffbe0" stop-opacity="1"/>
+      <stop offset="40%" stop-color="#f7e8bb" stop-opacity="0.9"/>
+      <stop offset="100%" stop-color="#1a1409" stop-opacity="0.05"/>
+    </radialGradient>
+    <radialGradient id="halo" cx="50%" cy="50%" r="90%">
+      <stop offset="0%" stop-color="#fceaa7" stop-opacity="0.25"/>
+      <stop offset="100%" stop-color="#000000" stop-opacity="0"/>
+    </radialGradient>
+    <filter id="blurGlow">
+      <feGaussianBlur stdDeviation="10" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+    <style>
+      .txt {
+        font: 800 78px/1 "Cinzel", serif;
+        fill: url(#textgrad);
+        text-anchor: middle;
+        letter-spacing: .06em;
+        filter: drop-shadow(0 0 8px rgba(255,255,220,.6))
+                drop-shadow(0 0 16px rgba(255,240,180,.25));
+      }
+      .ring { fill: none; stroke: #f6e5a2; stroke-width: 7; opacity: .8; }
+      .dot  { fill: #fff2a1; filter: drop-shadow(0 0 6px #fff2a1); }
+    </style>
+    <linearGradient id="textgrad" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#fff9d0"/>
+      <stop offset="100%" stop-color="#f4d977"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="512" height="512" fill="#0a0905"/>
+  <circle cx="256" cy="256" r="200" fill="url(#core)" filter="url(#blurGlow)"/>
+  <circle cx="256" cy="256" r="220" fill="url(#halo)"/>
+  <circle cx="256" cy="256" r="180" class="ring"/>
+
+  <!-- четыре точки цикла -->
+  <circle cx="256" cy="60"  r="5" class="dot"/>
+  <circle cx="452" cy="256" r="5" class="dot"/>
+  <circle cx="256" cy="452" r="5" class="dot"/>
+  <circle cx="60"  cy="256" r="5" class="dot"/>
+
+  <!-- текст -->
+  <text x="256" y="285" class="txt">ELAYA</text>
+</svg>
