@@ -1,7 +1,5 @@
-# app/main.py
 from __future__ import annotations
 
-import asyncio
 import logging
 import os
 from typing import Any
@@ -15,7 +13,7 @@ from starlette.responses import PlainTextResponse
 
 from app.build import BUILD_MARK
 from app.config import settings
-from app.core import store  # ← init DB + антидубли
+from app.core import store  # init DB + антидубли
 
 # --- FastAPI core -----------------------------------------------------------
 app = FastAPI(title="Elaya StageCoach", version=BUILD_MARK)
@@ -24,8 +22,7 @@ dp = Dispatcher()
 BOT_PROFILE = os.getenv("BOT_PROFILE", "hq").strip().lower()
 WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET", "").strip()
 
-# --- Routers подключаем БЕЗ сайд-эффектов ----------------------------------
-# aiogram-роутеры (внутренние сценарии бота)
+# --- aiogram-роутеры --------------------------------------------------------
 from app.routers import system, hq  # базовые штабные
 dp.include_router(system.router)
 dp.include_router(hq.router)
@@ -35,11 +32,11 @@ if BOT_PROFILE == "trainer":
     from app.routers import trainer
     dp.include_router(trainer.router)
 
-# fastapi-роутеры (HTTP API)
+# --- fastapi-роутеры --------------------------------------------------------
 from app import core_api as core_api_router
 from app.routers import diag
 
-app.include_router(diag.router)
+app.include_router(diag.router)          # /diag/...
 app.include_router(core_api_router.router)
 
 # Sentry breadcrumbs (мягкая трассировка запросов)
@@ -47,7 +44,6 @@ try:
     from app.mw_sentry import SentryBreadcrumbs
     app.add_middleware(SentryBreadcrumbs)
 except Exception:
-    # не падаем, если модуль отсутствует на ранних этапах
     logging.getLogger(__name__).warning("Sentry middleware not attached")
 
 # --- singletons -------------------------------------------------------------
@@ -64,29 +60,29 @@ def get_bot() -> Bot:
     return _bot
 
 
-# --- health ----------------------------------------------------------------
+# --- health -----------------------------------------------------------------
 @app.get("/healthz")
 async def healthz() -> PlainTextResponse:
     return PlainTextResponse("OK", status_code=200)
 
 
-# --- webhook ---------------------------------------------------------------
+# --- telegram webhook --------------------------------------------------------
 @app.post("/tg/webhook")
 async def tg_webhook(request: Request) -> Response:
-    # 1) секрет (если включён)
+    # (1) проверка секрета, если включён
     if WEBHOOK_SECRET:
         req_secret = request.headers.get("X-Telegram-Bot-Api-Secret-Token", "")
         if req_secret != WEBHOOK_SECRET:
             return Response(status_code=status.HTTP_403_FORBIDDEN)
 
-    # 2) валидация апдейта
+    # (2) валидация апдейта
     try:
         data: dict[str, Any] = await request.json()
         update = Update.model_validate(data)
     except Exception:
         return Response(status_code=status.HTTP_400_BAD_REQUEST)
 
-    # 3) антидубли по update_id — подтверждаем дубль молча
+    # (3) антидубли по update_id — подтверждаем дубль молча
     if getattr(update, "update_id", None) is not None:
         try:
             if store.is_duplicate_update(int(update.update_id)):
@@ -94,7 +90,7 @@ async def tg_webhook(request: Request) -> Response:
         except Exception:
             logging.exception("duplicate check failed")
 
-    # 4) прокормить апдейт диспетчеру
+    # (4) прокармливаем апдейт диспетчеру
     bot = get_bot()
     try:
         await dp.feed_update(bot, update)
@@ -105,20 +101,19 @@ async def tg_webhook(request: Request) -> Response:
     return Response(status_code=status.HTTP_200_OK)
 
 
-# --- lifecycle --------------------------------------------------------------
+# --- lifecycle ---------------------------------------------------------------
 @app.on_event("startup")
 async def on_startup() -> None:
-    # инициализация БД (создание таблиц и служебных индексов)
     try:
-        store.init_db()
+        store.init_db()  # создаёт таблицы и индексы, если их нет
     except Exception:
         logging.exception("store.init_db failed")
 
     logging.getLogger(__name__).info(
-        "Startup: id=%s profile=%s build=%s",
-        settings.BOT_ID,
+        "Startup: profile=%s build=%s env=%s",
         BOT_PROFILE,
         BUILD_MARK,
+        os.getenv("ENV", "unknown"),
     )
 
 
