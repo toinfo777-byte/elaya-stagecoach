@@ -77,3 +77,46 @@ def is_duplicate_update(update_id: int) -> bool:
         )
         con.commit()
         return False
+
+
+# --- metrics & stats ----------------------------------------------------------
+def get_stats() -> dict:
+    """
+    Возвращает агрегаты для панели HQ:
+    - users: количество пользователей с состоянием
+    - last_updated: последний ts из scene_state
+    - scene_counts: счётчик по last_scene
+    - last_reflect: последняя непустая рефлексия (самая свежая)
+    """
+    with _lock, sqlite3.connect(_DB_PATH) as con:
+        con.row_factory = sqlite3.Row
+
+        cur = con.execute("SELECT COUNT(1) AS c FROM scene_state")
+        users = int(cur.fetchone()["c"])
+
+        cur = con.execute("SELECT MAX(updated_at) AS m FROM scene_state")
+        last_updated = cur.fetchone()["m"] if users else None
+
+        cur = con.execute("""
+            SELECT last_scene, COUNT(1) AS c
+            FROM scene_state
+            GROUP BY last_scene
+        """)
+        scene_counts = {row["last_scene"]: int(row["c"]) for row in cur.fetchall()}
+
+        cur = con.execute("""
+            SELECT last_reflect
+            FROM scene_state
+            WHERE last_reflect IS NOT NULL AND TRIM(last_reflect) <> ''
+            ORDER BY updated_at DESC
+            LIMIT 1
+        """)
+        row = cur.fetchone()
+        last_reflect = row["last_reflect"] if row else None
+
+    return {
+        "users": users,
+        "last_updated": last_updated,
+        "scene_counts": scene_counts,
+        "last_reflect": last_reflect,
+    }
