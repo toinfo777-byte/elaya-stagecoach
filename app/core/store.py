@@ -1,4 +1,3 @@
-# app/core/store.py
 from __future__ import annotations
 
 import os
@@ -25,24 +24,27 @@ _DB_PATH = _db_path_from_url(DB_URL)
 def init_db() -> None:
     os.makedirs(os.path.dirname(_DB_PATH), exist_ok=True)
     with sqlite3.connect(_DB_PATH) as con:
-        # немножко устойчивости под веб-нагрузку
+        # немного устойчивости под веб-нагрузку
         con.execute("PRAGMA journal_mode=WAL;")
         con.execute("PRAGMA synchronous=NORMAL;")
-
-        con.execute("""
+        con.execute(
+            """
             CREATE TABLE IF NOT EXISTS scene_state (
                 user_id INTEGER PRIMARY KEY,
                 last_scene TEXT NOT NULL,
                 last_reflect TEXT,
                 updated_at TEXT NOT NULL
             )
-        """)
-        con.execute("""
+            """
+        )
+        con.execute(
+            """
             CREATE TABLE IF NOT EXISTS webhook_seen (
                 update_id INTEGER PRIMARY KEY,
                 seen_at TEXT NOT NULL
             )
-        """)
+            """
+        )
         con.commit()
 
 
@@ -57,7 +59,7 @@ class SceneRow:
 def get_scene(user_id: int) -> SceneRow | None:
     with _lock, sqlite3.connect(_DB_PATH) as con:
         cur = con.execute(
-            "SELECT user_id, last_scene, last_reflect, updated_at "
+            "SELECT user_id,last_scene,last_reflect,updated_at "
             "FROM scene_state WHERE user_id=?",
             (user_id,),
         )
@@ -70,8 +72,8 @@ def upsert_scene(user_id: int, last_scene: str, last_reflect: str | None = None)
     with _lock, sqlite3.connect(_DB_PATH) as con:
         con.execute(
             """
-            INSERT INTO scene_state(user_id, last_scene, last_reflect, updated_at)
-            VALUES(?, ?, ?, ?)
+            INSERT INTO scene_state(user_id,last_scene,last_reflect,updated_at)
+            VALUES(?,?,?,?)
             ON CONFLICT(user_id) DO UPDATE SET
               last_scene=excluded.last_scene,
               last_reflect=excluded.last_reflect,
@@ -83,14 +85,14 @@ def upsert_scene(user_id: int, last_scene: str, last_reflect: str | None = None)
 
 
 def add_reflection(user_id: int, reflection: str) -> None:
-    """Сохраняет последнюю рефлексию и обновляет updated_at."""
+    """Фиксирует последнюю рефлексию пользователя и обновляет updated_at."""
     ts = datetime.utcnow().isoformat() + "Z"
     with _lock, sqlite3.connect(_DB_PATH) as con:
         con.execute(
             """
             UPDATE scene_state
-            SET last_reflect = ?, updated_at = ?
-            WHERE user_id = ?
+            SET last_reflect=?, updated_at=?
+            WHERE user_id=?
             """,
             (reflection.strip(), ts, user_id),
         )
@@ -128,20 +130,24 @@ def get_stats() -> dict:
         cur = con.execute("SELECT MAX(updated_at) AS m FROM scene_state")
         last_updated = cur.fetchone()["m"] if users else None
 
-        cur = con.execute("""
+        cur = con.execute(
+            """
             SELECT last_scene, COUNT(1) AS c
             FROM scene_state
             GROUP BY last_scene
-        """)
+            """
+        )
         scene_counts = {row["last_scene"]: int(row["c"]) for row in cur.fetchall()}
 
-        cur = con.execute("""
+        cur = con.execute(
+            """
             SELECT last_reflect
             FROM scene_state
             WHERE last_reflect IS NOT NULL AND TRIM(last_reflect) <> ''
             ORDER BY updated_at DESC
             LIMIT 1
-        """)
+            """
+        )
         row = cur.fetchone()
         last_reflect = row["last_reflect"] if row else None
 
