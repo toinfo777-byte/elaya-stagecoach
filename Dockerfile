@@ -10,7 +10,6 @@ COPY requirements.txt .
 RUN pip install -r requirements.txt
 
 COPY app ./app
-COPY entrypoint.py ./entrypoint.py
 
 # Значения можно переопределить в Render → Environment
 ENV ENV=staging \
@@ -18,5 +17,5 @@ ENV ENV=staging \
     PORT=10000 \
     BUILD_MARK=manual
 
-# Старт через uvicorn (webhook режим)
-CMD ["uvicorn", "app.entrypoint_web:app", "--host", "0.0.0.0", "--port", "10000"]
+# Стартуем FastAPI-приложение
+CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT}"]
