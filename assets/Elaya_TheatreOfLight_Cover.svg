@@ -1,0 +1,52 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1920 1080">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#0a0905"/>
+      <stop offset="100%" stop-color="#1a1409"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="50%" cy="45%" r="60%">
+      <stop offset="0%" stop-color="#f5e6b3" stop-opacity="0.15"/>
+      <stop offset="100%" stop-color="#000" stop-opacity="0"/>
+    </radialGradient>
+    <style>
+      .bg { fill: url(#bg); }
+      .halo { fill: url(#glow); }
+      .ring { fill: none; stroke-width: 10; opacity: .6; }
+      .ring2{ fill: none; stroke-width: 4; opacity: .4; stroke-dasharray: 12 8; }
+      .flow { fill: none; stroke-width: 6; opacity: .5; }
+      .text { font: 700 64px/1.2 "Cinzel", serif; fill: #f7e8bb; text-anchor: middle; letter-spacing: .08em; }
+      .sub  { font: 500 28px/1.4 "Inter", ui-sans-serif; fill: #d5c99e; text-anchor: middle; letter-spacing: .05em; }
+      .sig  { font: 500 20px/1.4 "Inter", ui-sans-serif; fill: #b6aa82; text-anchor: end; }
+      .dot  { filter: drop-shadow(0 0 8px #f7e8bb); }
+      .shadow { filter: drop-shadow(0 0 25px rgba(247,232,187,.45)); }
+    </style>
+  </defs>
+
+  <rect width="1920" height="1080" class="bg"/>
+  <circle cx="960" cy="540" r="520" class="halo"/>
+  
+  <!-- breathing & reflection rings -->
+  <circle cx="960" cy="540" r="400" stroke="#d4b85a" class="ring"/>
+  <circle cx="960" cy="540" r="320" stroke="#f0d996" class="ring2"/>
+  <path d="M960 140 C1300 220 1300 860 960 940 C620 860 620 220 960 140Z" stroke="#f5d67a" class="flow"/>
+  <path d="M960 160 C1260 260 1260 840 960 920 C660 840 660 260 960 160Z" stroke="#fceaa7" class="flow"/>
+
+  <!-- nodes -->
+  <circle cx="960" cy="140" r="10" fill="#fceaa7" class="dot"/>
+  <circle cx="1470" cy="540" r="10" fill="#fceaa7" class="dot"/>
+  <circle cx="960" cy="940" r="10" fill="#fceaa7" class="dot"/>
+  <circle cx="450" cy="540" r="10" fill="#fceaa7" class="dot"/>
+
+  <!-- titles -->
+  <text x="960" y="550" class="text shadow">ELAYA</text>
+  <text x="960" y="608" class="sub">School of Theatre of Light</text>
+
+  <!-- blocks -->
+  <text x="960" y="80"  class="sub">Memory</text>
+  <text x="1470" y="520" class="sub">Diagnostics</text>
+  <text x="960" y="1010" class="sub">Mirror of Perception</text>
+  <text x="450" y="520" class="sub">Integration</text>
+
+  <!-- signature -->
+  <text x="1860" y="1040" class="sig">HQ Elaya · 2025</text>
+</svg>
