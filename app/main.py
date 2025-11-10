@@ -35,9 +35,11 @@ if BOT_PROFILE == "trainer":
 # --- fastapi-роутеры --------------------------------------------------------
 from app import core_api as core_api_router
 from app.routers import diag
+from app.routes import ui
 
 app.include_router(diag.router)          # /diag/...
 app.include_router(core_api_router.router)
+app.include_router(ui.router)            # web-панель HQ (/)
 
 # Sentry breadcrumbs (мягкая трассировка запросов)
 try:
