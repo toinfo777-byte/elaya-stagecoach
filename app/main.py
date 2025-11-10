@@ -24,6 +24,7 @@ WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET", "").strip()
 
 # --- aiogram-роутеры --------------------------------------------------------
 from app.routers import system, hq  # базовые штабные
+
 dp.include_router(system.router)
 dp.include_router(hq.router)
 
@@ -37,9 +38,9 @@ from app import core_api as core_api_router
 from app.routers import diag
 from app.routes import ui
 
-app.include_router(diag.router)          # /diag/...
-app.include_router(core_api_router.router)
-app.include_router(ui.router)            # web-панель HQ (/)
+app.include_router(diag.router)           # /diag/...
+app.include_router(core_api_router.router)  # /api/...
+app.include_router(ui.router)             # web-панель HQ (/)
 
 # Sentry breadcrumbs (мягкая трассировка запросов)
 try:
@@ -68,7 +69,7 @@ async def healthz() -> PlainTextResponse:
     return PlainTextResponse("OK", status_code=200)
 
 
-# --- telegram webhook --------------------------------------------------------
+# --- telegram webhook -------------------------------------------------------
 @app.post("/tg/webhook")
 async def tg_webhook(request: Request) -> Response:
     # (1) проверка секрета, если включён
@@ -103,7 +104,7 @@ async def tg_webhook(request: Request) -> Response:
     return Response(status_code=status.HTTP_200_OK)
 
 
-# --- lifecycle ---------------------------------------------------------------
+# --- lifecycle --------------------------------------------------------------
 @app.on_event("startup")
 async def on_startup() -> None:
     try:
