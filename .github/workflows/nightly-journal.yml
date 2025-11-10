@@ -1,0 +1,43 @@
+name: Nightly Journal
+on:
+  schedule:
+    # 20:59 UTC = 23:59 MSK
+    - cron: "59 20 * * *"
+  workflow_dispatch: {}
+permissions: { contents: write }
+
+jobs:
+  journal:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { ref: develop, fetch-depth: 0 }
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with: { python-version: "3.11" }
+
+      - name: Generate Journal
+        run: python tools/make_journal.py
+
+      - name: Commit Journal
+        run: |
+          git config user.name "elaya-bot"
+          git config user.email "elaya-bot@users.noreply.github.com"
+          git add docs/hq/journal
+          if git diff --cached --quiet; then
+            echo "No changes."
+          else
+            d=$(date -u +"%Y-%m-%d")
+            git commit -m "hq(journal): ${d}"
+            git push origin develop
+          fi
+
+      - name: Notify HQ
+        env:
+          TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
+          TG_HQ_CHAT_ID: ${{ secrets.TG_HQ_CHAT_ID }}
+        run: |
+          FILE="docs/hq/journal/Journal_$(date -u +"%Y-%m-%d").md"
+          TEXT="*Ночной журнал дыхания*\n📄 $(date -u +"%Y-%m-%d")"
+          python tools/tg_notify.py "$TEXT"
