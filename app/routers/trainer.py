@@ -1,72 +1,28 @@
 from __future__ import annotations
 
-import logging
-import os
-import aiohttp
 from aiogram import Router, F
 from aiogram.filters import Command
 from aiogram.types import Message
 
+from app.keyboards.reply import main_menu_kb, BTN_TRAINING
+
 router = Router(name="trainer")
 
-CORE_API_BASE = os.getenv("CORE_API_BASE", "").rstrip("/")
-CORE_API_TOKEN = os.getenv("CORE_API_TOKEN", "")
+async def _training_entry(m: Message) -> None:
+    await m.answer(
+        "Тренировка дня:\n\n• «Пауза 2 секунды»\n• «Ровный тембр»"
+        "\n\n(демо-заглушка; запуск круга появится в следующем коммите)",
+        reply_markup=main_menu_kb(),
+    )
 
+# Совместимость со старым названием
+async def show_training_levels(m: Message) -> None:
+    await _training_entry(m)
 
-async def _post_scene(path: str, payload: dict) -> str:
-    if not CORE_API_BASE:
-        return "⚠️ Портал спит. Настрой адрес ядра."
-    url = f"{CORE_API_BASE}{path}"
-    headers = {"X-Core-Token": CORE_API_TOKEN} if CORE_API_TOKEN else {}
-    try:
-        async with aiohttp.ClientSession() as s:
-            async with s.post(url, json=payload, headers=headers, timeout=15) as r:
-                logging.info("core call %s -> %s", path, r.status)
-                if r.status != 200:
-                    return "⚠️ Сейчас тихо. Повтори позже."
-                data = await r.json()
-                return data.get("reply", "…")
-    except Exception as e:
-        logging.warning("core call failed: %s %s", path, e)
-        return "⚠️ Портал перегружается. Попробуй ещё раз."
+@router.message(Command("training", "levels", "уровни"))
+async def cmd_training(m: Message) -> None:
+    await _training_entry(m)
 
-
-@router.message(Command("start"))
-async def cmd_start(m: Message):
-    reply = await _post_scene("/api/scene/enter", {
-        "user_id": m.from_user.id, "chat_id": m.chat.id, "text": None, "scene": "intro"
-    })
-    await m.answer("Меню тренировки:\n" + reply)
-
-
-@router.message(Command("scene_intro"))
-async def scene_intro(m: Message):
-    reply = await _post_scene("/api/scene/enter", {
-        "user_id": m.from_user.id, "chat_id": m.chat.id, "text": None, "scene": "intro"
-    })
-    await m.answer(reply)
-
-
-@router.message(Command("scene_reflect"))
-async def scene_reflect(m: Message):
-    reply = await _post_scene("/api/scene/reflect", {
-        "user_id": m.from_user.id, "chat_id": m.chat.id, "text": None, "scene": "reflect"
-    })
-    await m.answer(reply)
-
-
-@router.message(Command("scene_transition"))
-async def scene_transition(m: Message):
-    reply = await _post_scene("/api/scene/transition", {
-        "user_id": m.from_user.id, "chat_id": m.chat.id, "text": None, "scene": "transition"
-    })
-    await m.answer(reply)
-
-
-@router.message(F.text & ~F.via_bot)
-async def any_text(m: Message):
-    # по умолчанию текст — заметка для reflect
-    reply = await _post_scene("/api/scene/reflect", {
-        "user_id": m.from_user.id, "chat_id": m.chat.id, "text": m.text, "scene": "reflect"
-    })
-    await m.answer(reply)
+@router.message(F.text == BTN_TRAINING)
+async def btn_training(m: Message) -> None:
+    await _training_entry(m)
