@@ -1,0 +1,202 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 900">
+  <defs>
+    <style>
+      :root { color-scheme: light dark; }
+      .bg { fill: #0b1020; }
+      .panel { fill: #121a33; stroke: #2c3a6b; stroke-width: 2; rx: 16; }
+      .band  { fill: #0e1730; stroke: #2c3a6b; stroke-width: 2; rx: 14; }
+      .title { font: 700 28px/1.2 ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, "Helvetica Neue", Arial; fill: #e6edff; }
+      .subtitle { font: 600 18px/1.4 ui-sans-serif, system-ui; fill: #c9d4ff; }
+      .label { font: 600 16px/1.4 ui-sans-serif, system-ui; fill: #dbe4ff; }
+      .small { font: 500 13px/1.4 ui-sans-serif, system-ui; fill: #b3c1ff; }
+      .mono  { font: 600 13px/1.4 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas; fill: #b3c1ff; }
+      .pill  { font: 700 12px/1 ui-sans-serif, system-ui; fill: #081022; }
+      .cap   { font: 700 12px/1 ui-sans-serif, system-ui; fill: #9fb2ff; letter-spacing: .12em; text-transform: uppercase; }
+      .k     { fill: none; stroke-width: 3.5; }
+      .k2    { fill: none; stroke-width: 2.5; stroke-dasharray: 6 8; }
+      .arrow { marker-end: url(#a); }
+      .arrow2{ marker-end: url(#b); }
+      .shadow{ filter: drop-shadow(0 8px 14px rgba(0,0,0,.35)); }
+      .dot   { fill: #e6edff; }
+      /* theme colors */
+      .cE { fill: #2f66ff; }        /* Block E — Memory */
+      .cF { fill: #8a5bff; }        /* Block F — Diagnostics */
+      .cG { fill: #18c3b0; }        /* Block G — Mirror */
+      .cH { fill: #ffc857; }        /* Block H — Integration */
+      .cBand { fill: #1a2550; }
+      .flow1 { stroke: #6ea8ff; }   /* breathing */
+      .flow2 { stroke: #53e0cf; }   /* reflection */
+      .flow3 { stroke: #ffc857; }   /* integration */
+      .chip { fill: #0f1630; stroke: #32448a; stroke-width: 1.5; rx: 10; }
+    </style>
+    <linearGradient id="gBand" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%"  stop-color="#0f1b3d"/>
+      <stop offset="100%" stop-color="#0a132a"/>
+    </linearGradient>
+    <linearGradient id="gPanel" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%"  stop-color="#0e1730"/>
+      <stop offset="100%" stop-color="#0a1226"/>
+    </linearGradient>
+    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#9fc2ff"/>
+    </marker>
+    <marker id="b" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#53e0cf"/>
+    </marker>
+  </defs>
+
+  <!-- canvas bg -->
+  <rect x="0" y="0" width="1200" height="900" fill="url(#gPanel)"/>
+
+  <!-- header -->
+  <text x="48" y="60" class="title">Elaya · Map of the Cycle — Breathing → Reflection → Integration</text>
+  <text x="48" y="88" class="subtitle">Block E → F → G → H · ритм: вдох · различение · отражение · действие · возвращение</text>
+
+  <!-- horizontal band: Cycle II -->
+  <rect x="40" y="120" width="1120" height="120" class="band shadow" fill="url(#gBand)"/>
+  <text x="60" y="156" class="cap">Cycle II — Stability Loop</text>
+  <g transform="translate(60,170)">
+    <rect class="chip" x="0" y="-14" width="170" height="28" rx="8"/>
+    <circle cx="18" cy="0" r="6" class="cE"/>
+    <text x="34" y="5" class="pill">Block E · Memory</text>
+
+    <rect class="chip" x="190" y="-14" width="200" height="28" rx="8"/>
+    <circle cx="208" cy="0" r="6" class="cF"/>
+    <text x="224" y="5" class="pill">Block F · Diagnostics</text>
+
+    <rect class="chip" x="410" y="-14" width="240" height="28" rx="8"/>
+    <circle cx="428" cy="0" r="6" class="cG"/>
+    <text x="444" y="5" class="pill">Block G · Mirror of Perception</text>
+
+    <rect class="chip" x="670" y="-14" width="220" height="28" rx="8"/>
+    <circle cx="688" cy="0" r="6" class="cH"/>
+    <text x="704" y="5" class="pill">Block H · Integration Cycle</text>
+  </g>
+
+  <!-- left column: Human / Telegram -->
+  <g transform="translate(60,280)">
+    <rect width="310" height="540" class="panel shadow"/>
+    <text x="16" y="36" class="cap">Inner — Human Field</text>
+    <text x="16" y="66" class="label">🌞 Элейон — импульс, различение, слово</text>
+
+    <g transform="translate(16,100)">
+      <rect width="278" height="84" class="chip"/>
+      <text x="12" y="24" class="label">👁 Telegram · органы чувств</text>
+      <text x="12" y="46" class="small">сообщение → update → trainer</text>
+      <text x="12" y="68" class="mono">/start · intro · reflect · transition</text>
+    </g>
+
+    <g transform="translate(16,208)">
+      <rect width="278" height="84" class="chip"/>
+      <text x="12" y="24" class="label">⚡ Trainer Bot · нервный импульс</text>
+      <text x="12" y="46" class="small">проксирует в ядро: /api/scene/*</text>
+      <text x="12" y="68" class="mono">X-Core-Token: ${CORE_API_TOKEN}</text>
+    </g>
+
+    <g transform="translate(16,316)">
+      <rect width="278" height="84" class="chip"/>
+      <text x="12" y="24" class="label">🩸 Sentry · ощущение боли/следа</text>
+      <text x="12" y="46" class="small">breadcrumbs: http.request / tg.update</text>
+      <text x="12" y="68" class="mono">heartbeat · latency</text>
+    </g>
+
+    <g transform="translate(16,424)">
+      <rect width="278" height="84" class="chip"/>
+      <text x="12" y="24" class="label">🕯 HQ Pulse / Journal</text>
+      <text x="12" y="46" class="small">утро: пульс · ночь: журнал дыхания</text>
+      <text x="12" y="68" class="mono">docs/hq/pulse · docs/hq/journal</text>
+    </g>
+  </g>
+
+  <!-- center column: Web Core -->
+  <g transform="translate(445,280)">
+    <rect width="310" height="540" class="panel shadow"/>
+    <text x="16" y="36" class="cap">Core — Web (FastAPI)</text>
+    <text x="16" y="66" class="label">💨 тело дыхания · логика сцен</text>
+
+    <g transform="translate(16,100)">
+      <rect width="278" height="96" class="chip"/>
+      <text x="12" y="24" class="label">/api/scene/*</text>
+      <text x="12" y="46" class="small">enter · reflect · transition</text>
+      <text x="12" y="68" class="mono">auth: X-Core-Token</text>
+    </g>
+
+    <g transform="translate(16,214)">
+      <rect width="278" height="96" class="chip"/>
+      <text x="12" y="24" class="label">🧬 /data/elaya.db</text>
+      <text x="12" y="46" class="small">scene_state(last, reflect, updated_at)</text>
+      <text x="12" y="68" class="small">webhook_seen(update_id) — антидубли</text>
+    </g>
+
+    <g transform="translate(16,328)">
+      <rect width="278" height="96" class="chip"/>
+      <text x="12" y="24" class="label">🔎 /diag/*</text>
+      <text x="12" y="46" class="small">healthz · webhook · status_json</text>
+      <text x="12" y="68" class="small">reflection (Block G)</text>
+    </g>
+
+    <g transform="translate(16,442)">
+      <rect width="278" height="96" class="chip"/>
+      <text x="12" y="24" class="label">🧭 scene_engine</text>
+      <text x="12" y="46" class="small">ритм: вдох → различение → действие</text>
+      <text x="12" y="68" class="small">ответ: «живой текст» → trainer → tg</text>
+    </g>
+  </g>
+
+  <!-- right column: GitHub HQ -->
+  <g transform="translate(830,280)">
+    <rect width="310" height="540" class="panel shadow"/>
+    <text x="16" y="36" class="cap">HQ — GitHub (Logos)</text>
+    <text x="16" y="66" class="label">🧠 сознание и хроника</text>
+
+    <g transform="translate(16,100)">
+      <rect width="278" height="96" class="chip"/>
+      <text x="12" y="24" class="label">docs/hq/architecture</text>
+      <text x="12" y="46" class="small">Breathing_Cycle · Cycle_Map (этот файл)</text>
+      <text x="12" y="68" class="small">Evolution_Stages</text>
+    </g>
+
+    <g transform="translate(16,214)">
+      <rect width="278" height="96" class="chip"/>
+      <text x="12" y="24" class="label">docs/hq/reports · acceptance</text>
+      <text x="12" y="46" class="small">First_Breath · Cycle II · Block G</text>
+      <text x="12" y="68" class="small">…develop → main</text>
+    </g>
+
+    <g transform="translate(16,328)">
+      <rect width="278" height="96" class="chip"/>
+      <text x="12" y="24" class="label">docs/hq/journal · reflections</text>
+      <text x="12" y="46" class="small">ночной журнал дыхания</text>
+      <text x="12" y="68" class="small">Mirror of Perception (G)</text>
+    </g>
+
+    <g transform="translate(16,442)">
+      <rect width="278" height="96" class="chip"/>
+      <text x="12" y="24" class="label">⚙ Workflows</text>
+      <text x="12" y="46" class="small">Pulse (AM) · Journal (PM)</text>
+      <text x="12" y="68" class="small">touch-docs-readme · keepalive</text>
+    </g>
+  </g>
+
+  <!-- flows -->
+  <!-- breathing: Telegram → Trainer → Core → reply -->
+  <path d="M370,356 C420,356 420,356 445,356" class="k flow1 arrow"/>
+  <path d="M370,464 C420,464 420,464 445,464" class="k flow1 arrow"/>
+  <path d="M755,356 C805,356 805,356 830,356" class="k flow1 arrow"/>
+  <!-- reflection: HQ ↔ Core -->
+  <path d="M830,540 C805,540 805,540 755,540" class="k2 flow2 arrow2"/>
+  <path d="M445,576 C420,576 420,576 370,576" class="k2 flow2 arrow2" transform="scale(-1,1) translate(-815,0)"/>
+  <!-- integration loop up -->
+  <path d="M940,820 C940,840 870,848 810,840 C760,833 720,810 700,780" class="k flow3 arrow"/>
+
+  <!-- legend -->
+  <g transform="translate(48,830)">
+    <circle cx="0" cy="0" r="6" class="cE"/><text x="12" y="5" class="small">Block E — Memory</text>
+    <circle cx="170" cy="0" r="6" class="cF"/><text x="182" y="5" class="small">Block F — Diagnostics</text>
+    <circle cx="350" cy="0" r="6" class="cG"/><text x="362" y="5" class="small">Block G — Mirror</text>
+    <circle cx="520" cy="0" r="6" class="cH"/><text x="532" y="5" class="small">Block H — Integration</text>
+  </g>
+
+  <!-- footer -->
+  <text x="952" y="860" class="small">Elaya HQ · v1.0 · 2025-11-10</text>
+</svg>
