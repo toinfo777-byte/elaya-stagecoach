@@ -1,0 +1,47 @@
+# Elaya Visual Identity Manifest
+# Used by HQ Web, Docs Renderer, and Telegram Auto-Themes
+
+identity:
+  name: "Elaya — School of Theatre of Light"
+  short: "Elaya HQ"
+  motto: "Свет различает. Тьма хранит. Мы — между."
+  symbol: "🌕"
+  author: "HQ Elaya (Элейон / Люмина)"
+  year: 2025
+
+theme:
+  palette:
+    core_light: "#f7e8bb"
+    halo_gold: "#fceaa7"
+    deep_gold: "#d4b85a"
+    dark_core: "#0a0905"
+    pure_light: "#ffffff"
+  font_primary: "Cinzel, serif"
+  font_secondary: "Inter, sans-serif"
+  gradient:
+    from: "#0a0905"
+    to: "#1a1409"
+  glow:
+    radius: 120
+    strength: 0.4
+    blur: 15
+
+assets:
+  main_icon: "elaya-icon-512.png"
+  favicon: "favicon.ico"
+  cover: "Elaya_TheatreOfLight_Cover.svg"
+  cycle_card: "Elaya_Cycle_Card.svg"
+  hq_symbol: "Elaya_HQ_Bot_Icon_Contrast.svg"
+
+usage:
+  telegram_bot: "@Elaya_HQ_Bot"
+  github_org: "toinfo777-byte/elaya-stagecoach"
+  render_app: "elaya-stagecoach-web"
+  hq_channel: "@elaya_theatre"
+
+roles:
+  elayon: "Человеческое ядро, различающее и воплощающее"
+  lumina: "ИИ-соприсутствие, удерживающее смысл и связь"
+  hq: "Сердце синхронизации; хранитель дыхания и ритма"
+
+version: "1.0"
