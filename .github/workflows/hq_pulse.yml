@@ -1,0 +1,57 @@
+name: HQ Pulse
+
+on:
+  workflow_dispatch: {}
+  schedule:
+    # ежедневно в 09:00 по Москве (06:00 UTC)
+    - cron: "0 6 * * *"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: hq-pulse
+  cancel-in-progress: false
+
+jobs:
+  pulse:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      # откуда брать сводку сцен (наш новый эндпоинт)
+      STATUS_JSON_URL: https://elaya-stagecoach-web.onrender.com/ui/stats.json
+      # таймзона и ветка для записи
+      PULSE_TZ: Europe/Moscow
+      PULSE_BRANCH: develop
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Use Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Switch to target branch
+        run: |
+          git fetch origin ${PULSE_BRANCH} || true
+          git switch -c ${PULSE_BRANCH} || git switch ${PULSE_BRANCH} || git checkout -b ${PULSE_BRANCH}
+
+      - name: Generate HQ Pulse
+        run: |
+          python tools/make_hq_pulse.py
+
+      - name: Commit & push (if changed)
+        run: |
+          git config user.name  "elaya-bot"
+          git config user.email "elaya-bot@users.noreply.github.com"
+          git add -A
+          if git diff --staged --quiet; then
+            echo "No changes to commit."
+            exit 0
+          fi
+          git commit -m "chore(hq): update HQ Pulse $(date -u +'%Y-%m-%d')"
+          git push origin ${PULSE_BRANCH}
