@@ -1,63 +1,67 @@
 from __future__ import annotations
 
-from aiogram import Router, types
-from aiogram.filters import CommandStart
-from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
+from datetime import datetime, timezone
+import os
+from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.responses import JSONResponse, PlainTextResponse
 
-from app.config import settings
+router = APIRouter(prefix="", tags=["system"])
 
-# -------------------- aiogram (бот) --------------------
-router = Router(name="system")
+# ── небольшое хранилище-пустышка (пока без БД) ─────────────────────────────────
+STATE = {
+    "core": {
+        "users": 0,
+        "intro": 0,
+        "reflect": 0,
+        "transition": 0,
+        "last_updated": "",
+    },
+    "reflection": {"text": "", "updated_at": ""},
+}
 
-
-@router.message(CommandStart())
-async def cmd_start(message: types.Message) -> None:
-    # HQ-профиль — НИКАКИХ клавиатур
-    if settings.bot_profile == "hq":
-        await message.answer("Привет! Я HQ-бот. Доступно: /status, /version, /panic.")
-        return
-
-    # trainer-профиль — простое меню без внешних зависимостей
-    try:
-        kb = ReplyKeyboardMarkup(
-            keyboard=[
-                [
-                    KeyboardButton(text="🏋️ Тренировка дня"),
-                    KeyboardButton(text="📈 Мой прогресс"),
-                ],
-                [
-                    KeyboardButton(text="🎯 Путь лидера"),
-                    KeyboardButton(text="⚙️ Настройки"),
-                ],
-                [KeyboardButton(text="⭐ Расширенная версия")],
-            ],
-            resize_keyboard=True,
-        )
-    except Exception:
-        kb = None
-
-    if kb:
-        await message.answer("Меню тренировки:", reply_markup=kb)
-    else:
-        await message.answer("Меню тренировки активно.")
+def _now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
-# -------------------- fastapi (веб) --------------------
-# Небольшой JSON для автообновления панели: /ui/stats.json
-# (подключается в main.py: `from app.routers.system import web_router as system_web_router`;
-#  затем `app.include_router(system_web_router)` )
-try:
-    from fastapi import APIRouter
-    from fastapi.responses import JSONResponse
-    from app.core.store import get_scene_stats
+# ── UI / Ping / Stats ──────────────────────────────────────────────────────────
+@router.get("/ui/ping")
+async def ui_ping():
+    return {"ui": "ok"}
 
-    web_router = APIRouter()
+@router.get("/ui/stats.json")
+async def ui_stats():
+    # отдаём «мок» (числа можно начнём брать уже из trainer позже)
+    return {"core": STATE["core"], "reflection": STATE["reflection"], "status": "ok"}
 
-    @web_router.get("/ui/stats.json")
-    async def ui_stats():
-        # компактный JSON: {"counts":{...}, "last_updated": "...", "last_reflection": "...", "ok": True}
-        return JSONResponse(get_scene_stats() | {"ok": True})
 
-except Exception:
-    # Если FastAPI недоступен в среде — молча пропускаем веб-часть
-    web_router = None  # type: ignore
+# ── Диагностика вебхука бота ───────────────────────────────────────────────────
+def guard_key_ok(k: str | None) -> bool:
+    guard = os.getenv("WEBHOOK_SECRET", "")
+    return bool(k) and bool(guard) and guard.startswith(k)  # первые 10 символов
+
+@router.get("/diag/ping")
+async def diag_ping():
+    return {"ok": True, "ts": _now_iso()}
+
+@router.get("/diag/webhook")
+async def diag_webhook(k: str | None = None):
+    if not guard_key_ok(k):
+        raise HTTPException(status_code=403, detail="forbidden")
+    # то, что можно безопасно показать
+    return {
+        "ok": True,
+        "ts": _now_iso(),
+        "webhook_guard_prefix_len": 10,
+    }
+
+# удобный text/plain, если нужно быстро посмотреть ключевую инфу с рендера
+@router.get("/diag/env")
+async def diag_env(k: str | None = None):
+    if not guard_key_ok(k):
+        raise HTTPException(status_code=403, detail="forbidden")
+    safe = {
+        "SAFE_MODE": os.getenv("SAFE_MODE", "0"),
+        "RENDER_SERVICE_ID": os.getenv("RENDER_SERVICE_ID", "-"),
+        "STAGECOACH_WEB_URL": os.getenv("STAGECOACH_WEB_URL", "-"),
+    }
+    return JSONResponse(safe)
