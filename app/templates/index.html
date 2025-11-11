@@ -3,143 +3,113 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Элайя — StageCoach · HQ Panel</title>
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link rel="stylesheet" href="/static/css/theme.css">
-  <style>
-    body{opacity:1;transition:opacity .2s ease}
-    .btn{padding:8px 14px;border-radius:10px;border:1px solid var(--panel-border);background:var(--panel);color:var(--text);cursor:pointer}
-    .btn:hover{filter:brightness(1.08)}
-    .modal-back{position:fixed;inset:0;display:none;align-items:center;justify-content:center;background:rgba(0,0,0,.5);z-index:1000}
-    .modal{width:min(680px,92vw);background:var(--panel);border:1px solid var(--panel-border);border-radius:var(--radius-xl);padding:18px 18px 14px;box-shadow:var(--soft-shadow)}
-    .modal h3{margin:0 0 10px;color:var(--text)}
-    .modal textarea{width:100%;background:rgba(255,255,255,.02);color:var(--text);border:1px solid var(--panel-border);border-radius:12px;padding:12px;resize:vertical}
-    .modal .row{display:flex;gap:10px;justify-content:flex-end;margin-top:12px}
-  </style>
+  <title>Элайя — StageCoach</title>
+  <link rel="stylesheet" href="/static/theme.css" />
 </head>
 <body>
-  <div class="hq-container">
+  <main class="wrap">
+    <header class="hdr">
+      <h1>Элайя — <span>StageCoach</span> <b class="dot"></b></h1>
+      <p class="subtitle">панель наблюдения</p>
+    </header>
 
-    <h1 class="hq-title">
-      Элайя — StageCoach
-      <span class="sun pulse" aria-hidden="true"></span>
-    </h1>
-    <p class="hq-subtitle">панель наблюдения</p>
-
-    <section class="hq-panel">
-      <div class="stripe"></div>
-
-      <div class="hq-grid">
-        <!-- ПОРТАЛ -->
-        <div class="card">
-          <h3>Портал</h3>
-          <div class="pills">
-            <span class="pill pill--intro">Stable</span>
-            <span class="pill pill--reflect">Online</span>
-            <span class="pill pill--transition">Light active</span>
-          </div>
-
-          <hr class="sep">
-
-          <div class="small hq-breadcrumbs">
-            <span class="badge dim"><span class="dot"></span> HQ Panel</span>
-            <span class="badge ok"><span class="dot"></span> Cycle Active</span>
-            <span class="badge dim"><span class="dot"></span> Memory Stable</span>
-            <span class="badge dim"><span class="dot"></span> Reflection On</span>
-            <button class="btn" id="open-reflection" style="margin-left:auto">Добавить заметку</button>
-          </div>
+    <section class="grid">
+      <div class="card">
+        <h3>Портал</h3>
+        <div class="chips">
+          <span class="chip">Stable</span>
+          <span class="chip">Online</span>
+          <span class="chip">Light active</span>
         </div>
-
-        <!-- RELECTION BOX -->
-        <div class="card reflect-box">
-          <h3>Последняя заметка · Reflection</h3>
-          <div class="reflect-text" id="reflection-text">—</div>
-          <div class="reflect-footer">
-            <span id="last-upd">—</span>
-            <span class="moon pulse" title="Свет"></span>
-          </div>
+        <div class="badges">
+          <span class="badge">• HQ Panel</span>
+          <span class="badge badge-on">• Cycle Active</span>
+          <span class="badge">• Memory Stable</span>
+          <span class="badge">• Reflection On</span>
+          <button id="open-reflection" class="btn-inline">Добавить заметку</button>
         </div>
       </div>
 
-      <!-- CORE · СЧЁТЧИКИ -->
-      <div class="card" style="margin: 12px 26px 6px;">
+      <div class="card">
+        <h3>Последняя заметка · reflection</h3>
+        <div id="reflection-text" class="block">—</div>
+        <div class="meta">
+          <b class="mini-dot"></b>
+          <span id="reflection-time">—</span>
+        </div>
+      </div>
+
+      <div class="card wide">
         <h3>Core · состояние</h3>
-        <div class="small">Последнее обновление ядра: <span id="core-last-update">—</span></div>
-        <div class="pills" style="margin-top:12px">
-          <span class="pill pill--intro">intro: <b id="intro">0</b></span>
-          <span class="pill pill--reflect">reflect: <b id="reflect">0</b></span>
-          <span class="pill pill--transition">transition: <b id="transition">0</b></span>
+        <p class="muted">Последнее обновление ядра: <span id="core-upd">—</span></p>
+        <div class="chips" id="core-counters">
+          <span class="chip">intro: <span id="c-intro">0</span></span>
+          <span class="chip">reflect: <span id="c-reflect">0</span></span>
+          <span class="chip">transition: <span id="c-transition">0</span></span>
         </div>
-      </div>
-
-      <div class="hq-status">
-        <span class="badge dim"><span class="dot"></span> HQ Panel</span>
-        <span class="badge ok"><span class="dot"></span> Cycle Active</span>
-        <span class="badge dim"><span class="dot"></span> Memory Stable</span>
-        <span class="badge dim"><span class="dot"></span> Reflection On</span>
+        <div class="badges">
+          <span class="badge">• HQ Panel</span>
+          <span class="badge badge-on">• Cycle Active</span>
+          <span class="badge">• Memory Stable</span>
+          <span class="badge">• Reflection On</span>
+        </div>
       </div>
     </section>
-  </div>
+  </main>
 
-  <!-- MODAL: Reflection -->
-  <div id="refl-modal" class="modal-back" role="dialog" aria-modal="true" aria-labelledby="refl-title">
-    <div class="modal">
-      <h3 id="refl-title">Reflection · новая заметка</h3>
-      <textarea id="refl-text" rows="6" placeholder="Короткая рефлексия…"></textarea>
-      <div class="row">
-        <button class="btn" id="refl-save">Сохранить</button>
-        <button class="btn" id="refl-cancel" style="background:linear-gradient(180deg,#e6e6e6,#cfcfcf);color:#111;">Отмена</button>
+  <!-- модалка для добавления заметки -->
+  <dialog id="dlg">
+    <form id="reflection-form" method="dialog">
+      <h4>Новая заметка</h4>
+      <textarea name="text" rows="6" placeholder="Текст заметки…"></textarea>
+      <div class="dlg-actions">
+        <button type="submit" class="btn">Сохранить</button>
+        <button type="button" id="dlg-close" class="btn ghost">Отмена</button>
       </div>
-    </div>
-  </div>
+    </form>
+  </dialog>
 
+  <!-- JS: автообновление + submit -->
   <script>
-    const $ = (id) => document.getElementById(id);
+    const $ = (q) => document.querySelector(q);
 
-    async function pullStats(){
-      try{
-        const r = await fetch('/ui/stats.json', {cache:'no-store'});
-        if(!r.ok) return;
-        const j = await r.json();
+    async function loadStats() {
+      try {
+        const r = await fetch("/ui/stats.json", { cache: "no-store" });
+        const data = await r.json();
 
-        // структура: { users, last_update, counts:{intro,reflect,transition}, last_reflection:{text,at} }
-        const counts = j.counts || {};
-        const lastRef = j.last_reflection || {};
+        $("#reflection-text").textContent = data.reflection.text || "—";
+        $("#reflection-time").textContent = data.reflection.updated_at || "—";
 
-        // counters
-        $('intro').textContent = counts.intro ?? 0;
-        $('reflect').textContent = counts.reflect ?? 0;
-        $('transition').textContent = counts.transition ?? 0;
-
-        // times + last reflection
-        $('core-last-update').textContent = j.last_update || '—';
-        $('last-upd').textContent = lastRef.at || j.last_update || '—';
-        $('reflection-text').textContent = (lastRef.text && String(lastRef.text).trim()) ? lastRef.text : '—';
-      }catch(e){
-        console.warn('stats refresh failed', e);
+        $("#core-upd").textContent = data.core.last_updated || "—";
+        $("#c-intro").textContent = data.core.intro ?? 0;
+        $("#c-reflect").textContent = data.core.reflect ?? 0;
+        $("#c-transition").textContent = data.core.transition ?? 0;
+      } catch (e) {
+        console.error(e);
       }
     }
 
-    // modal controls
-    const modal = $('refl-modal');
-    $('open-reflection')?.addEventListener('click', () => {
-      $('refl-text').value = '';
-      modal.style.display = 'flex';
-    });
-    $('refl-cancel')?.addEventListener('click', () => {
-      modal.style.display = 'none';
-    });
-    $('refl-save')?.addEventListener('click', async () => {
-      const text = $('refl-text').value.trim();
-      if(!text){ alert('Пусто.'); return; }
-      // Опционально: если сделаем эндпоинт POST /ui/reflection/save — сюда прилетит сохранение в store.add_reflection().
-      // Сейчас просто закрываем модалку, обновляем панель (сохранение идёт через бот-трафик /scene/reflect).
-      modal.style.display = 'none';
-      await pullStats();
-    });
+    // автообновление панели
+    loadStats();
+    setInterval(loadStats, 5000);
 
-    pullStats();
-    setInterval(pullStats, 8000);
+    // модалка
+    const dlg = $("#dlg");
+    $("#open-reflection").addEventListener("click", () => dlg.showModal());
+    $("#dlg-close").addEventListener("click", () => dlg.close());
+
+    // отправка заметки
+    $("#reflection-form").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const fd = new FormData(e.target);
+      const r = await fetch("/ui/reflection", { method: "POST", body: fd });
+      if (r.ok) {
+        dlg.close();
+        e.target.reset();
+        loadStats();
+      }
+    });
   </script>
 </body>
 </html>
