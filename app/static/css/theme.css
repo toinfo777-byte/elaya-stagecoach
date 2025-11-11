@@ -1,209 +1,180 @@
 /* ==========================================================================
-   Elaya · HQ Theme (Light-of-Night)
-   — версия 1.3 — возвращён мягкий золотой свет и пульсирующая точка
+   Elaya · HQ Theme — Dawn Light 1.0
+   Тёплая светлая палитра на ночном фоне с мягким свечением и пульсом.
    ========================================================================== */
 
-:root {
-  /* Цвета ядра */
-  --bg: #0b0f14;
-  --bg-2: #10161e;
-  --panel: #121820;
-  --panel-2: #151d26;
-  --panel-border: rgba(255, 255, 255, 0.06);
+:root{
+  /* Фон сцены */
+  --bg: #0a0f14;
+  --bg-2: #0e141b;
+
+  /* Панели */
+  --panel: #111720;
+  --panel-2: #141c26;
+  --panel-border: rgba(255,255,255,.08);
 
   /* Текст */
-  --text: #f7f3e7;
-  --text-dim: #d6d0c4;
-  --muted: #9ca7b2;
+  --text: #fff7e6;
+  --text-dim: #e7dbc7;
+  --muted: #aeb7c3;
 
-  /* Акценты */
-  --accent: #ffeaa3;       /* мягкий свет */
-  --accent-2: #ffcc67;     /* тёплый янтарь */
-  --accent-soft: rgba(255, 227, 140, 0.20);
+  /* Акценты (тёплое солнце) */
+  --accent: #ffe39a;
+  --accent-2: #ffc96b;
+  --accent-soft: rgba(255, 220, 140, .20);
 
-  /* Служебные */
-  --ok: #8ff0c2;
+  /* Статусы */
+  --ok: #78f2c6;
   --warn: #ffd37a;
-  --err: #ff7676;
+  --err: #ff6b6b;
 
   /* Геометрия */
-  --radius-xl: 22px;
-  --radius-md: 14px;
+  --radius-xl: 24px;
+  --radius-md: 16px;
 
-  /* Тени и свечение */
-  --soft-shadow: 0 12px 26px rgba(0, 0, 0, 0.5);
-  --inner: inset 0 1px 0 rgba(255,255,255,0.03),
-           inset 0 -1px 0 rgba(0,0,0,0.25);
-  --glow: 0 0 40px rgba(255, 227, 140, 0.28),
-          0 0 120px rgba(255, 227, 140, 0.15);
-  --glow-soft: 0 0 30px rgba(255, 227, 140, 0.18);
+  /* Тени/свет */
+  --soft-shadow: 0 14px 34px rgba(0,0,0,.5);
+  --inner: inset 0 1px 0 rgba(255,255,255,.04), inset 0 -1px 0 rgba(0,0,0,.28);
+  --glow: 0 0 36px rgba(255, 220, 140, .35),
+          0 0 110px rgba(255, 220, 140, .18);
+  --glow-soft: 0 0 22px rgba(255, 220, 140, .22);
 
   /* Шрифт */
-  --font: "Inter", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font: ui-sans-serif, system-ui, -apple-system, Segoe UI, Inter, Roboto, Arial, "Noto Sans";
 }
 
-body {
-  margin: 0;
-  height: 100%;
+@media (prefers-color-scheme: light){
+  :root{
+    --bg: #fcfbf7;
+    --bg-2: #ffffff;
+    --panel: #ffffff;
+    --panel-2: #fff8ea;
+    --panel-border: rgba(20,24,30,.09);
+    --text: #1b1f27;
+    --text-dim: #2f3542;
+    --muted: #5e6776;
+    --soft-shadow: 0 18px 34px rgba(16,20,30,.08);
+    --glow: 0 0 42px rgba(255, 193, 94, .3), 0 0 120px rgba(255,193,94,.15);
+    --glow-soft: 0 0 26px rgba(255,193,94,.22);
+  }
+}
+
+/* Сцена */
+html,body{height:100%}
+body{
+  margin:0;
   background:
-    radial-gradient(1600px 700px at 50% -200px, rgba(255, 230, 160, 0.08), transparent 60%),
-    radial-gradient(1000px 800px at 50% 120%, rgba(25, 32, 44, 0.9), transparent 70%),
+    radial-gradient(1800px 720px at 50% -210px, rgba(255,225,145,.12), transparent 65%),
+    radial-gradient(1200px 820px at 50% 115%, rgba(18,24,34,.85), transparent 70%),
     var(--bg);
-  color: var(--text);
-  font-family: var(--font);
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
+  color:var(--text);
+  font-family:var(--font);
+  -webkit-font-smoothing:antialiased;
+  -moz-osx-font-smoothing:grayscale;
 }
 
-.hq-container {
-  max-width: 1040px;
-  margin: 72px auto;
-  padding: 0 20px;
-}
+/* Контейнер */
+.hq-container{max-width:1120px;margin:76px auto;padding:0 22px}
 
-.hq-title {
-  font-size: clamp(28px, 4vw, 46px);
-  letter-spacing: 0.4px;
-  line-height: 1.12;
-  margin: 0 0 8px;
+/* Заголовок */
+.hq-title{
+  font-size:clamp(30px,4.6vw,52px);
+  line-height:1.1;
+  margin:0 0 8px;
+  letter-spacing:.4px;
   text-shadow:
-    0 1px 0 rgba(0,0,0,0.35),
-    0 0 30px rgba(255, 230, 160, 0.25);
+    0 1px 0 rgba(0,0,0,.35),
+    0 0 28px rgba(255, 220, 140, .22);
+}
+.hq-subtitle{color:var(--text-dim);margin:0 0 26px}
+
+/* Солнце */
+.sun{
+  width:16px;height:16px;border-radius:50%;
+  margin-left:10px;vertical-align:middle;display:inline-block;
+  background: radial-gradient(circle at 35% 35%, #fff, #ffe3a6 50%, #f0c36a 72%);
+  box-shadow: var(--glow);
 }
 
-.hq-subtitle {
-  color: var(--text-dim);
-  margin: 0 0 28px;
+@keyframes elayaPulse{
+  0%,100%{filter:drop-shadow(0 0 0 rgba(255,220,140,0));transform:translateY(0)}
+  50%{filter:drop-shadow(0 0 12px rgba(255,220,140,.45));transform:translateY(-.5px)}
 }
+.pulse{animation:elayaPulse 2.6s ease-in-out infinite}
 
 /* Панель */
-.hq-panel {
-  background: linear-gradient(180deg, var(--panel) 0%, var(--panel-2) 100%);
-  border: 1px solid var(--panel-border);
-  border-radius: var(--radius-xl);
-  box-shadow: var(--soft-shadow);
-  position: relative;
-  overflow: hidden;
+.hq-panel{
+  background:linear-gradient(180deg,var(--panel) 0%,var(--panel-2) 100%);
+  border:1px solid var(--panel-border);
+  border-radius:var(--radius-xl);
+  box-shadow:var(--soft-shadow);
+  position:relative;overflow:hidden;
 }
 
-.hq-panel .stripe {
-  position: absolute;
-  inset: 0;
-  background: radial-gradient(1000px 260px at 50% -100px, var(--accent-soft), transparent 70%);
-  pointer-events: none;
+/* Тёплая «полоска» наверху панели */
+.hq-panel .stripe{
+  position:absolute;inset:0;pointer-events:none;
+  background:radial-gradient(1100px 300px at 50% -140px, var(--accent-soft), transparent 72%);
 }
 
-/* Сетки и карточки */
-.hq-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 20px;
-  padding: 26px;
+/* Сетка */
+.hq-grid{
+  display:grid;grid-template-columns:1fr 1fr;gap:20px;padding:28px;
 }
-@media (max-width: 900px) {
-  .hq-grid { grid-template-columns: 1fr; }
+@media (max-width:900px){.hq-grid{grid-template-columns:1fr}}
+
+/* Карточка */
+.card{
+  background:linear-gradient(180deg, rgba(255,255,255,.02), rgba(0,0,0,.06));
+  border:1px solid var(--panel-border);
+  border-radius:var(--radius-md);
+  box-shadow:var(--inner);
+  padding:18px 18px 16px;
 }
 
-.card {
-  background: linear-gradient(180deg, rgba(255,255,255,0.02), rgba(0,0,0,0.05));
-  border: 1px solid var(--panel-border);
-  border-radius: var(--radius-md);
-  box-shadow: var(--inner);
-  padding: 18px;
-}
-
-.card h3 {
-  font-size: 14px;
-  font-weight: 600;
-  letter-spacing: .12em;
-  text-transform: uppercase;
-  color: var(--muted);
-  margin: 0 0 12px;
+/* Заголовки секций */
+.card h3{
+  font-size:14px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;
+  color:var(--muted);margin:0 0 12px;
 }
 
 /* Пилюли */
-.pills {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
+.pills{display:flex;gap:10px;flex-wrap:wrap;margin-top:10px}
+.pill{
+  display:inline-flex;align-items:center;gap:8px;
+  padding:9px 13px;border-radius:999px;
+  background:rgba(255,255,255,.035);
+  border:1px solid var(--panel-border);
+  color:var(--text);font-weight:700;font-size:14px;
 }
-.pill {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 12px;
-  border-radius: 999px;
-  background: rgba(255,255,255,0.03);
-  border: 1px solid var(--panel-border);
-  color: var(--text);
-  font-weight: 600;
-  font-size: 14px;
-}
-.pill--intro      { box-shadow: var(--glow-soft); }
-.pill--reflect    { box-shadow: 0 0 18px rgba(127, 219, 255, 0.15); }
-.pill--transition { box-shadow: 0 0 18px rgba(119, 242, 197, 0.18); }
+.pill--intro{box-shadow:var(--glow-soft)}
+.pill--reflect{box-shadow:0 0 20px rgba(127,219,255,.16)}
+.pill--transition{box-shadow:0 0 20px rgba(119,242,197,.2)}
 
-/* Маленькая пульсирующая луна */
-.moon {
-  width: 14px;
-  height: 14px;
-  border-radius: 50%;
-  background: radial-gradient(circle at 35% 35%, #fff, #ffe8b1 45%, #e9c375 70%);
-  box-shadow: var(--glow);
-  display: inline-block;
-  vertical-align: middle;
-  margin-left: 8px;
-  animation: elayaPulse 2.8s ease-in-out infinite;
+/* Маленькая луна */
+.moon{
+  width:14px;height:14px;border-radius:50%;
+  background:radial-gradient(circle at 35% 35%, #fff, #ffe7b3 45%, #e9c375 70%);
+  box-shadow:var(--glow);display:inline-block;vertical-align:middle;margin-left:8px;
 }
 
 /* Reflection */
-.reflect-box {
-  min-height: 112px;
-  display: grid;
-  align-content: space-between;
-}
-.reflect-text {
-  color: var(--text-dim);
-  line-height: 1.5;
-  font-size: 15.5px;
-  white-space: pre-wrap;
-}
-.reflect-footer {
-  display: flex; justify-content: space-between; align-items: center;
-  color: var(--muted);
-  font-size: 13px;
-  opacity: .9;
-}
+.reflect-box{min-height:112px;display:grid;align-content:space-between}
+.reflect-text{color:var(--text-dim);line-height:1.5;font-size:15.5px;white-space:pre-wrap}
+.reflect-footer{display:flex;justify-content:space-between;align-items:center;color:var(--muted);font-size:13px;opacity:.95}
 
-/* Footer-status */
-.hq-status {
-  display: flex;
-  gap: 14px;
-  align-items: center;
-  padding: 14px 22px 22px;
-  color: var(--muted);
-  font-size: 13px;
-}
-.badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 7px 10px;
-  border-radius: 10px;
-  border: 1px solid var(--panel-border);
-  background: rgba(255,255,255,0.02);
-}
-.badge .dot {
-  width: 7px; height: 7px; border-radius: 50%;
-  background: var(--accent-2);
-  box-shadow: 0 0 12px var(--accent-soft);
-}
-.badge.ok   .dot { background: var(--ok); }
-.badge.err  .dot { background: var(--err); }
-.badge.dim  .dot { background: var(--muted); }
+/* Статусы */
+.hq-status{display:flex;gap:14px;align-items:center;padding:14px 22px 22px;color:var(--muted);font-size:13px}
+.badge{display:inline-flex;align-items:center;gap:6px;padding:7px 10px;border-radius:10px;border:1px solid var(--panel-border);background:rgba(255,255,255,.02)}
+.badge .dot{width:7px;height:7px;border-radius:50%;background:var(--accent-2);box-shadow:0 0 12px var(--accent-soft)}
+.badge.ok .dot{background:var(--ok)}
+.badge.err .dot{background:var(--err)}
+.badge.dim .dot{background:var(--muted)}
 
-/* Пульсация */
-@keyframes elayaPulse {
-  0%, 100% { filter: drop-shadow(0 0 0 rgba(255, 230, 160, 0)); }
-  50% { filter: drop-shadow(0 0 8px rgba(255, 230, 160, .35)); }
-}
+/* Разделитель */
+hr.sep{border:0;height:1px;background:linear-gradient(90deg,transparent,var(--panel-border),transparent);margin:12px 0 8px}
+
+/* Таблицы, если появятся */
+table.hq{width:100%;border-collapse:collapse;font-size:14px}
+table.hq th,table.hq td{padding:10px 12px;border-bottom:1px dashed rgba(255,255,255,.07)}
+table.hq th{color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.08em;font-size:12.5px}
