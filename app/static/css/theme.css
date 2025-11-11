@@ -1,0 +1,260 @@
+/* ==========================================================================
+   Elaya · HQ Theme (Light-of-Night)
+   — переменные темы, светящие карточки, «пилюли», фон-орбита
+   Версия: 1.2
+   ========================================================================== */
+
+:root {
+  /* Цвета ядра */
+  --bg: #0b0f14;
+  --bg-2: #0f141b;
+  --panel: #11161d;
+  --panel-2: #141b23;
+  --panel-border: rgba(255, 255, 255, 0.08);
+
+  /* Текст */
+  --text: #f6f1e9;
+  --text-dim: #cfd6df;
+  --muted: #9aa6b2;
+
+  /* Акценты — тёплое «свечение» */
+  --accent: #ffd782;      /* тёплый свет */
+  --accent-2: #ffb84d;    /* оранж-жемчуг */
+  --accent-soft: rgba(255, 215, 130, 0.18);
+
+  /* Служебные */
+  --ok: #77f2c5;
+  --warn: #ffd37a;
+  --err: #ff6b6b;
+
+  /* Геометрия */
+  --radius-xl: 22px;
+  --radius-md: 14px;
+  --radius-sm: 10px;
+
+  /* Тени и свечение */
+  --soft-shadow: 0 10px 24px rgba(0, 0, 0, 0.45);
+  --inner: inset 0 1px 0 rgba(255,255,255,0.035), inset 0 -1px 0 rgba(0,0,0,0.3);
+  --glow: 0 0 40px rgba(255, 215, 130, 0.25),
+          0 0 120px rgba(255, 215, 130, 0.14);
+  --glow-soft: 0 0 24px rgba(255, 215, 130, 0.18);
+
+  /* Шрифт */
+  --font: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Inter, "Helvetica Neue", Arial, "Noto Sans", "Liberation Sans", "Apple Color Emoji", "Segoe UI Emoji";
+}
+
+@media (prefers-color-scheme: light) {
+  :root {
+    --bg: #f7f7fb;
+    --bg-2: #ffffff;
+    --panel: #ffffff;
+    --panel-2: #fafbff;
+    --panel-border: rgba(20, 24, 30, 0.08);
+    --text: #151922;
+    --text-dim: #2d3340;
+    --muted: #596273;
+    --soft-shadow: 0 12px 24px rgba(16, 20, 30, 0.08);
+    --glow: 0 0 40px rgba(255, 183, 77, 0.22), 0 0 100px rgba(255,183,77,0.10);
+    --glow-soft: 0 0 24px rgba(255,183,77,0.18);
+  }
+}
+
+/* Базовая сцена — «ночное» поле с орбитой */
+html, body {
+  height: 100%;
+}
+body {
+  margin: 0;
+  background:
+    radial-gradient(1800px 700px at 50% -200px, rgba(255, 215, 130, 0.08), transparent 60%),
+    radial-gradient(1200px 800px at 50% 115%, rgba(26, 34, 46, 0.8), transparent 70%),
+    var(--bg);
+  color: var(--text);
+  font-family: var(--font);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Контейнер сцены */
+.hq-container {
+  max-width: 1040px;
+  margin: 72px auto;
+  padding: 0 20px;
+}
+
+/* Заголовок — мягкий «перламутр» */
+.hq-title {
+  font-size: clamp(28px, 4.2vw, 46px);
+  letter-spacing: 0.4px;
+  line-height: 1.12;
+  margin: 0 0 8px;
+  text-shadow:
+    0 1px 0 rgba(0,0,0,0.35),
+    0 0 24px rgba(255, 215, 130, 0.18);
+}
+.hq-subtitle {
+  color: var(--text-dim);
+  margin: 0 0 24px;
+}
+
+/* Панель */
+.hq-panel {
+  background: linear-gradient(180deg, var(--panel) 0%, var(--panel-2) 100%);
+  border: 1px solid var(--panel-border);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--soft-shadow);
+  position: relative;
+  overflow: hidden;
+}
+
+/* Внутренние линии-полоски */
+.hq-panel .stripe {
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(1000px 280px at 50% -120px, var(--accent-soft), transparent 70%);
+  pointer-events: none;
+}
+
+/* Секции */
+.hq-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 18px;
+  padding: 26px;
+}
+@media (max-width: 900px) {
+  .hq-grid { grid-template-columns: 1fr; }
+}
+
+/* Карточки */
+.card {
+  background: linear-gradient(180deg, rgba(255,255,255,0.02), rgba(0,0,0,0.06));
+  border: 1px solid var(--panel-border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--inner);
+  padding: 18px 18px 16px;
+}
+
+/* Заголовок секции */
+.card h3 {
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin: 0 0 12px;
+}
+
+/* Пилюли-счётчики */
+.pills {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 10px;
+}
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-radius: 999px;
+  background: rgba(255,255,255,0.03);
+  border: 1px solid var(--panel-border);
+  color: var(--text);
+  font-weight: 600;
+  font-size: 14px;
+}
+.pill--intro      { box-shadow: var(--glow-soft); }
+.pill--reflect    { box-shadow: 0 0 18px rgba(127, 219, 255, 0.15); }
+.pill--transition { box-shadow: 0 0 18px rgba(119, 242, 197, 0.18); }
+
+/* «Светлячок» — маленькая луна в заголовке */
+.moon {
+  width: 14px; height: 14px; border-radius: 50%;
+  background: radial-gradient(circle at 35% 35%, #fff, #ffe7b3 45%, #e9c375 70%);
+  box-shadow: var(--glow);
+  display: inline-block;
+  vertical-align: middle;
+  margin-left: 8px;
+}
+
+/* Reflection box */
+.reflect-box {
+  min-height: 112px;
+  display: grid;
+  align-content: space-between;
+}
+.reflect-text {
+  color: var(--text-dim);
+  line-height: 1.5;
+  font-size: 15.5px;
+  white-space: pre-wrap;
+}
+.reflect-footer {
+  display: flex; justify-content: space-between; align-items: center;
+  color: var(--muted);
+  font-size: 13px;
+  opacity: .9;
+}
+
+/* Хлебные крошки статуса */
+.hq-status {
+  display: flex; gap: 14px; align-items: center;
+  padding: 14px 22px 22px;
+  color: var(--muted);
+  font-size: 13px;
+}
+.badge {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 7px 10px;
+  border-radius: 10px;
+  border: 1px solid var(--panel-border);
+  background: rgba(255,255,255,0.02);
+}
+.badge .dot {
+  width: 7px; height: 7px; border-radius: 50%;
+  background: var(--accent-2);
+  box-shadow: 0 0 12px var(--accent-soft);
+}
+.badge.ok   .dot { background: var(--ok); }
+.badge.err  .dot { background: var(--err); }
+.badge.dim  .dot { background: var(--muted); }
+
+/* Кнопки (если будут на панели) */
+.btn {
+  appearance: none; border: 0; cursor: pointer;
+  color: #121519; background: linear-gradient(180deg, #ffe8b1, #ffc872);
+  font-weight: 700; padding: 10px 14px; border-radius: 12px;
+  box-shadow: 0 6px 16px rgba(255, 165, 55, .25), 0 0 0 1px rgba(255,255,255,.2) inset;
+  transition: transform .08s ease, box-shadow .2s ease;
+}
+.btn:hover { transform: translateY(-1px); box-shadow: 0 10px 22px rgba(255, 165, 55, .30), 0 0 0 1px rgba(255,255,255,.22) inset; }
+.btn:active{ transform: translateY(0); }
+
+/* Маленькая «пульсация» у светлых элементов */
+@keyframes elayaPulse {
+  0%, 100% { filter: drop-shadow(0 0 0 rgba(255,215,130,0)); }
+  50% { filter: drop-shadow(0 0 10px rgba(255,215,130,.25)); }
+}
+.pulse {
+  animation: elayaPulse 2.8s ease-in-out infinite;
+}
+
+/* Служебные */
+hr.sep {
+  border: 0; height: 1px;
+  background: linear-gradient(90deg, transparent, var(--panel-border), transparent);
+  margin: 12px 0 8px;
+}
+.small { font-size: 12.5px; color: var(--muted); }
+
+/* Опционально — таблицы */
+table.hq {
+  width: 100%; border-collapse: collapse; font-size: 14px;
+}
+table.hq th, table.hq td {
+  padding: 10px 12px; border-bottom: 1px dashed rgba(255,255,255,0.07);
+}
+table.hq th {
+  color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: .08em; font-size: 12.5px;
+}
