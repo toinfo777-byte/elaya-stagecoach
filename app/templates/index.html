@@ -7,8 +7,14 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="/static/css/theme.css">
   <style>
-    /* Небольшая «подложка», чтобы страница показалась раньше */
     body{opacity:1;transition:opacity .2s ease}
+    .btn{padding:8px 14px;border-radius:10px;border:1px solid var(--panel-border);background:var(--panel);color:var(--text);cursor:pointer}
+    .btn:hover{filter:brightness(1.08)}
+    .modal-back{position:fixed;inset:0;display:none;align-items:center;justify-content:center;background:rgba(0,0,0,.5);z-index:1000}
+    .modal{width:min(680px,92vw);background:var(--panel);border:1px solid var(--panel-border);border-radius:var(--radius-xl);padding:18px 18px 14px;box-shadow:var(--soft-shadow)}
+    .modal h3{margin:0 0 10px;color:var(--text)}
+    .modal textarea{width:100%;background:rgba(255,255,255,.02);color:var(--text);border:1px solid var(--panel-border);border-radius:12px;padding:12px;resize:vertical}
+    .modal .row{display:flex;gap:10px;justify-content:flex-end;margin-top:12px}
   </style>
 </head>
 <body>
@@ -40,15 +46,16 @@
             <span class="badge ok"><span class="dot"></span> Cycle Active</span>
             <span class="badge dim"><span class="dot"></span> Memory Stable</span>
             <span class="badge dim"><span class="dot"></span> Reflection On</span>
+            <button class="btn" id="open-reflection" style="margin-left:auto">Добавить заметку</button>
           </div>
         </div>
 
-        <!-- ПРИВЕТСТВИЕ -->
+        <!-- RELECTION BOX -->
         <div class="card reflect-box">
-          <h3>Привет! Панель Элай запущена.</h3>
-          <div class="reflect-text" id="reflect_text">—</div>
+          <h3>Последняя заметка · Reflection</h3>
+          <div class="reflect-text" id="reflection-text">—</div>
           <div class="reflect-footer">
-            <span id="reflect_time">версия 1.2</span>
+            <span id="last-upd">—</span>
             <span class="moon pulse" title="Свет"></span>
           </div>
         </div>
@@ -57,11 +64,11 @@
       <!-- CORE · СЧЁТЧИКИ -->
       <div class="card" style="margin: 12px 26px 6px;">
         <h3>Core · состояние</h3>
-        <div class="small" id="core_updated">Последнее обновление: —</div>
+        <div class="small">Последнее обновление ядра: <span id="core-last-update">—</span></div>
         <div class="pills" style="margin-top:12px">
-          <span class="pill pill--intro">intro: <b id="stat_intro">0</b></span>
-          <span class="pill pill--reflect">reflect: <b id="stat_reflect">0</b></span>
-          <span class="pill pill--transition">transition: <b id="stat_transition">0</b></span>
+          <span class="pill pill--intro">intro: <b id="intro">0</b></span>
+          <span class="pill pill--reflect">reflect: <b id="reflect">0</b></span>
+          <span class="pill pill--transition">transition: <b id="transition">0</b></span>
         </div>
       </div>
 
@@ -74,31 +81,65 @@
     </section>
   </div>
 
+  <!-- MODAL: Reflection -->
+  <div id="refl-modal" class="modal-back" role="dialog" aria-modal="true" aria-labelledby="refl-title">
+    <div class="modal">
+      <h3 id="refl-title">Reflection · новая заметка</h3>
+      <textarea id="refl-text" rows="6" placeholder="Короткая рефлексия…"></textarea>
+      <div class="row">
+        <button class="btn" id="refl-save">Сохранить</button>
+        <button class="btn" id="refl-cancel" style="background:linear-gradient(180deg,#e6e6e6,#cfcfcf);color:#111;">Отмена</button>
+      </div>
+    </div>
+  </div>
+
   <script>
-    async function loadStats(){
+    const $ = (id) => document.getElementById(id);
+
+    async function pullStats(){
       try{
         const r = await fetch('/ui/stats.json', {cache:'no-store'});
+        if(!r.ok) return;
         const j = await r.json();
-        const c = j.core || {};
-        const refl = j.reflection || {};
-        // числа
-        document.getElementById('stat_intro').textContent = c.intro ?? 0;
-        document.getElementById('stat_reflect').textContent = c.reflect ?? 0;
-        document.getElementById('stat_transition').textContent = c.transition ?? 0;
-        // время
-        document.getElementById('core_updated').textContent =
-          'Последнее обновление: ' + (c.last_updated || '—');
-        // последняя заметка
-        document.getElementById('reflect_text').textContent =
-          refl.text ? String(refl.text) : '—';
-        document.getElementById('reflect_time').textContent =
-          refl.updated_at ? refl.updated_at : 'версия 1.2';
+
+        // структура: { users, last_update, counts:{intro,reflect,transition}, last_reflection:{text,at} }
+        const counts = j.counts || {};
+        const lastRef = j.last_reflection || {};
+
+        // counters
+        $('intro').textContent = counts.intro ?? 0;
+        $('reflect').textContent = counts.reflect ?? 0;
+        $('transition').textContent = counts.transition ?? 0;
+
+        // times + last reflection
+        $('core-last-update').textContent = j.last_update || '—';
+        $('last-upd').textContent = lastRef.at || j.last_update || '—';
+        $('reflection-text').textContent = (lastRef.text && String(lastRef.text).trim()) ? lastRef.text : '—';
       }catch(e){
-        console.warn('stats.json error', e);
+        console.warn('stats refresh failed', e);
       }
     }
-    loadStats();
-    setInterval(loadStats, 10_000);
+
+    // modal controls
+    const modal = $('refl-modal');
+    $('open-reflection')?.addEventListener('click', () => {
+      $('refl-text').value = '';
+      modal.style.display = 'flex';
+    });
+    $('refl-cancel')?.addEventListener('click', () => {
+      modal.style.display = 'none';
+    });
+    $('refl-save')?.addEventListener('click', async () => {
+      const text = $('refl-text').value.trim();
+      if(!text){ alert('Пусто.'); return; }
+      // Опционально: если сделаем эндпоинт POST /ui/reflection/save — сюда прилетит сохранение в store.add_reflection().
+      // Сейчас просто закрываем модалку, обновляем панель (сохранение идёт через бот-трафик /scene/reflect).
+      modal.style.display = 'none';
+      await pullStats();
+    });
+
+    pullStats();
+    setInterval(pullStats, 8000);
   </script>
 </body>
 </html>
