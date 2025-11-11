@@ -17,6 +17,9 @@ from app.build import BUILD_MARK
 from app.config import settings
 from app.core import store  # init DB + антидубли
 
+# --- импорт нового роутера --------------------------------------------------
+from app.routers import ui  # подключаем UI-панель (новый роутер)
+
 # --- FastAPI core -----------------------------------------------------------
 app = FastAPI(title="Elaya StageCoach", version=BUILD_MARK)
 dp = Dispatcher()
@@ -25,36 +28,35 @@ BOT_PROFILE = os.getenv("BOT_PROFILE", "hq").strip().lower()
 WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET", "").strip()
 
 # --- aiogram-роутеры --------------------------------------------------------
-from app.routers import system, hq  # базовые штабные
+from app.routers import system, hq
 
 dp.include_router(system.router)
 dp.include_router(hq.router)
 
 if BOT_PROFILE == "trainer":
-    # фронтовой контур «Тренер сцены»
     from app.routers import trainer
     dp.include_router(trainer.router)
 
 # --- fastapi-роутеры --------------------------------------------------------
 from app import core_api as core_api_router
 from app.routers import diag
-from app.routes import ui as ui_pages_router      # веб-панель HQ (/)
-from app.ui import router as ui_api_router        # /ui/stats.json, /ui/ping
+from app.routes import ui as ui_pages_router
+from app.ui import router as ui_api_router
 
-app.include_router(diag.router)                   # /diag/...
-app.include_router(core_api_router.router)        # /api/...
-app.include_router(ui_pages_router.router)        # HTML-панель
-app.include_router(ui_api_router)                 # JSON/ping для UI
+app.include_router(diag.router)             # /diag/...
+app.include_router(core_api_router.router)  # /api/...
+app.include_router(ui_pages_router.router)  # HTML-панель HQ (/)
+app.include_router(ui_api_router)           # /ui/stats.json + /ui/ping
+app.include_router(ui.router)               # 👈 новый ui-роутер из app/routers/ui.py
 
 # --- static (/static) --------------------------------------------------------
-# монтируем только если папка существует, чтобы не падать на проде
 _static_dir = Path("app/static")
 if _static_dir.exists():
     app.mount("/static", StaticFiles(directory=str(_static_dir)), name="static")
 else:
     logging.getLogger(__name__).info("Static dir not found, skip mount: %s", _static_dir)
 
-# Sentry breadcrumbs (мягкая трассировка запросов)
+# --- Sentry middleware ------------------------------------------------------
 try:
     from app.mw_sentry import SentryBreadcrumbs
     app.add_middleware(SentryBreadcrumbs)
@@ -97,7 +99,7 @@ async def tg_webhook(request: Request) -> Response:
     except Exception:
         return Response(status_code=status.HTTP_400_BAD_REQUEST)
 
-    # (3) антидубли по update_id — подтверждаем дубль молча
+    # (3) антидубли по update_id
     if getattr(update, "update_id", None) is not None:
         try:
             if store.is_duplicate_update(int(update.update_id)):
@@ -105,7 +107,7 @@ async def tg_webhook(request: Request) -> Response:
         except Exception:
             logging.exception("duplicate check failed")
 
-    # (4) прокармливаем апдейт диспетчеру
+    # (4) передаём апдейт aiogram-диспетчеру
     bot = get_bot()
     try:
         await dp.feed_update(bot, update)
@@ -120,7 +122,7 @@ async def tg_webhook(request: Request) -> Response:
 @app.on_event("startup")
 async def on_startup() -> None:
     try:
-        store.init_db()  # создаёт таблицы, если их нет
+        store.init_db()  # создаёт таблицы и индексы, если их нет
     except Exception:
         logging.exception("store.init_db failed")
 
