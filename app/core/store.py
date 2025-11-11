@@ -25,7 +25,6 @@ _DB_PATH = _db_path_from_url(DB_URL)
 def init_db() -> None:
     os.makedirs(os.path.dirname(_DB_PATH), exist_ok=True)
     with sqlite3.connect(_DB_PATH) as con:
-        # чуть устойчивости под веб-нагрузку
         con.execute("PRAGMA journal_mode=WAL;")
         con.execute("PRAGMA synchronous=NORMAL;")
         con.execute(
@@ -48,6 +47,7 @@ def init_db() -> None:
         )
         con.commit()
 
+
 # --- rows -------------------------------------------------------------------
 @dataclass
 class SceneRow:
@@ -55,6 +55,7 @@ class SceneRow:
     last_scene: str
     last_reflect: str | None
     updated_at: str
+
 
 # --- CRUD -------------------------------------------------------------------
 def get_scene(user_id: int) -> SceneRow | None:
@@ -86,7 +87,6 @@ def upsert_scene(user_id: int, last_scene: str, last_reflect: str | None = None)
 
 
 def add_reflection(user_id: int, reflection: str) -> None:
-    """Сохранить последнюю рефлексию и обновить updated_at."""
     ts = datetime.utcnow().isoformat() + "Z"
     with _lock, sqlite3.connect(_DB_PATH) as con:
         con.execute(
@@ -112,15 +112,9 @@ def is_duplicate_update(update_id: int) -> bool:
         con.commit()
         return False
 
+
 # --- HQ stats (расширенная) -------------------------------------------------
 def get_stats() -> dict:
-    """
-    Сводка для HQ-панели (расширенная):
-    - users: пользователей в scene_state
-    - last_update: MAX(updated_at)
-    - counts: intro/reflect/transition
-    - last_reflection: {text, at}
-    """
     with _lock, sqlite3.connect(_DB_PATH) as con:
         con.row_factory = sqlite3.Row
 
@@ -156,12 +150,9 @@ def get_stats() -> dict:
         "last_reflection": {"text": last_reflect, "at": last_reflect_at},
     }
 
+
 # --- HQ stats (компактная для /ui/stats.json) -------------------------------
 def get_scene_stats() -> dict:
-    """
-    Минимальный JSON для автообновления UI:
-    { counts:{intro,reflect,transition}, last_updated, last_reflection }
-    """
     with _lock, sqlite3.connect(_DB_PATH) as con:
         counts = {"intro": 0, "reflect": 0, "transition": 0}
         for scene, cnt in con.execute(
@@ -190,3 +181,47 @@ def get_scene_stats() -> dict:
         "last_updated": last_updated,
         "last_reflection": last_reflection,
     }
+
+
+# --- Aggregates for UI / Pulse ----------------------------------------------
+def get_counts() -> dict:
+    with _lock, sqlite3.connect(_DB_PATH) as con:
+        cur = con.execute("SELECT COUNT(*) FROM scene_state")
+        users = cur.fetchone()[0] or 0
+
+        cur = con.execute(
+            """
+            SELECT last_scene, COUNT(*)
+            FROM scene_state
+            GROUP BY last_scene
+            """
+        )
+        by_scene = {row[0]: row[1] for row in cur.fetchall()}
+
+        cur = con.execute("SELECT COALESCE(MAX(updated_at), '') FROM scene_state")
+        last_updated = cur.fetchone()[0] or ""
+
+    return {
+        "users": users,
+        "intro": by_scene.get("intro", 0),
+        "reflect": by_scene.get("reflect", 0),
+        "transition": by_scene.get("transition", 0),
+        "last_updated": last_updated,
+    }
+
+
+def get_last_reflection() -> dict | None:
+    with _lock, sqlite3.connect(_DB_PATH) as con:
+        cur = con.execute(
+            """
+            SELECT user_id, last_reflect, updated_at
+            FROM scene_state
+            WHERE last_reflect IS NOT NULL AND TRIM(last_reflect) <> ''
+            ORDER BY updated_at DESC
+            LIMIT 1
+            """
+        )
+        row = cur.fetchone()
+        if not row:
+            return None
+        return {"user_id": row[0], "text": row[1], "updated_at": row[2]}
