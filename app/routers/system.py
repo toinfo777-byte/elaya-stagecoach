@@ -9,7 +9,7 @@ async def health():
 
 @router.get("/healthz")
 async def healthz():
-    # иногда рендер дёргает разные урлы — пусть оба отвечают
+    # Render может пинговать разные урлы — пусть оба отвечают
     return {"status": "ok"}
 
 @router.get("/status")
@@ -24,7 +24,6 @@ async def status():
 async def version():
     return {"version": "1.2"}
 
-# универсальный echo-json для быстрой диагностики
 @router.post("/echo")
 async def echo(payload: dict):
     return {"received": payload, "ok": True}
