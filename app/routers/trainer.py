@@ -6,7 +6,7 @@ from aiogram.filters import Command
 from aiogram.types import Message
 
 from app.keyboards.reply import main_menu_kb, BTN_TRAINING
-from trainer.app import core_api  # импортируем наш мост к StageCoach
+from app import core_api  # ✅ исправлено: относительный импорт к StageCoach
 
 router = Router(name="trainer")
 
