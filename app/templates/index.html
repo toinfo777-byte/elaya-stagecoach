@@ -1,31 +1,80 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="ru">
 <head>
-  <meta charset="UTF-8">
-  <title>Elaya — StageCoach</title>
-  <link rel="stylesheet" href="/static/css/theme.css">
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>{{ title }}</title>
+
+  <!-- тема (ваш файл) + cache-busting -->
+  <link rel="stylesheet" href="/static/css/theme.css?v=1.2">
+
+  <style>
+    /* небольшая подсветка «пульсирующей точки» возле заголовка */
+    .sun-dot {
+      width: 10px; height: 10px; border-radius: 999px; display:inline-block; margin-left:10px;
+      background: radial-gradient(circle at 35% 35%, #fff, #ffe7b3 45%, #e9c375 70%);
+      box-shadow: 0 0 10px rgba(255,215,130,.6), 0 0 30px rgba(255,215,130,.35);
+      animation: elayaPulse 2.8s ease-in-out infinite;
+      vertical-align: middle;
+    }
+    .shell { max-width: 1100px; margin: 52px auto 80px; padding: 0 22px; }
+    .grid {
+      display:grid; grid-template-columns: 1fr 1fr; gap:18px;
+    }
+    @media (max-width: 980px){ .grid { grid-template-columns: 1fr; } }
+    .card h3 { margin:0 0 12px; }
+    .pills { margin-top: 8px; }
+    .pill { font-size: 13.5px; }
+  </style>
 </head>
 <body>
-  <div class="hq-container">
-    <h1 class="hq-title">Элайя — StageCoach <span class="moon"></span></h1>
+  <div class="shell">
+    <h1 class="hq-title">Элайя — StageCoach <span class="sun-dot"></span></h1>
     <p class="hq-subtitle">панель наблюдения</p>
+
     <div class="hq-panel">
       <div class="stripe"></div>
       <div class="hq-grid">
-        <div class="card">
-          <h3>Портал</h3>
+
+        <section class="card">
+          <h3>портал</h3>
           <div class="pills">
-            <div class="pill pill--intro">Stable</div>
-            <div class="pill pill--reflect">Online</div>
-            <div class="pill pill--transition">Light active</div>
+            {% for flag in portal_flags %}
+              <span class="pill">{{ flag }}</span>
+            {% endfor %}
           </div>
-        </div>
-        <div class="card reflect-box">
-          <div class="reflect-text">Привет! Панель Элайи запущена.</div>
-          <div class="reflect-footer"><span>версия 1.2</span><span>🌗</span></div>
-        </div>
+        </section>
+
+        <section class="card">
+          <h3>&nbsp;</h3>
+          <div class="reflect-box">
+            <div class="reflect-text">{{ hello_text }}</div>
+            <div class="reflect-footer">
+              <span class="small">версия {{ version }}</span>
+              <span class="moon pulse"></span>
+            </div>
+          </div>
+        </section>
+
+      </div>
+      <div class="hq-status">
+        <span class="badge dim"><span class="dot"></span> HQ Panel</span>
+        <span class="badge ok"><span class="dot"></span> Cycle Active</span>
+        <span class="badge dim"><span class="dot"></span> Memory Stable</span>
+        <span class="badge dim"><span class="dot"></span> Reflection On</span>
       </div>
     </div>
   </div>
+
+  <script>
+    // лёгкое автообновление статистики (если понадобится)
+    async function refreshStats(){
+      try {
+        const r = await fetch('/ui/stats.json', {cache:'no-store'});
+        // здесь можно обновлять DOM по данным r.json()
+      } catch(e){}
+    }
+    // setInterval(refreshStats, 15000);
+  </script>
 </body>
 </html>
