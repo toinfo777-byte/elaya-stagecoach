@@ -1,7 +1,12 @@
 /* ==========================================================================
    Elaya · HQ Theme (Light-of-Night)
    — переменные темы, светящие карточки, «пилюли», фон-орбита
-   Версия: 1.2
+   Версия: 1.3  ·  автор: HQ Elaya
+   Изменения v1.3:
+   • focus-visible для клавиатурной навигации
+   • prefers-reduced-motion: убираем пульсации
+   • слегка повышен контраст текста на тёмной теме
+   • мягче орбита на светлой теме, мелкие правки типографики
    ========================================================================== */
 
 :root {
@@ -13,8 +18,8 @@
   --panel-border: rgba(255, 255, 255, 0.08);
 
   /* Текст */
-  --text: #f6f1e9;
-  --text-dim: #cfd6df;
+  --text: #f7f3ea;        /* было #f6f1e9 — на 1–2% светлее для контраста */
+  --text-dim: #d7dee6;    /* было #cfd6df */
   --muted: #9aa6b2;
 
   /* Акценты — тёплое «свечение» */
@@ -35,12 +40,13 @@
   /* Тени и свечение */
   --soft-shadow: 0 10px 24px rgba(0, 0, 0, 0.45);
   --inner: inset 0 1px 0 rgba(255,255,255,0.035), inset 0 -1px 0 rgba(0,0,0,0.3);
-  --glow: 0 0 40px rgba(255, 215, 130, 0.25),
-          0 0 120px rgba(255, 215, 130, 0.14);
+  --glow: 0 0 40px rgba(255, 215, 130, 0.25), 0 0 120px rgba(255, 215, 130, 0.14);
   --glow-soft: 0 0 24px rgba(255, 215, 130, 0.18);
 
   /* Шрифт */
-  --font: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Inter, "Helvetica Neue", Arial, "Noto Sans", "Liberation Sans", "Apple Color Emoji", "Segoe UI Emoji";
+  --font: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Inter,
+          "Helvetica Neue", Arial, "Noto Sans", "Liberation Sans",
+          "Apple Color Emoji", "Segoe UI Emoji";
 }
 
 @media (prefers-color-scheme: light) {
@@ -50,8 +56,8 @@
     --panel: #ffffff;
     --panel-2: #fafbff;
     --panel-border: rgba(20, 24, 30, 0.08);
-    --text: #151922;
-    --text-dim: #2d3340;
+    --text: #141922;
+    --text-dim: #2a3140;
     --muted: #596273;
     --soft-shadow: 0 12px 24px rgba(16, 20, 30, 0.08);
     --glow: 0 0 40px rgba(255, 183, 77, 0.22), 0 0 100px rgba(255,183,77,0.10);
@@ -60,14 +66,12 @@
 }
 
 /* Базовая сцена — «ночное» поле с орбитой */
-html, body {
-  height: 100%;
-}
+html, body { height: 100%; }
 body {
   margin: 0;
   background:
-    radial-gradient(1800px 700px at 50% -200px, rgba(255, 215, 130, 0.08), transparent 60%),
-    radial-gradient(1200px 800px at 50% 115%, rgba(26, 34, 46, 0.8), transparent 70%),
+    radial-gradient(1800px 700px at 50% -220px, rgba(255, 215, 130, 0.08), transparent 60%),
+    radial-gradient(1200px 800px at 50% 115%, rgba(26, 34, 46, 0.82), transparent 70%),
     var(--bg);
   color: var(--text);
   font-family: var(--font);
@@ -75,11 +79,22 @@ body {
   -moz-osx-font-smoothing: grayscale;
 }
 
+@media (prefers-color-scheme: light) {
+  body {
+    background:
+      radial-gradient(1600px 520px at 50% -180px, rgba(255, 193, 120, 0.14), transparent 60%),
+      var(--bg);
+  }
+}
+
 /* Контейнер сцены */
 .hq-container {
   max-width: 1040px;
   margin: 72px auto;
   padding: 0 20px;
+}
+@media (max-width: 560px) {
+  .hq-container { margin: 56px auto; }
 }
 
 /* Заголовок — мягкий «перламутр» */
@@ -92,10 +107,7 @@ body {
     0 1px 0 rgba(0,0,0,0.35),
     0 0 24px rgba(255, 215, 130, 0.18);
 }
-.hq-subtitle {
-  color: var(--text-dim);
-  margin: 0 0 24px;
-}
+.hq-subtitle { color: var(--text-dim); margin: 0 0 24px; }
 
 /* Панель */
 .hq-panel {
@@ -122,9 +134,7 @@ body {
   gap: 18px;
   padding: 26px;
 }
-@media (max-width: 900px) {
-  .hq-grid { grid-template-columns: 1fr; }
-}
+@media (max-width: 900px) { .hq-grid { grid-template-columns: 1fr; } }
 
 /* Карточки */
 .card {
@@ -146,23 +156,15 @@ body {
 }
 
 /* Пилюли-счётчики */
-.pills {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-  margin-top: 10px;
-}
+.pills { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
 .pill {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
+  display: inline-flex; align-items: center; gap: 8px;
   padding: 8px 12px;
   border-radius: 999px;
   background: rgba(255,255,255,0.03);
   border: 1px solid var(--panel-border);
   color: var(--text);
-  font-weight: 600;
-  font-size: 14px;
+  font-weight: 600; font-size: 14px;
 }
 .pill--intro      { box-shadow: var(--glow-soft); }
 .pill--reflect    { box-shadow: 0 0 18px rgba(127, 219, 255, 0.15); }
@@ -173,52 +175,35 @@ body {
   width: 14px; height: 14px; border-radius: 50%;
   background: radial-gradient(circle at 35% 35%, #fff, #ffe7b3 45%, #e9c375 70%);
   box-shadow: var(--glow);
-  display: inline-block;
-  vertical-align: middle;
-  margin-left: 8px;
+  display: inline-block; vertical-align: middle; margin-left: 8px;
 }
 
 /* Reflection box */
-.reflect-box {
-  min-height: 112px;
-  display: grid;
-  align-content: space-between;
-}
+.reflect-box { min-height: 112px; display: grid; align-content: space-between; }
 .reflect-text {
-  color: var(--text-dim);
-  line-height: 1.5;
-  font-size: 15.5px;
-  white-space: pre-wrap;
+  color: var(--text-dim); line-height: 1.5; font-size: 15.5px; white-space: pre-wrap;
 }
 .reflect-footer {
   display: flex; justify-content: space-between; align-items: center;
-  color: var(--muted);
-  font-size: 13px;
-  opacity: .9;
+  color: var(--muted); font-size: 13px; opacity: .9;
 }
 
 /* Хлебные крошки статуса */
 .hq-status {
   display: flex; gap: 14px; align-items: center;
   padding: 14px 22px 22px;
-  color: var(--muted);
-  font-size: 13px;
+  color: var(--muted); font-size: 13px;
 }
 .badge {
   display: inline-flex; align-items: center; gap: 6px;
-  padding: 7px 10px;
-  border-radius: 10px;
+  padding: 7px 10px; border-radius: 10px;
   border: 1px solid var(--panel-border);
   background: rgba(255,255,255,0.02);
 }
-.badge .dot {
-  width: 7px; height: 7px; border-radius: 50%;
-  background: var(--accent-2);
-  box-shadow: 0 0 12px var(--accent-soft);
-}
-.badge.ok   .dot { background: var(--ok); }
-.badge.err  .dot { background: var(--err); }
-.badge.dim  .dot { background: var(--muted); }
+.badge .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent-2); box-shadow: 0 0 12px var(--accent-soft); }
+.badge.ok .dot { background: var(--ok); }
+.badge.err .dot { background: var(--err); }
+.badge.dim .dot { background: var(--muted); }
 
 /* Кнопки (если будут на панели) */
 .btn {
@@ -229,15 +214,26 @@ body {
   transition: transform .08s ease, box-shadow .2s ease;
 }
 .btn:hover { transform: translateY(-1px); box-shadow: 0 10px 22px rgba(255, 165, 55, .30), 0 0 0 1px rgba(255,255,255,.22) inset; }
-.btn:active{ transform: translateY(0); }
+.btn:active { transform: translateY(0); }
+
+/* Доступность — focus-visible */
+:where(a, button, .pill, .btn):focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  box-shadow: 0 0 0 4px rgba(255, 215, 130, .18);
+  border-radius: 12px;
+}
 
 /* Маленькая «пульсация» у светлых элементов */
 @keyframes elayaPulse {
   0%, 100% { filter: drop-shadow(0 0 0 rgba(255,215,130,0)); }
   50% { filter: drop-shadow(0 0 10px rgba(255,215,130,.25)); }
 }
-.pulse {
-  animation: elayaPulse 2.8s ease-in-out infinite;
+.pulse { animation: elayaPulse 2.8s ease-in-out infinite; }
+
+@media (prefers-reduced-motion: reduce) {
+  .pulse { animation: none; }
+  * { transition: none !important; }
 }
 
 /* Служебные */
@@ -248,13 +244,15 @@ hr.sep {
 }
 .small { font-size: 12.5px; color: var(--muted); }
 
-/* Опционально — таблицы */
-table.hq {
-  width: 100%; border-collapse: collapse; font-size: 14px;
-}
-table.hq th, table.hq td {
-  padding: 10px 12px; border-bottom: 1px dashed rgba(255,255,255,0.07);
-}
+/* Таблицы */
+table.hq { width: 100%; border-collapse: collapse; font-size: 14px; }
+table.hq th, table.hq td { padding: 10px 12px; border-bottom: 1px dashed rgba(255,255,255,0.07); }
 table.hq th {
-  color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: .08em; font-size: 12.5px;
+  color: var(--muted); font-weight: 600; text-transform: uppercase;
+  letter-spacing: .08em; font-size: 12.5px;
 }
+
+/* Утилиты */
+.text-dim { color: var(--text-dim); }
+.text-muted { color: var(--muted); }
+.hidden { display: none !important; }
