@@ -1,20 +1,18 @@
-from __future__ import annotations
-
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
+from app.routes import ui as ui_routes
+from app.routers import system as system_routes
 
-# Роуты UI и, при необходимости, другие
-from app.routes import ui  # <-- есть app/routes/ui.py
+app = FastAPI(title="Elaya StageCoach Web")
 
-app = FastAPI(title="Elaya StageCoach · Web")
-
-# Статика: /static/css/theme.css и др.
+# статика и шаблоны
 app.mount("/static", StaticFiles(directory="app/static"), name="static")
 
-# Подключаем роутер UI (/, /ui/ping, /ui/stats.json)
-app.include_router(ui.router, prefix="", tags=["ui"])
+# роуты
+app.include_router(system_routes.router, prefix="/diag", tags=["diag"])
+app.include_router(ui_routes.router, tags=["ui"])
 
-# --- опционально: health для Render ---
-@app.get("/healthz")
-def healthz():
-    return {"ok": True}
+# корень = панель
+@app.get("/")
+async def root():
+    return await ui_routes.index()
