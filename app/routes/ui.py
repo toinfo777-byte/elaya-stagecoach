@@ -1,35 +1,47 @@
 from __future__ import annotations
-from fastapi import APIRouter, Request
-from fastapi.responses import JSONResponse, HTMLResponse
-from fastapi.templating import Jinja2Templates
-from app.core import store
 
-router = APIRouter(prefix="/ui", tags=["ui"])
+from fastapi import APIRouter, Request
+from fastapi.templating import Jinja2Templates
+from fastapi.responses import JSONResponse
+from datetime import datetime
+
+router = APIRouter()
 templates = Jinja2Templates(directory="app/templates")
 
-@router.get("/ping")
-def ping():
+# Главная (рендер панели)
+@router.get("/")
+def index(request: Request):
+    # Можно передать любые данные в шаблон:
+    ctx = {
+        "request": request,
+        "title": "Элайя — StageCoach",
+        "version": "1.2",
+        "portal_flags": ["Stable", "Online", "Light active"],
+        "hello_text": "Привет! Панель Элайи запущена.",
+    }
+    return templates.TemplateResponse("index.html", ctx)
+
+# Пинг для UI
+@router.get("/ui/ping")
+def ui_ping():
     return {"ui": "ok"}
 
-@router.get("/stats.json")
-def stats():
-    counts = store.get_counts()
-    last_ref = store.get_last_reflection()
-    return JSONResponse({
-        "core": counts,
-        "reflection": last_ref or {"text": "", "updated_at": ""},
-        "status": "ok"
-    })
-
-@router.get("/", response_class=HTMLResponse)
-def index(request: Request):
-    core = store.get_counts()
-    reflection = store.get_last_reflection()
-    return templates.TemplateResponse(
-        "index.html",
-        {
-            "request": request,
-            "core": core,
-            "reflection": reflection,
-        }
-    )
+# Мини-статистика для карточек
+@router.get("/ui/stats.json")
+def ui_stats():
+    # Заглушка — сюда потом подставим реальные счётчики из БД
+    data = {
+        "core": {
+            "users": 0,
+            "intro": 0,
+            "reflect": 0,
+            "transition": 0,
+            "last_updated": "",
+        },
+        "reflection": {
+            "text": "",
+            "updated_at": "",
+        },
+        "status": "ok",
+    }
+    return JSONResponse(data)
