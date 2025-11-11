@@ -1,105 +1,91 @@
 from __future__ import annotations
+from fastapi import APIRouter, Request
+from fastapi.responses import JSONResponse, HTMLResponse
+from fastapi.templating import Jinja2Templates
+from datetime import datetime
+import sqlite3
+import os
 
-from fastapi import APIRouter, Response
-from starlette.responses import HTMLResponse
+# — если у тебя уже есть Templates в другом месте — можешь переиспользовать
+templates = Jinja2Templates(directory="app/templates")
 
-router = APIRouter()
+router = APIRouter(prefix="/ui", tags=["ui"])
 
+# путь к SQLite (так же, как в app/core/store.py)
+DB_URL = os.getenv("DB_URL", "sqlite:////data/elaya.db")
+def _db_path_from_url(url: str) -> str:
+    return url.replace("sqlite:///", "/", 1) if url.startswith("sqlite:") else url
+DB_PATH = _db_path_from_url(DB_URL)
 
-@router.get("/ui/ping")
+def _read_stats() -> dict:
+    intro = reflect = transition = 0
+    users = 0
+    last_updated = None
+    last_reflection = None
+
+    if not os.path.exists(DB_PATH):
+        return {
+            "users": 0,
+            "last_updated": None,
+            "counts": {"intro": 0, "reflect": 0, "transition": 0},
+            "last_reflection": None,
+        }
+
+    with sqlite3.connect(DB_PATH) as con:
+        # количество уникальных пользователей
+        cur = con.execute("SELECT COUNT(*) FROM scene_state")
+        users = cur.fetchone()[0] or 0
+
+        # счётчики по сценам
+        cur = con.execute(
+            "SELECT last_scene, COUNT(*) FROM scene_state GROUP BY last_scene"
+        )
+        for last_scene, cnt in cur.fetchall():
+            if last_scene == "intro":
+                intro = cnt
+            elif last_scene == "reflect":
+                reflect = cnt
+            elif last_scene == "transition":
+                transition = cnt
+
+        # последнее обновление
+        cur = con.execute(
+            "SELECT MAX(updated_at) FROM scene_state"
+        )
+        last_updated = cur.fetchone()[0]
+
+        # последняя рефлексия (самая свежая непустая last_reflect)
+        cur = con.execute(
+            "SELECT last_reflect FROM scene_state "
+            "WHERE last_reflect IS NOT NULL AND TRIM(last_reflect) <> '' "
+            "ORDER BY updated_at DESC LIMIT 1"
+        )
+        row = cur.fetchone()
+        last_reflection = row[0] if row else None
+
+    return {
+        "users": users,
+        "last_updated": last_updated,
+        "counts": {"intro": intro, "reflect": reflect, "transition": transition},
+        "last_reflection": last_reflection,
+    }
+
+@router.get("/ping")
 async def ui_ping():
-    return Response(content="ui: ok", media_type="text/plain")
+    return {"ui": "ok", "ts": datetime.utcnow().isoformat() + "Z"}
 
+@router.get("/stats.json")
+async def ui_stats_json():
+    return JSONResponse(_read_stats())
 
 @router.get("/", response_class=HTMLResponse)
-async def index():
-    html = """
-<!doctype html>
-<html lang="ru">
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Elaya — School of Theatre of Light</title>
-  <style>
-    :root { color-scheme: dark; }
-    body { margin:0; font-family: system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, 'Helvetica Neue', Arial, 'Noto Sans', 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol', sans-serif; background:#0a0a0a; color:#f6ead6; }
-    .shell { max-width: 980px; margin: 72px auto; padding: 0 20px; }
-    .panel { border: 1px solid rgba(246,234,214,.15); border-radius: 18px; padding: 24px; background: radial-gradient(1200px 420px at 50% -120px, rgba(246,234,214,.08), rgba(0,0,0,0)); }
-    h1 { font-weight: 800; font-size: 40px; letter-spacing: .5px; text-align: center; margin: 0 0 12px; }
-    .sub { text-align:center; opacity:.8; margin-bottom:28px; }
-    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
-    .card { border: 1px dashed rgba(246,234,214,.18); border-radius: 14px; padding: 16px; min-height: 120px; }
-    .kvs { display:flex; gap:12px; flex-wrap:wrap; margin-top:8px; }
-    .kv { padding: 8px 12px; border-radius: 999px; border: 1px solid rgba(246,234,214,.18); font-weight:700; }
-    .muted { opacity:.75; }
-    .last { white-space: pre-wrap; word-break: break-word; min-height: 48px; }
-    footer { margin-top: 18px; text-align:center; opacity:.6; font-size: 13px; }
-  </style>
-</head>
-<body>
-  <div class="shell">
-    <div class="panel">
-      <h1>Elaya — School of Theatre of Light</h1>
-      <div class="sub">Свет различает. Тьма хранит. Мы — между.</div>
-
-      <div class="grid">
-        <div class="card">
-          <div class="muted">CORE · СОСТОЯНИЕ</div>
-          <div style="margin-top:8px">
-            Пользователей в памяти: <b><span id="usersCnt">0</span></b><br/>
-            Последнее обновление: <span id="lastUpdated">—</span>
-          </div>
-          <div class="kvs" style="margin-top:10px">
-            <div class="kv">intro: <span id="introCnt">0</span></div>
-            <div class="kv">reflect: <span id="reflectCnt">0</span></div>
-            <div class="kv">transition: <span id="transitionCnt">0</span></div>
-          </div>
-        </div>
-
-        <div class="card">
-          <div class="muted">REFLECTION · ПОСЛЕДНЯЯ ЗАМЕТКА</div>
-          <div id="lastReflection" class="last" style="margin-top:10px">—</div>
-        </div>
-      </div>
-
-      <footer>HQ Panel · Cycle Active · Memory Stable · Reflection On</footer>
-    </div>
-  </div>
-
-  <!-- автообновление маленькой панели -->
-  <script>
-  async function refreshStats(){
-    try{
-      const r = await fetch('/ui/stats.json', {cache:'no-store'});
-      if(!r.ok) return;
-      const j = await r.json();
-
-      const set = (id, v) => {
-        const el = document.getElementById(id);
-        if (el) el.textContent = v;
-      };
-
-      // поддержка как компактного, так и расширенного формата
-      const counts = j.counts || j.scene_counts || {};
-      set('introCnt', counts.intro ?? 0);
-      set('reflectCnt', counts.reflect ?? 0);
-      set('transitionCnt', counts.transition ?? 0);
-
-      set('usersCnt', j.users ?? 0);
-      set('lastUpdated', j.last_updated || j.last_update || '—');
-
-      const lr = (j.last_reflection && (j.last_reflection.text ?? j.last_reflection))
-                 || '—';
-      set('lastReflection', (typeof lr === 'string' && lr.trim().length) ? lr : '—');
-    } catch(e){
-      // тихо
-      console.warn('stats refresh failed', e);
-    }
-  }
-  refreshStats();
-  setInterval(refreshStats, 5000);
-  </script>
-</body>
-</html>
-    """
-    return HTMLResponse(html)
+async def ui_index(request: Request):
+    # можно сразу отдать начальные данные — страница всё равно будет автообновляться
+    stats = _read_stats()
+    return templates.TemplateResponse(
+        "index.html",
+        {
+            "request": request,
+            "stats": stats,
+        },
+    )
