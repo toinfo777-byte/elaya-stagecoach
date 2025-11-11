@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import os
+from pathlib import Path
 from typing import Any
 
 from aiogram import Bot, Dispatcher
@@ -10,6 +11,7 @@ from aiogram.enums import ParseMode
 from aiogram.types import Update
 from fastapi import FastAPI, Request, Response, status
 from starlette.responses import PlainTextResponse
+from starlette.staticfiles import StaticFiles
 
 from app.build import BUILD_MARK
 from app.config import settings
@@ -36,13 +38,21 @@ if BOT_PROFILE == "trainer":
 # --- fastapi-роутеры --------------------------------------------------------
 from app import core_api as core_api_router
 from app.routers import diag
-from app.routes import ui
-from app.ui import router as ui_router  # <--- новый роутер
+from app.routes import ui as ui_pages_router      # веб-панель HQ (/)
+from app.ui import router as ui_api_router        # /ui/stats.json, /ui/ping
 
-app.include_router(diag.router)             # /diag/...
-app.include_router(core_api_router.router)  # /api/...
-app.include_router(ui.router)               # web-панель HQ (/)
-app.include_router(ui_router)               # /ui/stats.json и /ui/ping
+app.include_router(diag.router)                   # /diag/...
+app.include_router(core_api_router.router)        # /api/...
+app.include_router(ui_pages_router.router)        # HTML-панель
+app.include_router(ui_api_router)                 # JSON/ping для UI
+
+# --- static (/static) --------------------------------------------------------
+# монтируем только если папка существует, чтобы не падать на проде
+_static_dir = Path("app/static")
+if _static_dir.exists():
+    app.mount("/static", StaticFiles(directory=str(_static_dir)), name="static")
+else:
+    logging.getLogger(__name__).info("Static dir not found, skip mount: %s", _static_dir)
 
 # Sentry breadcrumbs (мягкая трассировка запросов)
 try:
@@ -110,7 +120,7 @@ async def tg_webhook(request: Request) -> Response:
 @app.on_event("startup")
 async def on_startup() -> None:
     try:
-        store.init_db()  # создаёт таблицы и индексы, если их нет
+        store.init_db()  # создаёт таблицы, если их нет
     except Exception:
         logging.exception("store.init_db failed")
 
