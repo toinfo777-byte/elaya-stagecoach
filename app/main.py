@@ -37,10 +37,12 @@ if BOT_PROFILE == "trainer":
 from app import core_api as core_api_router
 from app.routers import diag
 from app.routes import ui
+from app.ui import router as ui_router  # <--- новый роутер
 
-app.include_router(diag.router)           # /diag/...
+app.include_router(diag.router)             # /diag/...
 app.include_router(core_api_router.router)  # /api/...
-app.include_router(ui.router)             # web-панель HQ (/)
+app.include_router(ui.router)               # web-панель HQ (/)
+app.include_router(ui_router)               # /ui/stats.json и /ui/ping
 
 # Sentry breadcrumbs (мягкая трассировка запросов)
 try:
