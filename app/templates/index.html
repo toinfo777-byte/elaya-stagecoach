@@ -1,71 +1,31 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="ru">
 <head>
-  <meta charset="utf-8"/>
-  <meta name="viewport" content="width=device-width,initial-scale=1"/>
-  <title>Elaya — School of Theatre of Light</title>
-  <link rel="stylesheet" href="/static/css/theme.css"/>
+  <meta charset="UTF-8">
+  <title>Elaya — StageCoach</title>
+  <link rel="stylesheet" href="/static/css/theme.css">
 </head>
 <body>
   <div class="hq-container">
-    <h1 class="hq-title">Elaya — School of Theatre of Light <span class="moon pulse"></span></h1>
-    <p class="hq-subtitle">Свет различает. Тьма хранит. Мы — между.</p>
-
-    <section class="hq-panel">
+    <h1 class="hq-title">Элайя — StageCoach <span class="moon"></span></h1>
+    <p class="hq-subtitle">панель наблюдения</p>
+    <div class="hq-panel">
       <div class="stripe"></div>
       <div class="hq-grid">
         <div class="card">
-          <h3>CORE · СОСТОЯНИЕ</h3>
-          <div class="small">Пользователей в памяти: <strong id="users">{{ core.users }}</strong></div>
-          <div class="small">Последнее обновление: <span id="updated">{{ core.last_updated }}</span></div>
+          <h3>Портал</h3>
           <div class="pills">
-            <span class="pill pill--intro">intro: <span id="intro">{{ core.intro }}</span></span>
-            <span class="pill pill--reflect">reflect: <span id="reflect">{{ core.reflect }}</span></span>
-            <span class="pill pill--transition">transition: <span id="transition">{{ core.transition }}</span></span>
+            <div class="pill pill--intro">Stable</div>
+            <div class="pill pill--reflect">Online</div>
+            <div class="pill pill--transition">Light active</div>
           </div>
         </div>
-
         <div class="card reflect-box">
-          <div>
-            <h3>REFLECTION · ПОСЛЕДНЯЯ ЗАМЕТКА</h3>
-            <div id="reflection" class="reflect-text">
-              {% if reflection and reflection.text %}{{ reflection.text }}{% else %}—{% endif %}
-            </div>
-          </div>
-          <div class="reflect-footer">
-            <span class="small">HQ Panel · Cycle Active</span>
-            <span class="small">Memory Stable · Reflection On</span>
-          </div>
+          <div class="reflect-text">Привет! Панель Элайи запущена.</div>
+          <div class="reflect-footer"><span>версия 1.2</span><span>🌗</span></div>
         </div>
       </div>
-
-      <div class="hq-status">
-        <span class="badge ok"><span class="dot"></span> health: OK</span>
-        <span class="badge dim"><span class="dot"></span> build: manual</span>
-        <span class="badge dim"><span class="dot"></span> env: staging</span>
-      </div>
-    </section>
+    </div>
   </div>
-
-  <script>
-    // Лёгкий автоапдейт каждые 10 сек
-    async function refresh() {
-      try {
-        const r = await fetch('/ui/stats.json', { cache: 'no-store' });
-        if (!r.ok) return;
-        const data = await r.json();
-        const c = data.core || {};
-        document.getElementById('users').textContent = c.users ?? 0;
-        document.getElementById('updated').textContent = c.last_updated || '—';
-        document.getElementById('intro').textContent = c.intro ?? 0;
-        document.getElementById('reflect').textContent = c.reflect ?? 0;
-        document.getElementById('transition').textContent = c.transition ?? 0;
-
-        const ref = (data.reflection && data.reflection.text) ? data.reflection.text : '—';
-        document.getElementById('reflection').textContent = ref;
-      } catch (e) { /* тихо */ }
-    }
-    setInterval(refresh, 10000);
-  </script>
 </body>
 </html>
