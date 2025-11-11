@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Elaya — School of Theatre of Light</title>
+  <link rel="stylesheet" href="/static/css/theme.css" />
+  <style>
+    .wrap { max-width: 980px; margin: 64px auto; padding: 0 16px; }
+    .hero { background: var(--panel); border-radius: 18px; padding: 28px 32px; box-shadow: var(--shadow); }
+    .title { font: 900 40px/1.1 var(--font); color: var(--title); text-shadow: 0 2px 0 rgba(0,0,0,.25); }
+    .sub { margin-top: 8px; color: var(--muted); font: 500 16px/1.4 var(--font); }
+    .grid { display: grid; gap: 16px; grid-template-columns: 1fr 1fr; margin-top: 24px; }
+    .card { background: var(--card); border: 1px solid var(--card-border); border-radius: 16px; padding: 18px; }
+    .h { color: var(--muted); font: 700 12px/1 var(--font); letter-spacing: .08em; text-transform: uppercase; margin-bottom: 12px; }
+    .row { display: flex; align-items: center; gap: 8px; margin: 6px 0; }
+    .badge { background: var(--badge); color: var(--badge-text); border-radius: 999px; padding: 6px 12px; font: 700 13px var(--font); }
+    .muted { color: var(--muted-2); font: 500 14px var(--font); }
+    .footer { margin-top: 16px; color: var(--muted-2); font: 500 13px var(--font); text-align: center; }
+    .reflect { min-height: 80px; color: var(--text); font: 600 16px/1.45 var(--font); }
+  </style>
+</head>
+<body class="bg">
+  <div class="wrap">
+    <div class="hero">
+      <div class="title">Elaya — School of Theatre of Light</div>
+      <div class="sub">Свет различает. Тьма хранит. Мы — между.</div>
+
+      <div class="grid">
+        <div class="card">
+          <div class="h">CORE · СОСТОЯНИЕ</div>
+          <div class="row"><span class="muted">Пользователей в памяти:</span> <span id="users" class="badge">0</span></div>
+          <div class="row"><span class="muted">Последнее обновление:</span> <span id="last" class="muted">—</span></div>
+          <div class="row" style="gap:10px; margin-top:10px;">
+            <span class="badge" id="b-intro">intro: 0</span>
+            <span class="badge" id="b-reflect">reflect: 0</span>
+            <span class="badge" id="b-transition">transition: 0</span>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="h">REFLECTION · ПОСЛЕДНЯЯ ЗАМЕТКА</div>
+          <div id="reflect" class="reflect">—</div>
+        </div>
+      </div>
+
+      <div class="footer">
+        HQ Panel · Cycle Active · Memory Stable · Reflection On
+      </div>
+    </div>
+  </div>
+
+  <script>
+    async function loadStats() {
+      try {
+        const r = await fetch('/ui/stats.json', {cache: 'no-store'});
+        if (!r.ok) return;
+        const s = await r.json();
+        document.getElementById('users').textContent = s.users ?? 0;
+        document.getElementById('last').textContent = s.last_updated ?? '—';
+        document.getElementById('b-intro').textContent = `intro: ${s.counts?.intro ?? 0}`;
+        document.getElementById('b-reflect').textContent = `reflect: ${s.counts?.reflect ?? 0}`;
+        document.getElementById('b-transition').textContent = `transition: ${s.counts?.transition ?? 0}`;
+        document.getElementById('reflect').textContent = s.last_reflection ?? '—';
+      } catch (e) {
+        console.warn('stats error', e);
+      }
+    }
+    loadStats();
+    setInterval(loadStats, 10000); // автообновление каждые 10 сек
+  </script>
+</body>
+</html>
