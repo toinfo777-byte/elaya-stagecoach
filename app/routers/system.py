@@ -1,51 +1,30 @@
-from __future__ import annotations
-import os
+from fastapi import APIRouter
 from datetime import datetime, timezone
-from fastapi import APIRouter, HTTPException, Request, Form
-from fastapi.responses import JSONResponse
-from app.core import memory
 
-router = APIRouter(prefix="", tags=["system"])
+router = APIRouter()
 
-memory.init_db()
+@router.get("/health")
+async def health():
+    return {"status": "ok"}
 
-def _now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+@router.get("/healthz")
+async def healthz():
+    # иногда рендер дёргает разные урлы — пусть оба отвечают
+    return {"status": "ok"}
 
-def guard_key_ok(k: str | None) -> bool:
-    guard = os.getenv("WEBHOOK_SECRET", "")
-    return bool(k) and bool(guard) and guard.startswith(k)
-
-# ─── UI ──────────────────────────────────────────────────────────────
-@router.get("/ui/ping")
-async def ui_ping():
-    return {"ui": "ok"}
-
-@router.get("/ui/stats.json")
-async def ui_stats():
-    stats = memory.get_stats()
-    reflection = memory.last_reflection()
+@router.get("/status")
+async def status():
     return {
-        "core": stats,
-        "reflection": reflection,
-        "status": "ok",
+        "service": "elaya-stagecoach-web",
+        "version": "1.2",
+        "time": datetime.now(timezone.utc).isoformat()
     }
 
-@router.post("/ui/reflection/save")
-async def ui_reflection_save(text: str = Form(...)):
-    if not text.strip():
-        raise HTTPException(status_code=400, detail="empty text")
-    memory.save_reflection(text.strip())
-    memory.update_stats("reflect")
-    return {"ok": True, "saved": text.strip()}
+@router.get("/version")
+async def version():
+    return {"version": "1.2"}
 
-# ─── DIAG ────────────────────────────────────────────────────────────
-@router.get("/diag/ping")
-async def diag_ping():
-    return {"ok": True, "ts": _now_iso()}
-
-@router.get("/diag/webhook")
-async def diag_webhook(k: str | None = None):
-    if not guard_key_ok(k):
-        raise HTTPException(status_code=403, detail="forbidden")
-    return {"ok": True, "ts": _now_iso()}
+# универсальный echo-json для быстрой диагностики
+@router.post("/echo")
+async def echo(payload: dict):
+    return {"received": payload, "ok": True}
