@@ -9,6 +9,7 @@ async def health():
 
 @router.get("/healthz")
 async def healthz():
+    # Render может дёргать /healthz — держим его тоже
     return {"status": "ok"}
 
 @router.get("/status")
