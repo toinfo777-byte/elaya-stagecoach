@@ -6,9 +6,10 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 WORKDIR /app
 
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN python -m pip install --upgrade pip && \
+    pip install --no-cache-dir -r requirements.txt
 
 COPY app ./app
 
-# Render передаёт порт в $PORT — слушаем его (fallback 10000 для локала)
-CMD python -m uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-10000}
+# Render проставляет PORT; по умолчанию 10000 локально
+CMD exec uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-10000}
