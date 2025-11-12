@@ -1,2 +1,5 @@
 # app/routes/__init__.py
-# package marker for FastAPI UI routes
+from .ui import router as ui_router
+from .system import router as system_router
+
+__all__ = ["ui_router", "system_router"]
