@@ -11,5 +11,5 @@ RUN python -m pip install --upgrade pip && \
 
 COPY app ./app
 
-# Render проставляет PORT; по умолчанию 10000 локально
+# Render задаёт PORT; локально по умолчанию будет 10000
 CMD exec uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-10000}
