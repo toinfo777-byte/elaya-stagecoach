@@ -3,13 +3,18 @@ from datetime import datetime, timezone
 
 router = APIRouter()
 
+
+@router.get("/")
+async def root():
+    # редиректим на панель наблюдения
+    return {"ok": True, "app": "elaya-stagecoach-web"}
+
 @router.get("/health")
 async def health():
     return {"status": "ok"}
 
 @router.get("/healthz")
 async def healthz():
-    # Render может дёргать /healthz — держим его тоже
     return {"status": "ok"}
 
 @router.get("/status")
@@ -23,7 +28,3 @@ async def status():
 @router.get("/version")
 async def version():
     return {"version": "1.2"}
-
-@router.post("/echo")
-async def echo(payload: dict):
-    return {"received": payload, "ok": True}
