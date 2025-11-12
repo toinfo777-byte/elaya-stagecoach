@@ -1,19 +1,22 @@
 from fastapi import FastAPI
-from datetime import datetime, timezone
+from fastapi.middleware.cors import CORSMiddleware
 
-app = FastAPI(title="elaya-stagecoach-web")
+from app.routes import system as system_router
+from app.routes import ui as ui_router
+from app.routes import api as api_router
 
-# системные эндпоинты
-from app.routes.system import router as system_router  # noqa: E402
-app.include_router(system_router)
+app = FastAPI(title="Elaya — StageCoach", version="1.2")
 
-# (опционально) если появятся дополнительные роутеры — подключай безопасно
-try:
-    from app.routes.ui import router as ui_router  # пример
-    app.include_router(ui_router)
-except Exception:
-    pass
+# CORS — на будущее (можно убрать)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
-@app.get("/")
-async def root():
-    return {"ok": True, "app": "elaya-stagecoach-web", "ts": datetime.now(timezone.utc).isoformat()}
+# Роутеры
+app.include_router(system_router.router, tags=["system"])
+app.include_router(api_router.router, prefix="/api", tags=["api"])
+app.include_router(ui_router.router, tags=["ui"])
