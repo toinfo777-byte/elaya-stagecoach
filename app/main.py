@@ -1,11 +1,10 @@
-# app/main.py
 from fastapi import FastAPI
-from app.routes import system as system_router
-from app.routes import ui as ui_router
+from app.routes import system, ui
 
-app = FastAPI(title="Elaya StageCoach")
+app = FastAPI(title="elaya-stagecoach-web")
 
-# system: /health, /healthz, /api/...
-app.include_router(system_router.router, tags=["system"])
-# ui: /
-app.include_router(ui_router.router, tags=["ui"])
+# API без внутреннего prefix в самом роутере — вешаем здесь
+app.include_router(system.router, prefix="/api", tags=["api"])
+
+# UI/страницы
+app.include_router(ui.router, tags=["ui"])
