@@ -1,5 +1,5 @@
-# app/main.py
 from fastapi import FastAPI
+
 from app.routes.ui import router as ui_router
 from app.routes.system import router as system_router
 
