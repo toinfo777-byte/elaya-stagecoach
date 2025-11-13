@@ -1,9 +1,9 @@
 from fastapi import FastAPI
+from app.routes import api, ui, system   # ← ДОБАВИЛ system
 
-from app.routes.ui import router as ui_router
-from app.routes.system import router as system_router
+app = FastAPI()
 
-app = FastAPI(title="Elaya — StageCoach")
-
-app.include_router(ui_router)
-app.include_router(system_router)
+# --- РАУТЕРЫ ---
+app.include_router(api.router)
+app.include_router(system.router)   # ← ДОБАВИЛ system-router
+app.include_router(ui.router)
