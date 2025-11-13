@@ -1,114 +1,158 @@
+# app/routes/ui.py
 from fastapi import APIRouter
 from fastapi.responses import HTMLResponse
 
 router = APIRouter(tags=["ui"])
 
-# ... твои уже существующие роуты ...
+
+@router.get("/", response_class=HTMLResponse)
+async def home():
+    return """
+    <!doctype html>
+    <html lang="ru">
+    <head>
+      <meta charset="utf-8" />
+      <meta name="viewport" content="width=device-width,initial-scale=1" />
+      <title>Элайя — StageCoach</title>
+      <link rel="stylesheet" href="https://unpkg.com/sakura.css/css/sakura-dark.css" />
+      <style>
+        body { max-width: 960px; margin: 0 auto; }
+        pre {
+          background: #111;
+          padding: 1rem;
+          border-radius: 6px;
+          overflow-x: auto;
+        }
+        .toolbar {
+          margin-top: 1rem;
+          display: flex;
+          flex-wrap: wrap;
+          gap: .5rem;
+        }
+        button {
+          cursor: pointer;
+        }
+        .small { font-size: .8rem; opacity: .8; }
+      </style>
+    </head>
+    <body>
+      <h1>Элайя — <span>StageCoach</span></h1>
+      <p>Панель наблюдения. Проверь <code>/healthz</code> и <code>/api/status</code>.</p>
+
+      <div class="toolbar">
+        <a href="/timeline">Открыть таймлайн</a>
+        <button id="btn-sync">Синхронизировать</button>
+        <button id="btn-refresh">Обновить статус</button>
+      </div>
+
+      <p class="small">
+        Ключ хранится в <code>localStorage</code> и уходит заголовком <code>X-Guard-Key</code>
+      </p>
+
+      <pre id="core-box">{}</pre>
+
+      <h2>Последняя заметка</h2>
+      <pre id="reflection-box">{}</pre>
+
+      <script>
+        const STORAGE_KEY = "elaya_guard_key";
+
+        function getGuardKey() {
+          return localStorage.getItem(STORAGE_KEY) || "";
+        }
+
+        async function loadStatus() {
+          try {
+            const res = await fetch("/api/status");
+            const data = await res.json();
+            document.getElementById("core-box").textContent =
+              JSON.stringify(data.core, null, 2);
+
+            const refl = data.core.reflection || {text: "", updated_at: "-"};
+            document.getElementById("reflection-box").textContent =
+              JSON.stringify(refl, null, 2);
+          } catch (e) {
+            document.getElementById("core-box").textContent = "Ошибка загрузки /api/status";
+            console.error(e);
+          }
+        }
+
+        async function syncCore() {
+          try {
+            const key = getGuardKey();
+            const res = await fetch("/api/sync", {
+              method: "POST",
+              headers: {
+                "X-Guard-Key": key || "",
+              },
+            });
+            const data = await res.json();
+            document.getElementById("core-box").textContent =
+              JSON.stringify(data.core, null, 2);
+          } catch (e) {
+            console.error(e);
+          }
+        }
+
+        document.getElementById("btn-refresh").addEventListener("click", loadStatus);
+        document.getElementById("btn-sync").addEventListener("click", syncCore);
+
+        // первичная загрузка
+        loadStatus();
+      </script>
+    </body>
+    </html>
+    """
+
+
+@router.get("/healthz")
+async def healthz():
+    return {"status": "ok"}
+
 
 @router.get("/timeline", response_class=HTMLResponse)
-def timeline_page():
+async def timeline_page():
+    # простая заглушка-страница, фронт берёт события из /api/timeline
     return """
-<!doctype html>
-<html lang="ru">
-<head>
-  <meta charset="utf-8">
-  <title>Таймлайн Элайи</title>
-  <meta name="viewport" content="width=device-width,initial-scale=1">
-  <style>
-    body{font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial; margin: 24px; color:#e7e7e7; background:#0b0d10}
-    h1{font-size:22px; margin:0 0 16px}
-    .wrap{max-width:880px}
-    .row{display:flex;gap:8px; margin:8px 0 16px}
-    input,button,textarea{background:#13161a;color:#e7e7e7;border:1px solid #2a2f36;border-radius:8px;padding:10px 12px}
-    input,textarea{flex:1}
-    button{cursor:pointer}
-    .card{border:1px solid #20252c;border-radius:12px;padding:14px;margin:10px 0;background:#0f1216}
-    .meta{opacity:.7;font-size:12px}
-    .src{opacity:.8}
-  </style>
-</head>
-<body>
-  <div class="wrap">
-    <h1>Таймлайн Элайи</h1>
+    <!doctype html>
+    <html lang="ru">
+    <head>
+      <meta charset="utf-8" />
+      <meta name="viewport" content="width=device-width,initial-scale=1" />
+      <title>Элайя — Timeline</title>
+      <link rel="stylesheet" href="https://unpkg.com/sakura.css/css/sakura-dark.css" />
+      <style>
+        body { max-width: 960px; margin: 0 auto; }
+        pre {
+          background: #111;
+          padding: 1rem;
+          border-radius: 6px;
+          overflow-x: auto;
+        }
+      </style>
+    </head>
+    <body>
+      <h1>Таймлайн Элайи</h1>
+      <p>Автообновление каждые 5 сек • <a href="/">назад</a></p>
 
-    <div class="row">
-      <input id="text" placeholder="Текст события…">
-      <input id="source" value="ui" style="max-width:200px">
-      <button id="add">Добавить</button>
-    </div>
+      <pre id="events-box">{}</pre>
 
-    <div class="row">
-      <input id="guard" placeholder="X-Guard-Key (опционально)">
-      <button id="save-guard">Сохранить ключ</button>
-      <button id="reload">Обновить</button>
-    </div>
+      <script>
+        async function loadTimeline() {
+          try {
+            const res = await fetch("/api/timeline?limit=200");
+            const data = await res.json();
+            document.getElementById("events-box").textContent =
+              JSON.stringify(data.events, null, 2);
+          } catch (e) {
+            document.getElementById("events-box").textContent = "Ошибка загрузки /api/timeline";
+            console.error(e);
+          }
+        }
 
-    <div id="list"></div>
-  </div>
-
-<script>
-const $ = (q) => document.querySelector(q);
-const list = $("#list");
-const guardInput = $("#guard");
-
-// init guard from localStorage
-guardInput.value = localStorage.getItem("guardKey") || "";
-
-$("#save-guard").onclick = () => {
-  localStorage.setItem("guardKey", guardInput.value.trim());
-  alert("Guard key сохранён.");
-};
-
-async function load() {
-  const r = await fetch("/api/timeline?limit=200", {cache:"no-store"});
-  const data = await r.json();
-  render(data.events || []);
-}
-$("#reload").onclick = load;
-
-function render(events) {
-  list.innerHTML = "";
-  if (!events.length) {
-    list.innerHTML = '<p class="meta">Пока нет событий.</p>';
-    return;
-  }
-  for (const e of events) {
-    const card = document.createElement("div");
-    card.className = "card";
-    card.innerHTML = `
-      <div>${e.text || ""}</div>
-      <div class="meta"><span class="src">source: ${e.source}</span> • ${e.created_at}</div>
-    `;
-    list.appendChild(card);
-  }
-}
-
-$("#add").onclick = async () => {
-  const text = $("#text").value.trim();
-  const source = $("#source").value.trim() || "ui";
-  if (!text) return;
-  const headers = {};
-  const key = (guardInput.value || "").trim();
-  if (key) headers["X-Guard-Key"] = key;
-
-  const params = new URLSearchParams({text, source});
-  const r = await fetch("/api/timeline?" + params.toString(), {
-    method: "POST",
-    headers
-  });
-  if (r.ok) {
-    $("#text").value = "";
-    load();
-  } else {
-    const err = await r.json().catch(()=>({detail:"error"}));
-    alert("Ошибка: " + (err.detail || r.status));
-  }
-};
-
-// auto-refresh
-load();
-setInterval(load, 5000);
-</script>
-</body>
-</html>
+        loadTimeline();
+        setInterval(loadTimeline, 5000);
+      </script>
+    </body>
+    </html>
     """
