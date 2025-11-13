@@ -1,5 +1,3 @@
-# app/routes/system.py  (или app/routes/api.py)
-
 from __future__ import annotations
 
 from datetime import datetime, timezone
@@ -110,7 +108,7 @@ class EventOut(BaseModel):
     payload: dict[str, Any]
 
 
-# --- health / status (если нужно, можешь оставить свои реализации) ---
+# --- health / status ---
 
 @router.get("/healthz")
 async def healthz() -> dict[str, Any]:
@@ -123,7 +121,23 @@ async def get_status() -> dict[str, Any]:
     return {"ok": True, "core": core}
 
 
-# --- НОВОЕ: production-версия /api/event ---
+# --- НОВОЕ: публичный таймлайн для UI ---
+
+@router.get("/timeline")
+async def get_timeline() -> dict[str, Any]:
+    """
+    Публичный таймлайн для фронта.
+    НЕ требует GUARD_KEY.
+    Отдаёт только список событий.
+    """
+    core = _get_core()
+    events: list[dict[str, Any]] = []
+    if isinstance(core, dict):
+        events = list(core.get("events", []))
+    return {"ok": True, "events": events}
+
+
+# --- production-версия /api/event ---
 
 @router.post("/event")
 async def post_event(
