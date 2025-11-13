@@ -1,191 +1,160 @@
-# app/routes/system.py
-from typing import Any, Dict
+from __future__ import annotations
 
-from fastapi import APIRouter, Header
-from pydantic import BaseModel, Field
 from datetime import datetime, timezone
+from typing import Any, Literal
+
 import os
+from fastapi import APIRouter, Header, HTTPException, Query
+from pydantic import BaseModel
 
 router = APIRouter(prefix="/api", tags=["api"])
 
-# --- защита (временно мягкая: на web не блокируем) ---
+# --- защита (только для мутаций) ---
+
 GUARD_KEY = os.getenv("GUARD_KEY", "").strip()
 
 
 def _check_guard(x_guard_key: str | None):
     """
-    ВРЕМЕННО: защита выключена (no-op).
-    Позже можно вернуть проверку для боевого тренера/бота.
+    Простая защита для мутаций:
+    - если GUARD_KEY не задан в окружении — защита отключена
+    - если задан — требуем точное совпадение заголовка X-Guard-Key
     """
-    return  # no-op
+    if not GUARD_KEY:
+        return  # защита отключена
+    if (x_guard_key or "").strip() != GUARD_KEY:
+        raise HTTPException(status_code=401, detail="invalid guard key")
 
 
-# --- ядро: работаем через StateStore, если он есть; иначе — fallback ---
+# --- модели ядра ---
+
+class Reflection(BaseModel):
+    text: str = ""
+    updated_at: str = "-"  # ISO-строка или "-"
 
 
-try:
-    from app.core.state import StateStore  # твой стор
-
-    def _core_snapshot() -> Dict[str, Any]:
-        return StateStore.get().get_state().snapshot()
-
-    def _core_sync(source: str) -> Dict[str, Any]:
-        StateStore.get().sync(source=source)
-        return StateStore.get().get_state().snapshot()
-
-    def _core_add_event(source: str, scene: str, payload: Dict[str, Any]) -> Dict[str, Any]:
-        StateStore.get().add_event(source=source, scene=scene, payload=payload)
-        return StateStore.get().get_state().snapshot()
-
-except Exception:
-    # резервный режим без StateStore
-    CORE: Dict[str, Any] = {
-        "cycle": 0,
-        "last_update": "-",
-        "intro": 0,
-        "reflect": 0,
-        "transition": 0,
-        "events": [],
-        "reflection": {"text": "", "updated_at": "-"},
-    }
-
-    def _core_snapshot() -> Dict[str, Any]:
-        return CORE
-
-    def _core_sync(source: str) -> Dict[str, Any]:
-        CORE["cycle"] += 1
-        CORE["last_update"] = datetime.now(timezone.utc).isoformat()
-        # минимальная модель события
-        evt = {
-            "ts": CORE["last_update"],
-            "cycle": CORE["cycle"],
-            "source": source,
-            "scene": "transition",
-            "payload": {},
-        }
-        CORE.setdefault("events", [])
-        CORE["events"].insert(0, evt)
-        CORE["events"] = CORE["events"][:200]
-        return CORE
-
-    def _core_add_event(source: str, scene: str, payload: Dict[str, Any]) -> Dict[str, Any]:
-        CORE["cycle"] += 1
-        CORE["last_update"] = datetime.now(timezone.utc).isoformat()
-        evt = {
-            "ts": CORE["last_update"],
-            "cycle": CORE["cycle"],
-            "source": source,
-            "scene": scene,
-            "payload": payload or {},
-        }
-        CORE.setdefault("events", [])
-        CORE["events"].insert(0, evt)
-        CORE["events"] = CORE["events"][:200]
-        return CORE
+class Event(BaseModel):
+    ts: datetime
+    cycle: int
+    source: str
+    scene: str
+    payload: dict[str, Any] = {}
 
 
-# --- схемы для входящих данных ---
+class CoreState(BaseModel):
+    cycle: int = 0
+    last_update: datetime | None = None
 
+    intro: int = 0
+    reflect: int = 0
+    transition: int = 0
+
+    events: list[Event] = []
+    reflection: Reflection = Reflection()
+
+
+# одно единственное ядро на процесс
+CORE = CoreState()
+
+
+# --- внутренняя логика работы с ядром ---
+
+def _push_event(*, scene: str, source: str, payload: dict[str, Any]) -> Event:
+    """
+    Добавляем событие в ядро:
+    - при scene="transition" увеличиваем номер цикла
+    - обновляем счётчики intro/reflect/transition
+    - пишем ts и текущий cycle
+    - храним только последние 200 событий
+    """
+    # обновляем счётчики сцен
+    if scene == "intro":
+        CORE.intro += 1
+    elif scene == "reflect":
+        CORE.reflect += 1
+    elif scene == "transition":
+        CORE.transition += 1
+        CORE.cycle += 1
+    else:
+        # теоретически не должны сюда попадать, проверяем на всякий
+        raise HTTPException(status_code=400, detail=f"unknown scene: {scene}")
+
+    now = datetime.now(timezone.utc)
+
+    event = Event(
+        ts=now,
+        cycle=CORE.cycle,
+        source=source,
+        scene=scene,
+        payload=payload or {},
+    )
+
+    # кладём новое событие в начало (новейшие сверху)
+    CORE.events.insert(0, event)
+    # ограничиваем историю таймлайна
+    if len(CORE.events) > 200:
+        CORE.events.pop()
+
+    CORE.last_update = now
+    return event
+
+
+# --- входящая модель для /api/event ---
 
 class EventIn(BaseModel):
-    """
-    Минимальный контракт для тренера/бота.
-
-    Пример JSON:
-    {
-      "source": "trainer",
-      "scene": "intro",
-      "payload": {
-        "note": "пользователь зашёл в сцену intro",
-        "user_id": 12345
-      }
-    }
-    """
-
-    source: str = Field(..., description="источник события: trainer | bot | ui | system")
-    scene: str = Field(..., description="сцена/фаза портала: intro | reflect | transition | trainer | bot | ...")
-    payload: Dict[str, Any] = Field(default_factory=dict, description="произвольный JSON-пакет")
+    scene: Literal["intro", "reflect", "transition"]
+    source: str = "ui"
+    payload: dict[str, Any] | None = None
 
 
-# --- endpoints ---
-
+# --- публичные эндпоинты API ---
 
 @router.get("/status")
 async def api_status():
-    """Мини-снимок состояния ядра."""
-    return {"ok": True, "core": _core_snapshot()}
-
-
-@router.post("/sync")
-async def api_sync(
-    x_guard_key: str | None = Header(default=None, alias="X-Guard-Key"),
-):
     """
-    Ручная синхронизация ядра из UI.
-    Сейчас использует сцену 'transition' и источник 'ui'.
+    Текущее состояние ядра.
+    Используется панелью наблюдения и /timeline.
     """
-    _check_guard(x_guard_key)
-    core = _core_sync(source="ui")
-    return {"ok": True, "message": "synced", "core": core}
+    return {"ok": True, "core": CORE}
 
 
 @router.get("/timeline")
-async def api_timeline(limit: int = 50):
-    """
-    Публичный read-only таймлайн.
-    Возвращает последние `limit` событий (max 500).
-    """
-    events = _core_snapshot().get("events", [])
-    if not isinstance(events, list):
-        events = []
-
-    limit = max(1, min(limit, 500))
-    return {"ok": True, "events": events[:limit]}
-
-
-@router.post("/reflection")
-async def api_reflection(
-    text: str,
-    x_guard_key: str | None = Header(default=None, alias="X-Guard-Key"),
+async def api_timeline(
+    limit: int = Query(20, ge=1, le=200),
 ):
     """
-    Запись последней заметки (reflection).
-    Сейчас тоже не проверяет ключ — soft-mode.
+    Лента событий (новые сверху).
     """
-    _check_guard(x_guard_key)
-    core = _core_snapshot()
-    core.setdefault("reflection", {})
-    core["reflection"]["text"] = text
-    core["reflection"]["updated_at"] = datetime.now(timezone.utc).isoformat()
-    _core_sync(source="reflection")
-    return {"ok": True, "reflection": core["reflection"]}
+    return {
+        "ok": True,
+        "events": CORE.events[:limit],
+    }
 
 
 @router.post("/event")
 async def api_event(
-    event: EventIn,
-    x_guard_key: str | None = Header(default=None, alias="X-Guard-Key"),
+    body: EventIn,
+    x_guard_key: str | None = Header(default=None, convert_underscores=False),
 ):
     """
-    Приём произвольного события от тренера/бота.
+    Production-эндпоинт для записи событий ядра.
 
-    Использование (пример):
-    POST /api/event
-    {
-      "source": "trainer",
-      "scene": "intro",
-      "payload": {
-        "note": "intro started",
-        "user_id": 123
-      }
-    }
+    Правила:
+    - Требует корректный X-Guard-Key (если GUARD_KEY задан в окружении).
+    - scene ∈ {"intro","reflect","transition"}.
+    - При "transition" увеличивает номер цикла (CORE.cycle).
+    - Возвращает записанное событие и свежее состояние ядра.
     """
     _check_guard(x_guard_key)
-    core = _core_add_event(
-        source=event.source,
-        scene=event.scene,
-        payload=event.payload,
+
+    event = _push_event(
+        scene=body.scene,
+        source=body.source or "ui",
+        payload=body.payload or {},
     )
-    events = core.get("events", []) or []
-    last = events[0] if events else None
-    return {"ok": True, "event": last, "core": core}
+
+    return {
+        "ok": True,
+        "event": event,
+        "core": CORE,
+    }
