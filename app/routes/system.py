@@ -1,11 +1,14 @@
+# app/routes/system.py  (или app/routes/api.py)
+
 from __future__ import annotations
 
 from datetime import datetime, timezone
 from typing import Any, Literal
 
 import os
-from fastapi import APIRouter, Header, HTTPException, Query
-from pydantic import BaseModel
+
+from fastapi import APIRouter, Header, HTTPException
+from pydantic import BaseModel, Field, ValidationError
 
 router = APIRouter(prefix="/api", tags=["api"])
 
@@ -14,11 +17,10 @@ router = APIRouter(prefix="/api", tags=["api"])
 GUARD_KEY = os.getenv("GUARD_KEY", "").strip()
 
 
-def _check_guard(x_guard_key: str | None):
+def _check_guard(x_guard_key: str | None) -> None:
     """
-    Простая защита для мутаций:
-    - если GUARD_KEY не задан в окружении — защита отключена
-    - если задан — требуем точное совпадение заголовка X-Guard-Key
+    Если GUARD_KEY не задан — защита отключена.
+    Если задан — любой POST/мутирующий запрос должен прийти с заголовком X-Guard-Key.
     """
     if not GUARD_KEY:
         return  # защита отключена
@@ -26,135 +28,171 @@ def _check_guard(x_guard_key: str | None):
         raise HTTPException(status_code=401, detail="invalid guard key")
 
 
-# --- модели ядра ---
+# --- ядро: работаем через StateStore, если он есть; иначе — минимальный CORE ---
 
-class Reflection(BaseModel):
-    text: str = ""
-    updated_at: str = "-"  # ISO-строка или "-"
+try:
+    # Если в проекте есть полноценный StateStore — используем его.
+    from app.core.state import STATE  # type: ignore[attr-defined]
+except Exception:  # noqa: BLE001
+    # Фоллбек — простой in-memory core.
+    class _MiniState:
+        def __init__(self) -> None:
+            self.core: dict[str, Any] = {
+                "cycle": 0,
+                "last_update": "-",
+                "intro": 0,
+                "reflect": 0,
+                "transition": 0,
+                "events": [],
+                "reflection": {"text": "", "updated_at": "-"},
+            }
 
+        # Унифицированные методы для роутов
+        def snapshot(self) -> dict[str, Any]:
+            return self.core
 
-class Event(BaseModel):
-    ts: datetime
-    cycle: int
-    source: str
-    scene: str
-    payload: dict[str, Any] = {}
+        def set_core(self, core: dict[str, Any]) -> None:
+            self.core = core
 
-
-class CoreState(BaseModel):
-    cycle: int = 0
-    last_update: datetime | None = None
-
-    intro: int = 0
-    reflect: int = 0
-    transition: int = 0
-
-    events: list[Event] = []
-    reflection: Reflection = Reflection()
-
-
-# одно единственное ядро на процесс
-CORE = CoreState()
+    STATE = _MiniState()  # type: ignore[assignment]
 
 
-# --- внутренняя логика работы с ядром ---
-
-def _push_event(*, scene: str, source: str, payload: dict[str, Any]) -> Event:
+def _get_core() -> dict[str, Any]:
     """
-    Добавляем событие в ядро:
-    - при scene="transition" увеличиваем номер цикла
-    - обновляем счётчики intro/reflect/transition
-    - пишем ts и текущий cycle
-    - храним только последние 200 событий
+    Аккуратно достаём core из STATE, поддерживая разные реализации StateStore.
     """
-    # обновляем счётчики сцен
-    if scene == "intro":
-        CORE.intro += 1
-    elif scene == "reflect":
-        CORE.reflect += 1
-    elif scene == "transition":
-        CORE.transition += 1
-        CORE.cycle += 1
-    else:
-        # теоретически не должны сюда попадать, проверяем на всякий
-        raise HTTPException(status_code=400, detail=f"unknown scene: {scene}")
-
-    now = datetime.now(timezone.utc)
-
-    event = Event(
-        ts=now,
-        cycle=CORE.cycle,
-        source=source,
-        scene=scene,
-        payload=payload or {},
-    )
-
-    # кладём новое событие в начало (новейшие сверху)
-    CORE.events.insert(0, event)
-    # ограничиваем историю таймлайна
-    if len(CORE.events) > 200:
-        CORE.events.pop()
-
-    CORE.last_update = now
-    return event
+    state = STATE
+    if hasattr(state, "snapshot"):
+        return state.snapshot()  # type: ignore[no-any-return]
+    if hasattr(state, "core"):
+        return state.core  # type: ignore[no-any-return]
+    # самый простой фоллбек
+    return {
+        "cycle": 0,
+        "last_update": "-",
+        "intro": 0,
+        "reflect": 0,
+        "transition": 0,
+        "events": [],
+        "reflection": {"text": "", "updated_at": "-"},
+    }
 
 
-# --- входящая модель для /api/event ---
+def _set_core(core: dict[str, Any]) -> None:
+    state = STATE
+    if hasattr(state, "set_core"):
+        state.set_core(core)
+    elif hasattr(state, "core"):
+        state.core = core  # type: ignore[attr-defined]
+
+
+def _utc_now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+# --- Модели событий ---
+
+SourceType = Literal["ui", "bot", "core"]
+SceneType = Literal["intro", "reflect", "transition"]
+
 
 class EventIn(BaseModel):
-    scene: Literal["intro", "reflect", "transition"]
-    source: str = "ui"
-    payload: dict[str, Any] | None = None
+    source: SourceType = "ui"
+    scene: SceneType
+    payload: dict[str, Any] = Field(default_factory=dict)
 
 
-# --- публичные эндпоинты API ---
+class EventOut(BaseModel):
+    ts: str
+    cycle: int
+    source: SourceType
+    scene: SceneType
+    payload: dict[str, Any]
+
+
+# --- health / status (если нужно, можешь оставить свои реализации) ---
+
+@router.get("/healthz")
+async def healthz() -> dict[str, Any]:
+    return {"ok": True}
+
 
 @router.get("/status")
-async def api_status():
-    """
-    Текущее состояние ядра.
-    Используется панелью наблюдения и /timeline.
-    """
-    return {"ok": True, "core": CORE}
+async def get_status() -> dict[str, Any]:
+    core = _get_core()
+    return {"ok": True, "core": core}
 
 
-@router.get("/timeline")
-async def api_timeline(
-    limit: int = Query(20, ge=1, le=200),
-):
-    """
-    Лента событий (новые сверху).
-    """
-    return {
-        "ok": True,
-        "events": CORE.events[:limit],
-    }
-
+# --- НОВОЕ: production-версия /api/event ---
 
 @router.post("/event")
-async def api_event(
-    body: EventIn,
+async def post_event(
+    body: dict[str, Any],
     x_guard_key: str | None = Header(default=None, convert_underscores=False),
-):
+) -> dict[str, Any]:
     """
-    Production-эндпоинт для записи событий ядра.
+    Принимаем событие от UI/бота/ядра, валидируем и сохраняем его в core.events.
+    Пример тела запроса:
+    {
+      "source": "ui",
+      "scene": "transition",
+      "payload": { "note": "manual test from Talend" }
+    }
+    """
 
-    Правила:
-    - Требует корректный X-Guard-Key (если GUARD_KEY задан в окружении).
-    - scene ∈ {"intro","reflect","transition"}.
-    - При "transition" увеличивает номер цикла (CORE.cycle).
-    - Возвращает записанное событие и свежее состояние ядра.
-    """
+    # --- защита ---
     _check_guard(x_guard_key)
 
-    event = _push_event(
-        scene=body.scene,
-        source=body.source or "ui",
-        payload=body.payload or {},
-    )
+    # --- валидация входа ---
+    try:
+        event_in = EventIn.model_validate(body)
+    except ValidationError as e:
+        # Отдаём компактное описание ошибки валидации
+        raise HTTPException(
+            status_code=422,
+            detail={"ok": False, "error": "invalid event schema", "details": e.errors()},
+        ) from e
 
-    return {
-        "ok": True,
-        "event": event,
-        "core": CORE,
-    }
+    # --- загружаем текущее состояние ---
+    core = _get_core()
+
+    # Гарантируем наличие нужных ключей в core (на случай старого состояния)
+    core.setdefault("cycle", 0)
+    core.setdefault("last_update", "-")
+    core.setdefault("intro", 0)
+    core.setdefault("reflect", 0)
+    core.setdefault("transition", 0)
+    core.setdefault("events", [])
+    core.setdefault("reflection", {"text": "", "updated_at": "-"})
+
+    # --- формируем новое событие ---
+    next_cycle = int(core.get("cycle", 0)) + 1
+    ts = _utc_now_iso()
+
+    event_full = EventOut(
+        ts=ts,
+        cycle=next_cycle,
+        source=event_in.source,
+        scene=event_in.scene,
+        payload=event_in.payload,
+    ).model_dump()
+
+    # --- обновляем core ---
+    core["cycle"] = next_cycle
+    core["last_update"] = ts
+
+    # счётчики сцен
+    if event_in.scene in ("intro", "reflect", "transition"):
+        core[event_in.scene] = int(core.get(event_in.scene, 0)) + 1
+
+    # список событий (держим только последние 20)
+    events: list[dict[str, Any]] = list(core.get("events", []))
+    events.append(event_full)
+    if len(events) > 20:
+        events = events[-20:]
+    core["events"] = events
+
+    # --- сохраняем состояние ---
+    _set_core(core)
+
+    return {"ok": True, "event": event_full}
