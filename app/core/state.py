@@ -8,16 +8,15 @@ from typing import List, Dict, Any
 
 @dataclass
 class CoreState:
-    """Мини-память и состояние ядра."""
+    """Мини-память и состояние ядра портала."""
     cycle: int = 0
     last_update: str = "-"
+    # счётчики фаз портала
     intro: int = 0
     reflect: int = 0
     transition: int = 0
+    # лента событий (последние N)
     events: List[Dict[str, Any]] = field(default_factory=list)
-    reflection: Dict[str, Any] = field(
-        default_factory=lambda: {"text": "", "updated_at": "-"}
-    )
 
     def snapshot(self) -> Dict[str, Any]:
         return asdict(self)
@@ -31,6 +30,8 @@ class StateStore:
         self.state = CoreState()
         self._state_lock = Lock()
 
+    # --- singleton ---
+
     @classmethod
     def get(cls) -> "StateStore":
         if cls._instance is None:
@@ -39,87 +40,58 @@ class StateStore:
                     cls._instance = StateStore()
         return cls._instance
 
-    # --- helpers ---
+    # --- внутреннее ---
 
-    @staticmethod
-    def _now_iso() -> str:
-        return datetime.now(timezone.utc).isoformat()
+    def _bump_scene_counter(self, scene: str) -> None:
+        """Увеличиваем счётчики фаз портала, если сцена одна из базовых."""
+        if scene == "intro":
+            self.state.intro += 1
+        elif scene == "reflect":
+            self.state.reflect += 1
+        elif scene == "transition":
+            self.state.transition += 1
 
-    # --- бизнес-операции ---
+    def _push_event(self, source: str, scene: str, payload: Dict[str, Any]) -> None:
+        """Добавляем событие в ленту (последние N, новые сверху)."""
+        evt = {
+            "ts": datetime.now(timezone.utc).isoformat(),
+            "cycle": self.state.cycle,
+            "source": source,
+            "scene": scene,
+            "payload": payload or {},
+        }
+        # новые события в начало
+        self.state.events.insert(0, evt)
+        # держим последние 200
+        self.state.events = self.state.events[:200]
 
-    def sync(
-        self,
-        source: str = "manual",
-        scene: str | None = None,
-        payload: Dict[str, Any] | None = None,
-    ) -> CoreState:
+    # --- публичные операции ядра ---
+
+    def sync(self, source: str = "ui") -> CoreState:
         """
-        Инкремент цикла + запись события.
+        Базовая синхронизация ядра.
+        Сейчас считаем её сценой 'transition' от заданного source.
         """
         with self._state_lock:
             self.state.cycle += 1
-            now = self._now_iso()
-            self.state.last_update = now
-
-            evt = {
-                "ts": now,
-                "cycle": self.state.cycle,
-                "source": source,
-                "scene": scene or "transition",
-                "payload": payload or {},
-            }
-            self._append_event(evt)
+            self.state.last_update = datetime.now(timezone.utc).isoformat()
+            scene = "transition"
+            self._bump_scene_counter(scene)
+            self._push_event(source=source, scene=scene, payload={})
             return self.state
 
-    def add_event(
-        self,
-        source: str,
-        scene: str | None = None,
-        payload: Dict[str, Any] | None = None,
-    ) -> Dict[str, Any]:
+    def add_event(self, source: str, scene: str, payload: Dict[str, Any] | None = None) -> CoreState:
         """
-        Пишет событие в таймлайн без изменения цикла.
-        Возвращает записанное событие.
+        Добавление произвольного события портала.
+        Используется тренером/ботом через /api/event.
         """
         with self._state_lock:
-            now = self._now_iso()
-            evt = {
-                "ts": now,
-                "cycle": self.state.cycle,
-                "source": source,
-                "scene": scene or "other",
-                "payload": payload or {},
-            }
-            self._append_event(evt)
-            return evt
-
-    def _append_event(self, evt: Dict[str, Any]) -> None:
-        self.state.events.insert(0, evt)
-        # держим последние 50 событий
-        self.state.events = self.state.events[:50]
+            self.state.cycle += 1
+            self.state.last_update = datetime.now(timezone.utc).isoformat()
+            self._bump_scene_counter(scene)
+            self._push_event(source=source, scene=scene, payload=payload or {})
+            return self.state
 
     def get_state(self) -> CoreState:
         with self._state_lock:
             return self.state
-
-    def get_timeline(self, limit: int = 50) -> List[Dict[str, Any]]:
-        with self._state_lock:
-            return self.state.events[:limit]
-
-    def set_reflection(self, text: str) -> Dict[str, Any]:
-        """
-        Обновляет reflection и добавляет событие в таймлайн.
-        """
-        with self._state_lock:
-            now = self._now_iso()
-            self.state.reflection = {"text": text, "updated_at": now}
-            self._append_event(
-                {
-                    "ts": now,
-                    "cycle": self.state.cycle,
-                    "source": "reflection",
-                    "scene": "reflect",
-                    "payload": {"note": text},
-                }
-            )
-            return self.state.reflection
