@@ -15,6 +15,9 @@ class CoreState:
     reflect: int = 0
     transition: int = 0
     events: List[Dict[str, Any]] = field(default_factory=list)
+    reflection: Dict[str, Any] = field(
+        default_factory=lambda: {"text": "", "updated_at": "-"}
+    )
 
     def snapshot(self) -> Dict[str, Any]:
         return asdict(self)
@@ -36,24 +39,87 @@ class StateStore:
                     cls._instance = StateStore()
         return cls._instance
 
-    # бизнес-операции
-    def sync(self, source: str = "manual") -> CoreState:
+    # --- helpers ---
+
+    @staticmethod
+    def _now_iso() -> str:
+        return datetime.now(timezone.utc).isoformat()
+
+    # --- бизнес-операции ---
+
+    def sync(
+        self,
+        source: str = "manual",
+        scene: str | None = None,
+        payload: Dict[str, Any] | None = None,
+    ) -> CoreState:
+        """
+        Инкремент цикла + запись события.
+        """
         with self._state_lock:
             self.state.cycle += 1
-            self.state.last_update = datetime.now(timezone.utc).isoformat()
-            self._push_event("sync", {"source": source, "cycle": self.state.cycle})
+            now = self._now_iso()
+            self.state.last_update = now
+
+            evt = {
+                "ts": now,
+                "cycle": self.state.cycle,
+                "source": source,
+                "scene": scene or "transition",
+                "payload": payload or {},
+            }
+            self._append_event(evt)
             return self.state
 
-    def _push_event(self, kind: str, payload: Dict[str, Any]) -> None:
-        evt = {
-            "ts": datetime.now(timezone.utc).isoformat(),
-            "kind": kind,
-            "payload": payload,
-        }
+    def add_event(
+        self,
+        source: str,
+        scene: str | None = None,
+        payload: Dict[str, Any] | None = None,
+    ) -> Dict[str, Any]:
+        """
+        Пишет событие в таймлайн без изменения цикла.
+        Возвращает записанное событие.
+        """
+        with self._state_lock:
+            now = self._now_iso()
+            evt = {
+                "ts": now,
+                "cycle": self.state.cycle,
+                "source": source,
+                "scene": scene or "other",
+                "payload": payload or {},
+            }
+            self._append_event(evt)
+            return evt
+
+    def _append_event(self, evt: Dict[str, Any]) -> None:
         self.state.events.insert(0, evt)
-        # держим последние 20
-        self.state.events = self.state.events[:20]
+        # держим последние 50 событий
+        self.state.events = self.state.events[:50]
 
     def get_state(self) -> CoreState:
         with self._state_lock:
             return self.state
+
+    def get_timeline(self, limit: int = 50) -> List[Dict[str, Any]]:
+        with self._state_lock:
+            return self.state.events[:limit]
+
+    def set_reflection(self, text: str) -> Dict[str, Any]:
+        """
+        Обновляет reflection и добавляет событие в таймлайн.
+        """
+        with self._state_lock:
+            now = self._now_iso()
+            self.state.reflection = {"text": text, "updated_at": now}
+            self._append_event(
+                {
+                    "ts": now,
+                    "cycle": self.state.cycle,
+                    "source": "reflection",
+                    "scene": "reflect",
+                    "payload": {"note": text},
+                }
+            )
+            return self.state.reflection
