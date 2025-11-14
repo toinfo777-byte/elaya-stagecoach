@@ -17,7 +17,8 @@ if not BOT_TOKEN:
 
 WEBHOOK_SECRET = os.getenv("TG_WEBHOOK_SECRET", "").strip()
 
-bot = Bot(BOT_TOKEN)
+# Лучше сразу задать parse_mode, чтобы не прописывать его в каждом msg.answer
+bot = Bot(BOT_TOKEN, parse_mode="HTML")
 dp = Dispatcher()
 dp.include_router(start_router.router)
 
