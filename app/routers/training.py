@@ -1,39 +1,28 @@
-# app/routers/training.py
 from __future__ import annotations
 
-from aiogram import Router, F
-from aiogram.filters import Command
+from aiogram import Router
+from aiogram.filters import Command, StateFilter
 from aiogram.types import Message
+from aiogram.fsm.context import FSMContext
 
-try:
-    from app.keyboards.reply import main_menu_kb, BTN_TRAINING
-except Exception:
-    # мягкие заглушки, если клавиатуры ещё нет
-    def main_menu_kb():
-        return None
-    BTN_TRAINING = "🏋️ Тренировка"
+from app.keyboards.reply import main_menu_kb
 
 router = Router(name="training")
 
 
-async def training_entry(m: Message):
-    await m.answer(
-        "Тренировка дня:\n\n• «Пауза 2 секунды»\n• «Ровный тембр»\n\n"
-        "(демо-заглушка; запуск круга появится в следующем коммите)",
+@router.message(StateFilter("*"), Command("training"))
+async def show_training_levels(
+    msg: Message,
+    state: FSMContext,
+):
+    # при необходимости можно чистить состояние
+    # await state.clear()
+
+    await msg.answer(
+        "Привет! Я Элайя — тренер сцены.\n"
+        "Помогу прокачать голос, дыхание, уверенность и выразительность."
+    )
+    await msg.answer(
+        "Готово! Открываю меню.",
         reply_markup=main_menu_kb(),
     )
-
-
-# Совместимость со старым импортом
-async def show_training_levels(m: Message):
-    await training_entry(m)
-
-
-@router.message(Command("training", "levels", "уровни"))
-async def cmd_training(m: Message):
-    await training_entry(m)
-
-
-@router.message(F.text == BTN_TRAINING)
-async def btn_training(m: Message):
-    await training_entry(m)
