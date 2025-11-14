@@ -1,151 +1,181 @@
+# app/routes/system.py
+
 from __future__ import annotations
-from datetime import datetime, timezone
-from typing import Any, Literal
+
 import os
+import threading
+from datetime import datetime, timezone
+from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Header, HTTPException
-from pydantic import BaseModel, Field, ValidationError
 
 router = APIRouter(prefix="/api", tags=["api"])
 
-# ---------- GUARD ----------
+# ----------------- защита (для мутаций) -----------------
+
 GUARD_KEY = os.getenv("GUARD_KEY", "").strip()
 
-def _check_guard(x_guard_key: str | None) -> None:
+
+def _check_guard(x_guard_key: Optional[str]) -> None:
+    """
+    Если GUARD_KEY не задан — защита выключена.
+    Если задан — сверяем с заголовком X-Guard-Key, иначе 401.
+    """
     if not GUARD_KEY:
         return
+
     if (x_guard_key or "").strip() != GUARD_KEY:
         raise HTTPException(status_code=401, detail="invalid guard key")
 
 
-# ---------- CORE / STATE ----------
-try:
-    from app.core.state import STATE  # type: ignore
-except Exception:
-    class _MiniState:
-        def __init__(self) -> None:
-            self.core = {
-                "cycle": 0,
-                "last_update": "-",
-                "intro": 0,
-                "reflect": 0,
-                "transition": 0,
-                "events": [],
-                "reflection": {"text": "", "updated_at": "-"},
+# ----------------- простое ядро состояния -----------------
+
+
+class CoreState:
+    """
+    Минимальное состояние ядра Элайи в памяти процесса.
+
+    Этого достаточно для:
+    — счётчиков intro / reflect / transition
+    — цикла обновлений
+    — хранения последних событий для таймлайна.
+    """
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self.cycle: int = 0
+        self.last_update: str = "-"
+        self.intro: int = 0
+        self.reflect: int = 0
+        self.transition: int = 0
+        self.events: List[Dict[str, Any]] = []
+        self.reflection: Dict[str, Any] = {"text": "", "updated_at": "-"}
+
+    def snapshot(self) -> Dict[str, Any]:
+        with self._lock:
+            return {
+                "cycle": self.cycle,
+                "last_update": self.last_update,
+                "intro": self.intro,
+                "reflect": self.reflect,
+                "transition": self.transition,
+                "events": list(self.events),
+                "reflection": dict(self.reflection),
             }
 
-        def snapshot(self):
-            return self.core
+    def push_event(self, *, source: str, scene: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+        ts = datetime.now(timezone.utc).isoformat()
 
-        def set_core(self, core):
-            self.core = core
+        with self._lock:
+            # обновляем цикл и счётчики сцен
+            self.cycle += 1
+            self.last_update = ts
 
-    STATE = _MiniState()  # type: ignore
+            if scene == "intro":
+                self.intro += 1
+            elif scene == "reflect":
+                self.reflect += 1
+            elif scene == "transition":
+                self.transition += 1
 
+            event = {
+                "ts": ts,
+                "cycle": self.cycle,
+                "source": source,
+                "scene": scene,
+                "payload": payload,
+            }
 
-def _get_core() -> dict[str, Any]:
-    if hasattr(STATE, "snapshot"):
-        return STATE.snapshot()
-    if hasattr(STATE, "core"):
-        return STATE.core
-    return {
-        "cycle": 0,
-        "last_update": "-",
-        "intro": 0,
-        "reflect": 0,
-        "transition": 0,
-        "events": [],
-        "reflection": {"text": "", "updated_at": "-"},
-    }
+            self.events.append(event)
 
-
-def _set_core(core: dict[str, Any]) -> None:
-    if hasattr(STATE, "set_core"):
-        STATE.set_core(core)
-    elif hasattr(STATE, "core"):
-        STATE.core = core
+        return event
 
 
-def _utc_now_iso():
-    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+STATE = CoreState()
+
+# ----------------- healthcheck -----------------
 
 
-# ---------- MODELS ----------
-SourceType = Literal["ui", "bot", "core"]
-SceneType = Literal["intro", "reflect", "transition"]
-
-class EventIn(BaseModel):
-    source: SourceType = "ui"
-    scene: SceneType
-    payload: dict[str, Any] = Field(default_factory=dict)
-
-class EventOut(BaseModel):
-    ts: str
-    cycle: int
-    source: SourceType
-    scene: SceneType
-    payload: dict[str, Any]
-
-
-# ---------- ROUTES ----------
 @router.get("/healthz")
-async def healthz():
+async def healthz() -> Dict[str, Any]:
+    """
+    Простой healthcheck для Render.
+    """
     return {"ok": True}
 
 
+# ----------------- status -----------------
+
+
 @router.get("/status")
-async def get_status():
-    return {"ok": True, "core": _get_core()}
+async def status() -> Dict[str, Any]:
+    """
+    Отдаём минимальное состояние ядра для HQ / dashboard.
+
+    Формат:
+    {
+      "ok": true,
+      "core": {
+        "cycle": ...,
+        "last_update": "...",
+        "intro": ...,
+        "reflect": ...,
+        "transition": ...,
+        "events": [...],
+        "reflection": {...}
+      }
+    }
+    """
+    core = STATE.snapshot()
+    return {"ok": True, "core": core}
 
 
-@router.get("/timeline")
-async def get_timeline():
-    core = _get_core()
-    events = list(core.get("events", []))
-    return {"ok": True, "events": events}
+# ----------------- приём событий от бота / UI -----------------
 
 
 @router.post("/event")
-async def post_event(
-    body: dict[str, Any],
-    x_guard_key: str | None = Header(default=None, convert_underscores=False),
-):
+async def event(
+    body: Dict[str, Any],
+    x_guard_key: Optional[str] = Header(default=None, alias="X-Guard-Key"),
+) -> Dict[str, Any]:
+    """
+    Универсальная точка входа событий от бота / UI.
+
+    Ожидаемый формат тела:
+    {
+      "source": "bot" | "ui" | "...",
+      "scene": "start" | "intro" | "reflect" | "transition" | "...",
+      "payload": { ... }    # любой JSON-словарь
+    }
+    """
     _check_guard(x_guard_key)
 
-    try:
-        event_in = EventIn.model_validate(body)
-    except ValidationError as e:
-        raise HTTPException(
-            status_code=422,
-            detail={"ok": False, "error": "invalid event schema", "details": e.errors()},
-        )
+    source = str(body.get("source") or "unknown")
+    scene = str(body.get("scene") or "unknown")
+    raw_payload = body.get("payload") or {}
 
-    core = _get_core()
-    core.setdefault("cycle", 0)
-    core.setdefault("events", [])
-    core.setdefault("intro", 0)
-    core.setdefault("reflect", 0)
-    core.setdefault("transition", 0)
+    if not isinstance(raw_payload, dict):
+        payload: Dict[str, Any] = {"value": raw_payload}
+    else:
+        payload = raw_payload
 
-    cycle = core["cycle"] + 1
-    ts = _utc_now_iso()
+    event = STATE.push_event(source=source, scene=scene, payload=payload)
+    return {"ok": True, "event": event}
 
-    event_full = EventOut(
-        ts=ts,
-        cycle=cycle,
-        source=event_in.source,
-        scene=event_in.scene,
-        payload=event_in.payload,
-    ).model_dump()
 
-    core["cycle"] = cycle
-    core["last_update"] = ts
-    core[event_in.scene] += 1
+# ----------------- API для таймлайна -----------------
 
-    events = list(core["events"])
-    events.append(event_full)
-    core["events"] = events[-20:]
 
-    _set_core(core)
+@router.get("/timeline")
+async def api_timeline() -> Dict[str, Any]:
+    """
+    Лёгкий API для страницы /timeline.
 
-    return {"ok": True, "event": event_full}
+    Страница ожидает:
+    {
+      "ok": true,
+      "events": [ {ts, source, scene, payload, ...}, ... ]
+    }
+    """
+    core = STATE.snapshot()
+    return {"ok": True, "events": core["events"]}
