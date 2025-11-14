@@ -1,28 +1,33 @@
 from __future__ import annotations
 
-from aiogram import Router, F
+from aiogram import Router
 from aiogram.filters import CommandStart, StateFilter
 from aiogram.filters.command import CommandObject
 from aiogram.types import Message
 from aiogram.fsm.context import FSMContext
 
 from app.keyboards.reply import main_menu_kb
-from app.utils.core_client import core_event   # <-- новый клиент CORE
+from app.utils.core_client import core_event   # клиент CORE
 
 router = Router(name="start")
 
 
-# --- универсальный запуск через диплинки ---
+# ============================================================
+#               СТАРТ С ДИПЛИНКОМ
+# ============================================================
 @router.message(StateFilter("*"), CommandStart(deep_link=True))
-async def start_with_deeplink(msg: Message, command: CommandObject, state: FSMContext):
+async def start_with_deeplink(
+    msg: Message,
+    command: CommandObject,
+    state: FSMContext
+):
     payload = (command.args or "").strip().lower()
 
-    # ---- старые диплинки ----
+    # ---- старый диплинк: go_casting ----
     if payload.startswith("go_casting"):
         from app.routers.minicasting import start_minicasting
         await start_minicasting(msg, state)
 
-        # фиксируем событие
         await core_event(
             source="bot",
             scene="start",
@@ -30,6 +35,7 @@ async def start_with_deeplink(msg: Message, command: CommandObject, state: FSMCo
         )
         return
 
+    # ---- старый диплинк: go_training ----
     if payload.startswith("go_training"):
         from app.routers.training import show_training_levels
         await show_training_levels(msg, state)
@@ -41,7 +47,7 @@ async def start_with_deeplink(msg: Message, command: CommandObject, state: FSMCo
         )
         return
 
-    # ---- обычный старт через диплинк ----
+    # ---- новый формат диплинков ----
     await state.clear()
 
     await core_event(
@@ -57,12 +63,13 @@ async def start_with_deeplink(msg: Message, command: CommandObject, state: FSMCo
     await msg.answer("Готово! Открываю меню.", reply_markup=main_menu_kb())
 
 
-# --- обычный старт /start ---
+# ============================================================
+#                     Обычный /start
+# ============================================================
 @router.message(StateFilter("*"), CommandStart())
 async def plain_start(msg: Message, state: FSMContext):
     await state.clear()
 
-    # --- логируем старт в CORE ---
     await core_event(
         source="bot",
         scene="start",
