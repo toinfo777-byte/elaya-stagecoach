@@ -6,9 +6,11 @@ from aiogram.filters import Command, StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.types import Message
 
-from app.keyboards.menu import BTN_APPLY
-
 router = Router(name="apply")
+
+# текст кнопки "Путь лидера" / заявка
+BTN_APPLY = "🧭 Путь лидера"  # держим в синхронизации с реальным текстом кнопки
+
 
 # Мягкий импорт общего сценария кастинга (без циклических импортов)
 try:
