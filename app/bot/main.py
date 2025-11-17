@@ -5,12 +5,8 @@ import os
 from fastapi import FastAPI, Request, HTTPException
 from aiogram import Bot, Dispatcher
 from aiogram.types import Update
-from aiogram.client.default import DefaultBotProperties  # <-- НОВЫЙ импорт
 
-from app.routers import start as start_router  # наши хендлеры /start и меню
-
-
-# --- базовая конфигурация ---
+from app.routers import router as root_router  # главный router с /start (и дальше всем остальным)
 
 BOT_TOKEN = os.getenv("TG_BOT_TOKEN", "").strip()
 if not BOT_TOKEN:
@@ -18,14 +14,9 @@ if not BOT_TOKEN:
 
 WEBHOOK_SECRET = os.getenv("TG_WEBHOOK_SECRET", "").strip()
 
-# aiogram v3: все дефолты через DefaultBotProperties
-bot = Bot(
-    BOT_TOKEN,
-    default=DefaultBotProperties(parse_mode="HTML"),
-)
-
+bot = Bot(BOT_TOKEN)
 dp = Dispatcher()
-dp.include_router(start_router.router)
+dp.include_router(root_router)   # <-- один вход
 
 app = FastAPI()
 
