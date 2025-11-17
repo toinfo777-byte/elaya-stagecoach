@@ -2,14 +2,12 @@ from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 
 from app.config import settings
-from app.routers import start, reviews, training  # <- training здесь
+from app.routers import router as main_router  # единый корневой роутер
 
 bot = Bot(
     token=settings.TG_BOT_TOKEN,
     default=DefaultBotProperties(parse_mode="HTML"),
 )
-dp = Dispatcher()
 
-dp.include_router(start.router)
-dp.include_router(training.router)   # <- ВАЖНО
-dp.include_router(reviews.router)
+dp = Dispatcher()
+dp.include_router(main_router)
