@@ -1,17 +1,46 @@
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
+from aiogram.fsm.storage.memory import MemoryStorage
+from aiogram.types import Update
+
+from fastapi import FastAPI
 
 from app.config import settings
-from app.routers import start_router, reviews_router, training_router
+from app.routers import router as main_router
+
+
+# --- aiogram: бот и диспетчер ---
 
 bot = Bot(
     token=settings.TG_BOT_TOKEN,
     default=DefaultBotProperties(parse_mode="HTML"),
 )
 
-dp = Dispatcher()
+# память можно заменить на Redis позже, сейчас достаточно MemoryStorage
+dp = Dispatcher(storage=MemoryStorage())
 
-# Каждый router включаем только один раз
-dp.include_router(start_router)
-dp.include_router(training_router)
-dp.include_router(reviews_router)
+# подключаем только корневой роутер,
+# внутри которого уже start/reviews/training
+dp.include_router(main_router)
+
+
+# --- ASGI-приложение для Render / uvicorn ---
+
+app = FastAPI()
+
+
+@app.get("/healthz")
+async def healthcheck() -> dict:
+    return {"status": "ok"}
+
+
+@app.post("/tg/webhook")
+async def tg_webhook(update: dict) -> dict:
+    """
+    Точка входа для Telegram Webhook.
+    Render вызывает uvicorn → uvicorn поднимает `app`,
+    Telegram шлёт POST сюда, мы прокидываем апдейт в aiogram.
+    """
+    telegram_update = Update(**update)
+    await dp.feed_update(bot, telegram_update)
+    return {"ok": True}
