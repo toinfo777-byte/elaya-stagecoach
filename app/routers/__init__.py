@@ -1,12 +1,14 @@
-from __future__ import annotations
-
 from aiogram import Router
 
-from . import start  # сюда потом добавим: menu, reviews, progress, help, policy и т.д.
+from .start import router as start_router
+from .training import router as training_router
+from .reviews import router as reviews_router
 
 router = Router(name="root")
 
-# базовый /start
-router.include_router(start.router)
+# Подключаем все дочерние роутеры РОВНО ОДИН РАЗ
+router.include_router(start_router)
+router.include_router(training_router)
+router.include_router(reviews_router)
 
 __all__ = ["router"]
