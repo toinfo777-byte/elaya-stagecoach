@@ -11,5 +11,5 @@ bot = Bot(
 dp = Dispatcher()
 
 dp.include_router(start.router)
-dp.include_router(training.router)
+dp.include_router(training.router)   # один раз!
 dp.include_router(reviews.router)
