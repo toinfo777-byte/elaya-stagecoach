@@ -1,14 +1,17 @@
 from __future__ import annotations
 
 from aiogram import Router, F
+from aiogram.filters import Command, Text
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import Message, ReplyKeyboardRemove
 
 from app.core_api import send_timeline_event
 from app.keyboards.main_menu import MAIN_MENU
+from app.keyboards.reply import main_menu_kb
 
-router = Router(name="training-router")
+# один общий роутер для всего тренировочного блока
+router = Router(name="training")
 
 
 class TrainingFlow(StatesGroup):
@@ -17,10 +20,29 @@ class TrainingFlow(StatesGroup):
     transition = State()
 
 
-# 🚀 вход в тренировку дня
-@router.message(F.text == "🏋️‍♂️ Тренировка дня")
-@router.message(F.text == "🏋️ Тренировка дня")
+# ───────────────── /training (служебная команда на будущее) ───────────────── #
+
+
+@router.message(Command("training"))
+async def training_command(msg: Message, state: FSMContext) -> None:
+    """Служебная команда /training — просто открывает меню."""
+    await state.clear()
+
+    await msg.answer(
+        "Привет! Я Элайя — тренер сцены.\n"
+        "Помогу прокачать голос, дыхание, уверенность и выразительность."
+    )
+    await msg.answer("Готово! Открываю меню.", reply_markup=main_menu_kb())
+
+
+# ───────────────── Вход из кнопки «Тренировка дня» ───────────────── #
+
+
+# тут не равенство по всей строке, а «в тексте есть фраза Тренировка дня»
+# поэтому сработает независимо от вариации эмодзи и пробелов
+@router.message(Text(contains="Тренировка дня"))
 async def start_training(message: Message, state: FSMContext) -> None:
+    """Старт тренировки дня из нижнего меню."""
     await state.clear()
 
     await send_timeline_event(
@@ -41,7 +63,9 @@ async def start_training(message: Message, state: FSMContext) -> None:
     await state.set_state(TrainingFlow.intro)
 
 
-# 🟡 блок intro
+# ───────────────── Блок intro ───────────────── #
+
+
 @router.message(TrainingFlow.intro)
 async def handle_intro(message: Message, state: FSMContext) -> None:
     await state.update_data(intro_text=message.text)
@@ -66,7 +90,9 @@ async def handle_intro(message: Message, state: FSMContext) -> None:
     await state.set_state(TrainingFlow.reflect)
 
 
-# 🔵 блок reflect
+# ───────────────── Блок reflect ───────────────── #
+
+
 @router.message(TrainingFlow.reflect)
 async def handle_reflect(message: Message, state: FSMContext) -> None:
     await state.update_data(reflect_text=message.text)
@@ -92,7 +118,9 @@ async def handle_reflect(message: Message, state: FSMContext) -> None:
     await state.set_state(TrainingFlow.transition)
 
 
-# 🟣 блок transition + завершение
+# ───────────────── Блок transition + завершение ───────────────── #
+
+
 @router.message(TrainingFlow.transition)
 async def handle_transition(message: Message, state: FSMContext) -> None:
     data = await state.get_data()
