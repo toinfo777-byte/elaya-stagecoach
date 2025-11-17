@@ -1,17 +1,18 @@
 # app/routers/progress.py
-from __future__ import annotations
-from aiogram import Router
-from aiogram.filters import Command
+from aiogram import Router, F
 from aiogram.types import Message
 
-router = Router(name="progress")
+from app.keyboards.main_menu import MAIN_MENU
 
-@router.message(Command("progress"))
-async def show_progress(m: Message):
-    await m.answer(
+router = Router(name="progress-router")
+
+
+@router.message(F.text == "📈 Мой прогресс")
+async def handle_progress(message: Message):
+    # позже здесь будет запрос к CORE (/api/status или спец-эндпоинт)
+    await message.answer(
         "📈 Мой прогресс\n\n"
-        "Пока раздел находится в разработке.\n"
-        "Здесь позже появится статистика твоих тренировок."
+        "Я уже фиксирую события в ядре Элайи.\n"
+        "Скоро здесь появится твой реальный прогресс по тренировкам и циклам.",
+        reply_markup=MAIN_MENU,
     )
-
-__all__ = ["router", "show_progress"]
