@@ -1,15 +1,24 @@
-from __future__ import annotations
+# app/routers/help.py
 from aiogram import Router, F
-from aiogram.filters import Command
-from aiogram.types import Message, ReplyKeyboardRemove
-from aiogram.enums import ChatType
+from aiogram.types import Message
 
-router = Router(name="help")
+from app.keyboards.main_menu import MAIN_MENU
 
-@router.message(Command("help"), F.chat.type == ChatType.PRIVATE)
-async def help_private(m: Message) -> None:
-    await m.answer("FAQ и помощь. Задавайте вопрос.")
+router = Router(name="help-router")
 
-@router.message(Command("help"), F.chat.type.in_({ChatType.GROUP, ChatType.SUPERGROUP}))
-async def help_group(m: Message) -> None:
-    await m.answer("Помощь доступна в личке. Напишите мне в ЛС.", reply_markup=ReplyKeyboardRemove(True))
+
+HELP_TEXT = (
+    "💬 Помощь\n\n"
+    "Этот бот — тренер сцены Элайя.\n"
+    "Он помогает развивать голос, дыхание, внимание и уверенность через короткие тренировки.\n\n"
+    "Что можно делать сейчас:\n"
+    "• запускать базовые тренировки\n"
+    "• оставлять отзывы\n"
+    "• следить за развитием проекта Элайя.\n\n"
+    "Если что-то работает странно — просто напиши отзыв в разделе отзывов."
+)
+
+
+@router.message(F.text == "💬 Помощь")
+async def handle_help(message: Message):
+    await message.answer(HELP_TEXT, reply_markup=MAIN_MENU)
