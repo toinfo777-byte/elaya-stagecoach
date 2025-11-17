@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from aiogram import Router, F
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
@@ -114,7 +116,6 @@ async def handle_transition(message: Message, state: FSMContext) -> None:
         ),
         reply_markup=MAIN_MENU,
     )
-from __future__ import annotations
 
 from aiogram import Router
 from aiogram.filters import Command, StateFilter
