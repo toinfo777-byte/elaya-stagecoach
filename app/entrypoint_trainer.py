@@ -1,82 +1,77 @@
 from __future__ import annotations
 
-import os
 import logging
-from typing import Any
+import os
 
-from fastapi import FastAPI, Request
-from starlette.responses import Response, PlainTextResponse
+from fastapi import FastAPI, Request, HTTPException
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
+from aiogram.types import Update
 
 from app.config import settings
 from app.build import BUILD_MARK
+from app.routers import start as start_router
+from app.routers import menu, help, policy, progress, reviews, apply as apply_router
+
+# --- токен и секрет ---
+
+BOT_TOKEN = (
+    os.getenv("TG_BOT_TOKEN", "").strip()
+    or (settings.tg_bot_token or "")  # TELEGRAM_TOKEN
+    or (settings.bot_token or "")     # BOT_TOKEN
+)
+if not BOT_TOKEN:
+    raise RuntimeError("TG_BOT_TOKEN / TELEGRAM_TOKEN / BOT_TOKEN is not set")
+
+WEBHOOK_SECRET = (
+    os.getenv("TG_WEBHOOK_SECRET", "").strip()
+    or (settings.webhook_secret or "")
+)
+
+# --- aiogram core ---
+
+bot = Bot(
+    BOT_TOKEN,
+    default=DefaultBotProperties(parse_mode=ParseMode.HTML),
+)
+dp = Dispatcher()
+
+for r in (
+    start_router.router,
+    menu.router,
+    help.router,
+    policy.router,
+    progress.router,
+    reviews.router,
+    apply_router.router,
+):
+    dp.include_router(r)
+
+# --- FastAPI app ---
 
 app = FastAPI(title="Elaya Trainer — webhook")
-WEBHOOK_PATH: str = (
-    os.getenv("WEBHOOK_PATH")
-    or getattr(settings, "WEBHOOK_PATH", None)
-    or "/tg/webhook"
-)
-
-dp = Dispatcher()
-BOT_PROFILE = "trainer"  # фиксировано для этого сервиса
-
-# Только тренерские роутеры
-from app.routers import (  # noqa: E402
-    system,  # системный /start (с меню для trainer)
-    training, progress, minicasting, leader,
-    settings as settings_mod, faq,
-)
-dp.include_router(system.router)
-dp.include_router(training.router)
-dp.include_router(progress.router)
-dp.include_router(minicasting.router)
-dp.include_router(leader.router)
-dp.include_router(settings_mod.router)
-dp.include_router(faq.router)
-
-
-@app.get("/healthz")
-async def healthz() -> PlainTextResponse:
-    return PlainTextResponse("ok")
-
-
-@app.post(WEBHOOK_PATH)
-async def tg_webhook(request: Request) -> Response:
-    update: Any = await request.json()
-    bot: Bot = request.app.state.bot
-    await dp.feed_webhook_update(bot, update)
-    return Response(status_code=200)
-
-
-async def _make_bot() -> Bot:
-    token = (
-        getattr(settings, "TG_BOT_TOKEN", None)
-        or getattr(settings, "BOT_TOKEN", None)
-        or os.getenv("TELEGRAM_TOKEN")
-    )
-    if not token:
-        raise RuntimeError("TELEGRAM_TOKEN/BOT_TOKEN is not set")
-    bot = Bot(token=token, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
-    me = await bot.get_me()
-    logging.info(
-        ">>> Startup (trainer): id=%s user=@%s build=%s",
-        me.id, me.username, BUILD_MARK
-    )
-    return bot
 
 
 @app.on_event("startup")
 async def on_startup() -> None:
-    log_level = getattr(settings, "LOG_LEVEL", "INFO")
-    logging.basicConfig(level=getattr(logging, str(log_level).upper(), logging.INFO))
-    app.state.bot = await _make_bot()
+    log_level = getattr(settings, "log_level", "INFO")
+    logging.basicConfig(
+        level=getattr(logging, log_level.upper(), logging.INFO)
+    )
+    me = await bot.get_me()
+    logging.info(
+        ">>> Startup (trainer): id=%s user=@%s build=%s",
+        me.id,
+        me.username,
+        settings.build_mark or BUILD_MARK,
+    )
 
 
-@app.on_event("shutdown")
-async def on_shutdown() -> None:
-    bot: Bot | None = getattr(app.state, "bot", None)
-    if bot:
-        await bot.session.close()
+@app.get("/healthz")
+async def healthz():
+    return {"ok": True}
+
+
+@app.post("/tg/webhook")
+async de
