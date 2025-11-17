@@ -26,10 +26,10 @@ async def start_entry(
     - любые другие payload → просто фиксируем в CORE
     """
 
-    # очищаем состояние
+    # очищаем состояние для любого /start
     await state.clear()
 
-    # payload диплинка
+    # достаём payload диплинка (если есть)
     payload = ""
     if command and command.args:
         payload = command.args.strip().lower()
