@@ -6,7 +6,7 @@ class Settings(BaseSettings):
 
     TG_BOT_TOKEN: str
     WEBHOOK_SECRET: str
-    BASE_URL: str
+    BASE_URL: str  # https://elaya-stagecoach-web.onrender.com
 
 
 settings = Settings()
