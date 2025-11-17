@@ -8,9 +8,8 @@ class Settings(BaseSettings):
     )
 
     TG_BOT_TOKEN: str
-    WEBHOOK_SECRET: str
-    BASE_URL: str
+    WEBHOOK_SECRET: str | None = None
+    BASE_URL: str | None = None
 
 
-# ← ЭТО ДОБАВЛЯЕМ
 settings = Settings()
