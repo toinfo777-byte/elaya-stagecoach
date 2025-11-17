@@ -1,49 +1,33 @@
-# app/core_api.py
-from __future__ import annotations
+import logging
+from typing import Any, Dict
 
-from fastapi import APIRouter, Header, HTTPException
-from pydantic import BaseModel
-from os import getenv
+import httpx
 
-from app.core.scene_engine import engine
-from app.core import store
+from app.config import settings
 
-router = APIRouter(prefix="/api")
+logger = logging.getLogger(__name__)
 
 
-class SceneRequest(BaseModel):
-    user_id: int
-    chat_id: int
-    text: str | None = None
-    scene: str
+async def send_timeline_event(kind: str, payload: Dict[str, Any] | None = None) -> bool:
+    """
+    Отправка события в web-ядро Элайи (/api/timeline).
 
+    Ошибки логируем, но НЕ ломаем работу бота.
+    """
+    base = settings.BASE_URL.rstrip("/")
+    url = f"{base}/api/timeline"
 
-class SceneResponse(BaseModel):
-    reply: str
+    data = {
+        "kind": kind,
+        "payload": payload or {},
+    }
 
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            resp = await client.post(url, json=data)
+        resp.raise_for_status()
+    except Exception as e:  # noqa: BLE001
+        logger.warning("Failed to send timeline event %s: %s", kind, e)
+        return False
 
-def _auth(x_core_token: str | None):
-    if not x_core_token or x_core_token != getenv("CORE_API_TOKEN"):
-        raise HTTPException(status_code=401, detail="unauthorized")
-
-
-@router.post("/scene/enter", response_model=SceneResponse)
-async def scene_enter(req: SceneRequest, x_core_token: str | None = Header(None)):
-    _auth(x_core_token)
-    return SceneResponse(reply=engine.intro(req.user_id))
-
-
-@router.post("/scene/reflect", response_model=SceneResponse)
-async def scene_reflect(req: SceneRequest, x_core_token: str | None = Header(None)):
-    _auth(x_core_token)
-    reply = engine.reflect(req.user_id, req.text)
-    if req.text and str(req.text).strip():
-        # фиксируем отражение в журнале
-        store.add_reflection(req.user_id, str(req.text))
-    return SceneResponse(reply=reply)
-
-
-@router.post("/scene/transition", response_model=SceneResponse)
-async def scene_transition(req: SceneRequest, x_core_token: str | None = Header(None)):
-    _auth(x_core_token)
-    return SceneResponse(reply=engine.transition(req.user_id))
+    return True
