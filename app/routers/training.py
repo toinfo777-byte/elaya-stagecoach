@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from aiogram import Router, F
+from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import Message, ReplyKeyboardRemove
@@ -8,7 +9,6 @@ from aiogram.types import Message, ReplyKeyboardRemove
 from app.core_api import send_timeline_event
 from app.keyboards.main_menu import MAIN_MENU
 
-# 👉 СНАЧАЛА создаём router
 router = Router(name="training")
 
 
@@ -19,9 +19,12 @@ class TrainingFlow(StatesGroup):
 
 
 # 🚀 Вход в "Тренировку дня"
-# Ловим любое сообщение, начинающееся с символа "🏋"
-@router.message(F.text.startswith("🏋"))
+# 1) команда /training
+# 2) любой текст, в котором есть "Тренировка дня"
+@router.message(Command("training"))
+@router.message(F.text.contains("Тренировка дня"))
 async def start_training(message: Message, state: FSMContext) -> None:
+    # очищаем предыдущее состояние
     await state.clear()
 
     await send_timeline_event(
@@ -29,6 +32,7 @@ async def start_training(message: Message, state: FSMContext) -> None:
         {
             "user_id": message.from_user.id,
             "username": message.from_user.username,
+            "text": message.text,  # заодно пишем сырой текст кнопки в таймлайн
         },
     )
 
