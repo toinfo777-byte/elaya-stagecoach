@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "elaya-stagecoach"
+version = "0.0.1"
+description = "Local Elaya Agent CLI"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = []
+
+[tool.black]
+line-length = 88
+target-version = ["py312"]
+skip-string-normalization = false
+
+[tool.isort]
+profile = "black"
+line_length = 88
+known_first_party = ["app", "trainer", "elaya_cli"]
+combine_as_imports = true
+
+[project.scripts]
+elaya = "elaya_cli:main"

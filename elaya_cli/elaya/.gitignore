@@ -1,0 +1,34 @@
+# --- Python ---
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+
+# --- Virtual env ---
+venv/
+.venv/
+
+# --- VSCode ---
+.vscode/
+
+# --- OS files ---
+.DS_Store
+Thumbs.db
+
+# --- Build artifacts ---
+build/
+dist/
+*.egg-info/
+
+# --- Project specific ---
+# Локальный CLI-агент
+elayа_cli/__pycache__/
+*.log
+
+# Логи pytest
+.pytest_cache/
+
+# MyPy / Ruff / Black
+.mypy_cache/
+.ruff_cache/
+.cache/

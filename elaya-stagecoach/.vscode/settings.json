@@ -1,0 +1,27 @@
+{
+  // Общие настройки редактора
+  "editor.tabSize": 4,
+  "editor.insertSpaces": true,
+  "editor.rulers": [88],
+  "editor.formatOnSave": true,
+
+  // Python: используем Black как главный форматтер
+  "[python]": {
+    "editor.defaultFormatter": "ms-python.black-formatter"
+  },
+
+  // isort: сортировка импортов в стиле Black
+  "isort.args": [
+    "--profile",
+    "black"
+  ],
+
+  // Подсказки Python
+  "python.analysis.typeCheckingMode": "basic",
+
+  // GitLens: показывать историю по файлу
+  "gitlens.currentLine.enabled": true,
+
+  // Лучше видеть пробелы в конце строки (для аккуратности)
+  "editor.renderWhitespace": "boundary"
+}
