@@ -16,11 +16,11 @@ bot = Bot(
     default=DefaultBotProperties(parse_mode="HTML"),
 )
 
-# память можно заменить на Redis позже, сейчас достаточно MemoryStorage
+# пока достаточно MemoryStorage, при желании потом заменим на Redis
 dp = Dispatcher(storage=MemoryStorage())
 
 # подключаем только корневой роутер,
-# внутри которого уже start/reviews/training
+# внутри которого уже start / reviews / training
 dp.include_router(main_router)
 
 
@@ -38,7 +38,7 @@ async def healthcheck() -> dict:
 async def tg_webhook(update: dict) -> dict:
     """
     Точка входа для Telegram Webhook.
-    Render вызывает uvicorn → uvicorn поднимает `app`,
+    Render запускает uvicorn → uvicorn поднимает `app`,
     Telegram шлёт POST сюда, мы прокидываем апдейт в aiogram.
     """
     telegram_update = Update(**update)
