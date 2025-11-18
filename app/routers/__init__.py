@@ -1,20 +1,18 @@
 from aiogram import Router
 
-from .start import router as start_router
-from .reviews import router as reviews_router
-from .training import router as training_router
+from . import start, reviews, training
 
 # общий корневой роутер бота
 router = Router(name="root-router")
 
 # порядок важен только логически, для нас так наглядно
-router.include_router(start_router)
-router.include_router(reviews_router)
-router.include_router(training_router)
+router.include_router(start.router)
+router.include_router(reviews.router)
+router.include_router(training.router)
 
 __all__ = (
-    "router",
-    "start_router",
-    "reviews_router",
-    "training_router",
+    "router",      # корневой роутер
+    "start",
+    "reviews",
+    "training",
 )
