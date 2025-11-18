@@ -16,7 +16,11 @@ bot = Bot(
     default=DefaultBotProperties(parse_mode="HTML"),
 )
 
+# пока память в RAM, потом можно будет переехать в Redis
 dp = Dispatcher(storage=MemoryStorage())
+
+# подключаем корневой роутер,
+# внутри уже лежат start / reviews / training
 dp.include_router(main_router)
 
 
@@ -32,6 +36,9 @@ async def healthcheck() -> dict:
 
 @app.post("/tg/webhook")
 async def tg_webhook(update: dict) -> dict:
+    """
+    Точка входа для Telegram Webhook.
+    """
     telegram_update = Update(**update)
     await dp.feed_update(bot, telegram_update)
     return {"ok": True}
