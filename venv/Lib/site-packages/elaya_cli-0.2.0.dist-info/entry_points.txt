@@ -1,0 +1,2 @@
+[console_scripts]
+elaya = cli:main

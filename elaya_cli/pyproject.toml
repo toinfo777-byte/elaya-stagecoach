@@ -1,0 +1,12 @@
+[project]
+name = "elaya-cli"
+version = "0.2.0"
+description = "Local Elaya CLI Agent"
+authors = [
+    { name = "Elaya Project" }
+]
+readme = "README.md"
+requires-python = ">=3.10"
+
+[project.scripts]
+elaya = "cli:main"

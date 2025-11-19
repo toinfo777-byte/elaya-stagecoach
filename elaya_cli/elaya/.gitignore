@@ -32,3 +32,13 @@ elayа_cli/__pycache__/
 .mypy_cache/
 .ruff_cache/
 .cache/
+
+# --- Local Python env ---
+venv/
+*.egg-info/
+*.dist-info/
+*.pth
+__pycache__/
+/venv/
+/elaya_cli/elaya_cli.egg-info/
+/elaya_cli/*.dist-info/
