@@ -4,6 +4,7 @@ elaya/cli.py
 elaya/core.py
 elaya/commands/__init__.py
 elaya/commands/diag_cmd.py
+elaya/commands/event_cmd.py
 elaya/commands/help_cmd.py
 elaya/commands/project_cmd.py
 elaya/commands/status_cmd.py
