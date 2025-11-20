@@ -1,181 +1,116 @@
-# app/routes/system.py
-
 from __future__ import annotations
 
-import os
-import threading
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any, Optional
+
+import os
 
 from fastapi import APIRouter, Header, HTTPException
+from pydantic import BaseModel
 
 router = APIRouter(prefix="/api", tags=["api"])
 
-# ----------------- защита (для мутаций) -----------------
+# --- защита (используем для мутирующих запросов, например /timeline, /sync) ---
 
 GUARD_KEY = os.getenv("GUARD_KEY", "").strip()
 
 
-def _check_guard(x_guard_key: Optional[str]) -> None:
+def _check_guard(x_guard_key: str | None) -> None:
     """
-    Если GUARD_KEY не задан — защита выключена.
-    Если задан — сверяем с заголовком X-Guard-Key, иначе 401.
+    Простая защита для внутренних API.
+    Если GUARD_KEY не задан — защита отключена.
+    Если задан — требуем заголовок X-Guard-Key с тем же значением.
     """
     if not GUARD_KEY:
-        return
+        return  # защита отключена
 
     if (x_guard_key or "").strip() != GUARD_KEY:
         raise HTTPException(status_code=401, detail="invalid guard key")
 
 
-# ----------------- простое ядро состояния -----------------
+# --- ядро состояния: работаем через StateStore, если он есть; иначе — мягкий fallback ---
+
+try:
+    from app.core.state import StateStore  # type: ignore[attr-defined]
+except Exception:
+    StateStore = None  # type: ignore[assignment]
 
 
-class CoreState:
+def _store_event(kind: str, payload: dict[str, Any]) -> None:
     """
-    Минимальное состояние ядра Элайи в памяти процесса.
-
-    Этого достаточно для:
-    — счётчиков intro / reflect / transition
-    — цикла обновлений
-    — хранения последних событий для таймлайна.
+    Унифицированная запись событий в StateStore (если он есть).
+    Никаких исключений наверх не кидаем — агент не должен падать из-за ядра.
     """
+    if not StateStore:
+        return
 
-    def __init__(self) -> None:
-        self._lock = threading.Lock()
-        self.cycle: int = 0
-        self.last_update: str = "-"
-        self.intro: int = 0
-        self.reflect: int = 0
-        self.transition: int = 0
-        self.events: List[Dict[str, Any]] = []
-        self.reflection: Dict[str, Any] = {"text": "", "updated_at": "-"}
-
-    def snapshot(self) -> Dict[str, Any]:
-        with self._lock:
-            return {
-                "cycle": self.cycle,
-                "last_update": self.last_update,
-                "intro": self.intro,
-                "reflect": self.reflect,
-                "transition": self.transition,
-                "events": list(self.events),
-                "reflection": dict(self.reflection),
-            }
-
-    def push_event(self, *, source: str, scene: str, payload: Dict[str, Any]) -> Dict[str, Any]:
-        ts = datetime.now(timezone.utc).isoformat()
-
-        with self._lock:
-            # обновляем цикл и счётчики сцен
-            self.cycle += 1
-            self.last_update = ts
-
-            if scene == "intro":
-                self.intro += 1
-            elif scene == "reflect":
-                self.reflect += 1
-            elif scene == "transition":
-                self.transition += 1
-
-            event = {
-                "ts": ts,
-                "cycle": self.cycle,
-                "source": source,
-                "scene": scene,
-                "payload": payload,
-            }
-
-            self.events.append(event)
-
-        return event
+    try:
+        store = StateStore.get_instance()
+        store.add_event(kind=kind, payload=payload)
+    except Exception:
+        # логирование можно добавить позже, сейчас просто не роняем API
+        return
 
 
-STATE = CoreState()
-
-# ----------------- healthcheck -----------------
-
-
-@router.get("/healthz")
-async def healthz() -> Dict[str, Any]:
-    """
-    Простой healthcheck для Render.
-    """
-    return {"ok": True}
-
-
-# ----------------- status -----------------
+# --- /api/status — минимальный "пульс" ядра для CLI-агента ---
 
 
 @router.get("/status")
-async def status() -> Dict[str, Any]:
+async def api_status() -> dict[str, Any]:
     """
-    Отдаём минимальное состояние ядра для HQ / dashboard.
+    Базовый статус ядра для CLI-агента и внутренних проверок.
 
-    Формат:
-    {
-      "ok": true,
-      "core": {
-        "cycle": ...,
-        "last_update": "...",
-        "intro": ...,
-        "reflect": ...,
-        "transition": ...,
-        "events": [...],
-        "reflection": {...}
-      }
+    Используется elaya-cli (функция ping_core) для команды `elaya3 sync`.
+    """
+    now_utc = datetime.now(timezone.utc).isoformat()
+
+    data: dict[str, Any] = {
+        "status": "ok",
+        "source": "elaya-core",
+        "time": now_utc,
     }
+
+    # Пытаемся обогатить ответ данными из StateStore (если он есть)
+    if StateStore:
+        try:
+            store = StateStore.get_instance()
+            data["state_ready"] = True
+            # если у StateStore есть метод count_events — используем, иначе просто пропускаем
+            if hasattr(store, "count_events"):
+                data["timeline_len"] = store.count_events(kind="timeline")
+        except Exception:
+            data["state_ready"] = False
+
+    return data
+
+
+# --- /api/timeline — приём событий таймлайна от UI, ботов, CLI и т.п. ---
+
+
+class TimelineEvent(BaseModel):
+    channel: str = "cli"
+    level: str = "info"
+    message: str
+    extra: Optional[dict[str, Any]] = None
+    ts: Optional[str] = None
+
+
+@router.post("/timeline")
+async def api_timeline(
+    event: TimelineEvent,
+    x_guard_key: str | None = Header(default=None),
+) -> dict[str, Any]:
     """
-    core = STATE.snapshot()
-    return {"ok": True, "core": core}
-
-
-# ----------------- приём событий от бота / UI -----------------
-
-
-@router.post("/event")
-async def event(
-    body: Dict[str, Any],
-    x_guard_key: Optional[str] = Header(default=None, alias="X-Guard-Key"),
-) -> Dict[str, Any]:
-    """
-    Универсальная точка входа событий от бота / UI.
-
-    Ожидаемый формат тела:
-    {
-      "source": "bot" | "ui" | "...",
-      "scene": "start" | "intro" | "reflect" | "transition" | "...",
-      "payload": { ... }    # любой JSON-словарь
-    }
+    Приём события таймлайна.
+    Используется для внутреннего Pulse (UI, боты, CLI-агент и т.п.).
+    Защищён GUARD_KEY, чтобы извне сюда нельзя было стучаться.
     """
     _check_guard(x_guard_key)
 
-    source = str(body.get("source") or "unknown")
-    scene = str(body.get("scene") or "unknown")
-    raw_payload = body.get("payload") or {}
+    payload = event.dict()
+    if not payload.get("ts"):
+        payload["ts"] = datetime.now(timezone.utc).isoformat()
 
-    if not isinstance(raw_payload, dict):
-        payload: Dict[str, Any] = {"value": raw_payload}
-    else:
-        payload = raw_payload
+    _store_event("timeline", payload)
 
-    event = STATE.push_event(source=source, scene=scene, payload=payload)
-    return {"ok": True, "event": event}
-
-
-# ----------------- API для таймлайна -----------------
-
-
-@router.get("/timeline")
-async def api_timeline() -> Dict[str, Any]:
-    """
-    Лёгкий API для страницы /timeline.
-
-    Страница ожидает:
-    {
-      "ok": true,
-      "events": [ {ts, source, scene, payload, ...}, ... ]
-    }
-    """
-    core = STATE.snapshot()
-    return {"ok": True, "events": core["events"]}
+    return {"ok": True}
