@@ -42,3 +42,4 @@ __pycache__/
 /venv/
 /elaya_cli/elaya_cli.egg-info/
 /elaya_cli/*.dist-info/
+/.venv/

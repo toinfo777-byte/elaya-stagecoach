@@ -1,97 +1,113 @@
-#!/usr/bin/env python3
-# cli.py — минимальный CLI Элайя-Агента v0.2
+from __future__ import annotations
 
-import datetime
-import os
 import sys
+from dataclasses import dataclass
+from datetime import datetime
+from pathlib import Path
 
-from elaya.core import get_status
+from elaya.core import get_status, get_project_info, get_diag_info
 
-# -----------------------------
-# Команды
-# -----------------------------
 
-def show_help():
+# --- утилиты вывода ---
+
+def _print_header(title: str) -> None:
+    print()
+    print(title)
+    print("-" * len(title))
+
+
+def _fmt_time(dt: datetime) -> str:
+    return dt.strftime("%Y-%m-%d %H:%M:%S")
+
+
+def _print_usage() -> None:
     print("""
 Elaya Agent · v0.2
 
 Доступные команды:
 
-  elaya help       — показать помощь
-  elaya status     — статус локального слоя
-  elaya project    — информация о проекте (папки, время, структура)
-
-""")
-
-
-def show_status() -> None:
-    data = get_status()
-    print("Elaya Status:")
-    print(f"  Status : {data['status']}")
-    print(f"  Time   : {data['time']}")
-    print(f"  Folder : {data['cwd']}")
+  elaya help      — показать помощь
+  elaya status    — статус локального слоя
+  elaya project   — информация о проекте (папки, время, структура)
+  elaya diag      — диагностика окружения (пути, Python, venv)
+""".strip())
 
 
+# --- команды ---
 
 
-
-def show_project():
-    root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-    docs = os.path.join(root, "docs")
-    app = os.path.join(root, "app")
-    now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
-    print("Elaya Project Info:")
-    print(f"  Time : {now}")
-    print(f"  Root : {root}")
-    print(f"  Docs : {docs}")
-    print(f"  App  : {app}")
+def cmd_help(args: list[str]) -> int:
+    _print_usage()
+    return 0
 
 
-# -----------------------------
-# Основной вход
-# -----------------------------
+def cmd_status(args: list[str]) -> int:
+    info = get_status()
+    _print_header("Elaya Status")
 
-def main():
-    if len(sys.argv) < 2:
-        show_help()
-        return
+    print(f"Status : {info.status}")
+    print(f"Time   : {_fmt_time(info.time)}")
+    print(f"Folder : {info.folder}")
 
-    cmd = sys.argv[1]
+    return 0
 
-    if cmd == "help":
-        show_help()
-    elif cmd == "status":
-        show_status()
-    elif cmd == "project":
-        show_project()
-    else:
-        print(f"Неизвестная команда: {cmd}")
-        show_help()
+
+def cmd_project(args: list[str]) -> int:
+    info = get_project_info()
+    _print_header("Elaya Project Info")
+
+    print(f"Time : {_fmt_time(info.time)}")
+    print(f"Root : {info.root}")
+    print(f"Docs : {info.docs}")
+    print(f"App  : {info.app}")
+
+    return 0
+
+
+def cmd_diag(args: list[str]) -> int:
+    info = get_diag_info()
+    _print_header("Elaya Diagnostics")
+
+    print(f"Python  : {info.python}")
+    print(f"Venv    : {info.venv}")
+    print(f"Project : {info.project_root}")
+
+    if info.warnings:
+        print()
+        print("Warnings:")
+        for w in info.warnings:
+            print(f"- {w}")
+
+    return 0
+
+
+# --- точка входа ---
+
+
+def main(argv: list[str] | None = None) -> int:
+    if argv is None:
+        argv = sys.argv[1:]
+
+    if not argv:
+        # Без аргументов показываем help
+        _print_usage()
+        return 0
+
+    cmd, *rest = argv
+
+    if cmd in ("help", "-h", "--help"):
+        return cmd_help(rest)
+    if cmd == "status":
+        return cmd_status(rest)
+    if cmd == "project":
+        return cmd_project(rest)
+    if cmd == "diag":
+        return cmd_diag(rest)
+
+    print(f"Неизвестная команда: {cmd}")
+    _print_usage()
+    return 1
 
 
 if __name__ == "__main__":
-    main()
-
-def main():
-    import sys
-
-    if len(sys.argv) < 2:
-        show_help()
-        return
-
-    command = sys.argv[1]
-
-    if command == "help":
-        show_help()
-    elif command == "status":
-        show_status()
-    elif command == "project":
-        show_project()
-    else:
-        print(f"Неизвестная команда: {command}")
-        show_help()
-
-
-if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

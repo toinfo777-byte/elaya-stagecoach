@@ -9,10 +9,14 @@ from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Header, HTTPException
 
+# --- базовая конфигурация ---
+
 router = APIRouter(prefix="/api", tags=["api"])
 
-# ----------------- защита (для мутаций) -----------------
+# версия web-core (пока берём из env, иначе — значение по умолчанию)
+CORE_VERSION = os.getenv("CORE_VERSION", "0.9.0-beta").strip() or "0.9.0-beta"
 
+# ключ защиты для внутренних API (если не задан — защита выключена)
 GUARD_KEY = os.getenv("GUARD_KEY", "").strip()
 
 
@@ -107,7 +111,7 @@ async def healthz() -> Dict[str, Any]:
     """
     Простой healthcheck для Render.
     """
-    return {"ok": True}
+    return {"ok": True, "version": CORE_VERSION}
 
 
 # ----------------- status -----------------
@@ -121,6 +125,7 @@ async def status() -> Dict[str, Any]:
     Формат:
     {
       "ok": true,
+      "version": "0.9.0-beta",
       "core": {
         "cycle": ...,
         "last_update": "...",
@@ -133,7 +138,7 @@ async def status() -> Dict[str, Any]:
     }
     """
     core = STATE.snapshot()
-    return {"ok": True, "core": core}
+    return {"ok": True, "version": CORE_VERSION, "core": core}
 
 
 # ----------------- приём событий от бота / UI -----------------
@@ -149,7 +154,7 @@ async def event(
 
     Ожидаемый формат тела:
     {
-      "source": "bot" | "ui" | "...",
+      "source": "bot" | "ui" | "cli" | "...",
       "scene": "start" | "intro" | "reflect" | "transition" | "...",
       "payload": { ... }    # любой JSON-словарь
     }

@@ -1,2 +1,3 @@
 [console_scripts]
 elaya = cli:main
+elaya3 = elaya.cli:main

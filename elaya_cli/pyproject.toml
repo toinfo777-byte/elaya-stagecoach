@@ -1,12 +1,20 @@
 [project]
 name = "elaya-cli"
-version = "0.2.0"
+version = "0.4.1"
 description = "Local Elaya CLI Agent"
 authors = [
-    { name = "Elaya Project" }
+    { name = "Elaya Project" },
 ]
 readme = "README.md"
 requires-python = ">=3.10"
 
+# Лёгкий набор зависимостей для агента
+dependencies = [
+    "typer[all]",
+    "requests",
+]
+
 [project.scripts]
-elaya = "cli:main"
+elaya = "cli:main"          # старый односоставной агент v0.2
+elaya3 = "elaya.cli:main"   # новый агент v0.4 (Typer + Pulse + api_client)
+
