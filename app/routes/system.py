@@ -9,14 +9,10 @@ from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Header, HTTPException
 
-# --- базовая конфигурация ---
-
 router = APIRouter(prefix="/api", tags=["api"])
 
-# версия web-core (пока берём из env, иначе — значение по умолчанию)
-CORE_VERSION = os.getenv("CORE_VERSION", "0.9.0-beta").strip() or "0.9.0-beta"
+# ----------------- защита (для мутаций) -----------------
 
-# ключ защиты для внутренних API (если не задан — защита выключена)
 GUARD_KEY = os.getenv("GUARD_KEY", "").strip()
 
 
@@ -67,13 +63,7 @@ class CoreState:
                 "reflection": dict(self.reflection),
             }
 
-    def push_event(
-        self,
-        *,
-        source: str,
-        scene: str,
-        payload: Dict[str, Any],
-    ) -> Dict[str, Any]:
+    def push_event(self, *, source: str, scene: str, payload: Dict[str, Any]) -> Dict[str, Any]:
         ts = datetime.now(timezone.utc).isoformat()
 
         with self._lock:
@@ -111,7 +101,7 @@ async def healthz() -> Dict[str, Any]:
     """
     Простой healthcheck для Render.
     """
-    return {"ok": True, "version": CORE_VERSION}
+    return {"ok": True}
 
 
 # ----------------- status -----------------
@@ -125,7 +115,6 @@ async def status() -> Dict[str, Any]:
     Формат:
     {
       "ok": true,
-      "version": "0.9.0-beta",
       "core": {
         "cycle": ...,
         "last_update": "...",
@@ -138,10 +127,10 @@ async def status() -> Dict[str, Any]:
     }
     """
     core = STATE.snapshot()
-    return {"ok": True, "version": CORE_VERSION, "core": core}
+    return {"ok": True, "core": core}
 
 
-# ----------------- приём событий от бота / UI -----------------
+# ----------------- приём событий от бота / UI / CLI -----------------
 
 
 @router.post("/event")
@@ -150,12 +139,12 @@ async def event(
     x_guard_key: Optional[str] = Header(default=None, alias="X-Guard-Key"),
 ) -> Dict[str, Any]:
     """
-    Универсальная точка входа событий от бота / UI.
+    Универсальная точка входа событий от бота / UI / CLI.
 
     Ожидаемый формат тела:
     {
       "source": "bot" | "ui" | "cli" | "...",
-      "scene": "start" | "intro" | "reflect" | "transition" | "...",
+      "scene": "start" | "intro" | "reflect" | "transition" | "manual" | "...",
       "payload": { ... }    # любой JSON-словарь
     }
     """

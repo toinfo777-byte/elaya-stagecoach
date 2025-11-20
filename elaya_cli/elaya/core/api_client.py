@@ -1,92 +1,66 @@
+# elaya_cli/elaya/core/api_client.py
+
 from __future__ import annotations
 
-from typing import Any, Dict, Optional, Tuple
-import os
+from typing import Any, Dict
 
+import os
 import requests
 
-from .config import CORE_URL, CORE_GUARD_KEY, CORE_TIMEOUT, APP_NAME, APP_VERSION
+# Переменная окружения, откуда берём URL web-core
+CORE_URL_ENV = "ELAYA_CORE_URL"
+
+# Запасной URL по умолчанию (можешь поменять под себя)
+DEFAULT_CORE_URL = "https://elaya-stagecoach-web.onrender.com"
 
 
-def is_configured() -> bool:
+def get_core_url() -> str:
     """
-    Есть ли web-core: проверяем, задан ли URL.
+    Возвращает базовый URL web-core.
+
+    1) Берём из переменной окружения E L A Y A _ C O R E _ U R L
+    2) Если не задана — используем DEFAULT_CORE_URL.
     """
-    return bool(CORE_URL)
+    base = os.getenv(CORE_URL_ENV, DEFAULT_CORE_URL).strip()
+    if not base:
+        base = DEFAULT_CORE_URL
+    return base.rstrip("/")
 
 
-def _headers() -> Dict[str, str]:
+def _core_url(path: str) -> str:
     """
-    Базовые заголовки для всех запросов к web-core.
+    Строим полный URL до эндпоинта web-core.
     """
-    headers: Dict[str, str] = {
-        "User-Agent": f"{APP_NAME}-cli/{APP_VERSION}",
+    return f"{get_core_url()}{path}"
+
+
+def get_status() -> Dict[str, Any]:
+    """
+    Запрос состояния ядра: GET /api/status.
+
+    Возвращает JSON как dict.
+    """
+    resp = requests.get(_core_url("/api/status"), timeout=10)
+    resp.raise_for_status()
+    return resp.json()
+
+
+def send_event(source: str, scene: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Отправка произвольного события в web-core: POST /api/event.
+
+    Аргументы:
+      source — откуда пришло событие (например, "cli" или "bot")
+      scene  — тип / сцена события ("manual", "intro", "reflect" и т.п.)
+      payload — произвольный JSON-словарь с данными события
+
+    Возвращает JSON ответ web-core (dict).
+    """
+    body = {
+        "source": source,
+        "scene": scene,
+        "payload": payload,
     }
-    if CORE_GUARD_KEY:
-        headers["X-Guard-Key"] = CORE_GUARD_KEY
-    return headers
-
-
-def _post_json(path: str, payload: Dict[str, Any]) -> Tuple[bool, Optional[str], Optional[Dict[str, Any]]]:
-    """
-    Вспомогательная функция: POST JSON в web-core.
-    Возвращает (ok, error_message, json_response).
-    """
-    if not is_configured():
-        return False, "CORE_URL is not configured (ELAYA_CORE_URL)", None
-
-    url = CORE_URL + path
-    try:
-        response = requests.post(
-            url,
-            json=payload,
-            headers=_headers(),
-            timeout=CORE_TIMEOUT,
-        )
-        response.raise_for_status()
-        try:
-            data = response.json()
-        except ValueError:
-            data = None
-        return True, None, data
-    except Exception as exc:  # noqa: BLE001
-        return False, f"{type(exc).__name__}: {exc}", None
-
-
-def send_pulse(event: str, ok: bool = True, extra: Optional[Dict[str, Any]] = None) -> Tuple[bool, Optional[str]]:
-    """
-    Отправляет событие в web-core (/api/pulse), если он настроен.
-    """
-    payload = {
-        "event": event,
-        "ok": ok,
-        "extra": extra or {},
-    }
-    ok_flag, err, _ = _post_json("/api/pulse", payload)
-    return ok_flag, err
-
-
-def ping_core() -> Tuple[bool, str]:
-    """
-    Пробный запрос к web-core: /api/status.
-    Используется командой `elaya3 sync`.
-    """
-    if not is_configured():
-        return False, "ELAYA_CORE_URL не задан, web-core недоступен."
-
-    url = CORE_URL + "/api/status"
-    try:
-        response = requests.get(  # type: ignore[call-arg]
-            url,
-            headers=_headers(),
-            timeout=CORE_TIMEOUT,
-        )
-        response.raise_for_status()
-        try:
-            data = response.json()
-        except ValueError:
-            data = {}
-        version = data.get("version", "?")
-        return True, f"web-core online, version {version}"
-    except Exception as exc:  # noqa: BLE001
-        return False, f"Ошибка при запросе к web-core: {type(exc).__name__}: {exc}"
+    resp = requests.post(_core_url("/api/event"), json=body, timeout=10)
+    resp.raise_for_status()
+    return resp.json()
