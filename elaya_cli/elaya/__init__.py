@@ -11,8 +11,7 @@ from .commands.event_cmd import event as event_command
 from .commands.intro_cmd import intro as intro_command
 from .commands.reflect_cmd import reflect as reflect_command
 from .commands.transition_cmd import transition as transition_command
-from .commands.cycle_cmd import cycle as cycle_command
-from .commands.cycle_cmd import next
+from .commands.cycle_cmd import cycle as cycle_command, next as next_command
 
 CLI_VERSION = "0.5.0"
 
@@ -70,9 +69,8 @@ app.command(name="reflect")(reflect_command)
 app.command(name="transition")(transition_command)
 app.command(name="cycle")(cycle_command)
 
-
 # автоматический Cycle Engine
-app.command(name="next")(next)
+app.command(name="next")(next_command)
 
 
 def main() -> None:
