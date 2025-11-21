@@ -412,3 +412,7 @@ def get_cycle_state() -> Dict[str, Any]:
     core = state.to_dict()
     cycle_state = CycleState.from_core(core).to_dict()
     return {"ok": True, "cycle": cycle_state}
+
+@router.get("/healthz")
+def healthz() -> dict:
+    return {"ok": True}
