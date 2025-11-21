@@ -188,6 +188,24 @@ def post_reflection(
 def get_cycle_state() -> Dict[str, Any]:
     """
     Высокоуровневое состояние цикла Элайи.
+
+    Используется для:
+    - CLI-команд вроде `elaya3 cycle`
+    - UI-панели /timeline (заголовок)
+    - тренер-бота (понимать, где мы в цикле)
+    """
+    core = state.to_dict()
+    cycle_state = CycleState.from_core(core).to_dict()
+    return {"ok": True, "cycle": cycle_state}
+
+
+@router.post("/cycle/next")
+def post_cycle_next() -> Dict[str, Any]:
+    """
+    Временный автоматический шаг цикла.
+
+    Пока что это заглушка: состояние в ядре не меняется,
+    мы просто возвращаем актуальное состояние цикла.
     """
     core = state.to_dict()
     cycle_state = CycleState.from_core(core).to_dict()
@@ -196,7 +214,4 @@ def get_cycle_state() -> Dict[str, Any]:
 
 @router.get("/healthz")
 def healthz() -> dict:
-    """
-    Healthcheck для Render (`/api/healthz`).
-    """
     return {"ok": True}
