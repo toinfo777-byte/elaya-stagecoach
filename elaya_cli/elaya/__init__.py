@@ -8,13 +8,17 @@ import typer
 
 from .core.api_client import get_core_status
 from .commands.event_cmd import event as event_command
+from .commands.intro_cmd import intro as intro_command
+from .commands.reflect_cmd import reflect as reflect_command
+from .commands.transition_cmd import transition as transition_command
+from .commands.cycle_cmd import next_command
 
-CLI_VERSION = "0.4.2"
+CLI_VERSION = "0.5.0"
 
 app = typer.Typer(help="Локальный CLI-агент Элайи")
 
 
-# ------- команды -------
+# ------ базовые команды ------
 
 
 @app.command()
@@ -24,30 +28,19 @@ def status() -> None:
     """
     root = Path(__file__).resolve().parents[2]
 
-    typer.echo(f"Status: OK")
-    typer.echo(f"Time:   {datetime.now().isoformat(sep=' ', timespec='seconds')}")
-    typer.echo(f"Root:   {root}")
-    typer.echo(f"App:    Elaya CLI Agent v{CLI_VERSION}")
-
-    typer.echo()
-    typer.echo("Core status (/api/status):")
+    typer.echo(f"Elaya CLI Agent v{CLI_VERSION}")
+    typer.echo("Status: OK")
+    typer.echo(f"Time: {datetime.now().isoformat(timespec='seconds')}")
+    typer.echo(f"Root: {root}")
 
     try:
-        data = get_core_status()
+        core = get_core_status()
     except Exception as exc:
-        typer.echo(f"  ⚠️  Ошибка запроса к web-core: {exc}")
+        typer.echo(f"⚠ Ошибка запроса /api/status: {exc}")
         return
 
-    if not data.get("ok"):
-        typer.echo(f"  ⚠️  Ответ без ok=true: {data}")
-        return
-
-    core = data.get("core", {})
-    events = core.get("events", [])
-
-    typer.echo(f"  cycle:       {core.get('cycle')}")
-    typer.echo(f"  last_update: {core.get('last_update')}")
-    typer.echo(f"  events:      {len(events)}")
+    typer.echo("\nCore status (/api/status):")
+    typer.echo(json.dumps(core, ensure_ascii=False, indent=2))
 
 
 @app.command()
@@ -57,16 +50,26 @@ def sync() -> None:
     Удобно для отладки связи CLI ↔ web-core.
     """
     try:
-        data = get_core_status()
+        core = get_core_status()
     except Exception as exc:
-        typer.echo(f"⚠️  Ошибка запроса к web-core: {exc}")
+        typer.echo(f"⚠ Ошибка запроса к web-core: {exc}")
         raise typer.Exit(code=1)
 
-    typer.echo(json.dumps(data, ensure_ascii=False, indent=2))
+    typer.echo(json.dumps(core, ensure_ascii=False, indent=2))
 
 
-# Подключаем команду event из отдельного модуля.
+# ------ высокоуровневые команды ------
+
+# ручное событие
 app.command(name="event")(event_command)
+
+# фазы цикла (ручной режим)
+app.command(name="intro")(intro_command)
+app.command(name="reflect")(reflect_command)
+app.command(name="transition")(transition_command)
+
+# автоматический Cycle Engine
+app.command(name="next")(next_command)
 
 
 def main() -> None:

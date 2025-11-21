@@ -3,12 +3,16 @@ elaya/__init__.py
 elaya/cli.py
 elaya/core.py
 elaya/commands/__init__.py
+elaya/commands/cycle_cmd.py
 elaya/commands/diag_cmd.py
 elaya/commands/event_cmd.py
 elaya/commands/help_cmd.py
+elaya/commands/intro_cmd.py
 elaya/commands/project_cmd.py
+elaya/commands/reflect_cmd.py
 elaya/commands/status_cmd.py
 elaya/commands/sync_cmd.py
+elaya/commands/transition_cmd.py
 elaya/core/__init__.py
 elaya/core/api_client.py
 elaya/core/config.py

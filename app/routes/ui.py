@@ -1,61 +1,114 @@
+# app/routes/ui.py
+from __future__ import annotations
+
+from typing import Any, Dict, List
+
 from fastapi import APIRouter
 from fastapi.responses import HTMLResponse
 
+from app.routes.system import state
+from app.core.cycle_state import CycleState
+
 router = APIRouter(tags=["ui"])
 
+
+def _render_timeline(events: List[Dict[str, Any]]) -> str:
+    """
+    Простая текстовая верстка таймлайна.
+    """
+    if not events:
+        return "<p>Пока нет событий</p>"
+
+    parts: List[str] = []
+    for ev in events:
+        ts = ev.get("ts", "-")
+        source = ev.get("source", "")
+        scene = ev.get("scene", "")
+        payload = ev.get("payload", {})
+
+        parts.append(
+            f"""
+            <div class="event">
+              <div class="ts">{ts}</div>
+              <div class="meta">{source} — {scene}</div>
+              <pre class="payload">{payload}</pre>
+            </div>
+            """
+        )
+
+    return "\n".join(parts)
+
+
 @router.get("/timeline", response_class=HTMLResponse)
-async def timeline():
-    return """
-<!doctype html>
-<html lang="ru">
-<head>
-    <meta charset="utf-8"/>
-    <title>Таймлайн Элайи</title>
-    <style>
-        body { font-family: sans-serif; background:#050816; color:#fff; padding:20px; }
-        h1 { margin-bottom:10px; }
-        .event { padding:8px 0; border-bottom:1px solid #333; }
-        .ts { color:#7df9ff; }
-        .scene { color:#ffa; }
-        .payload { color:#adf; }
-    </style>
-</head>
-<body>
+def timeline_page() -> HTMLResponse:
+    """
+    Живая страница таймлайна Элайи.
 
-<h1>Таймлайн Элайи</h1>
-<div id="events">Загрузка…</div>
+    Использует:
+    - state.to_dict()         — сырые данные ядра
+    - CycleState.from_core()  — агрегированное состояние цикла
+    """
+    core = state.to_dict()
+    cycle_state = CycleState.from_core(core)
+    events = core.get("events", [])
 
-<script>
-async function loadTimeline() {
-    const r = await fetch("/api/timeline");
-    const data = await r.json();
-    const root = document.getElementById("events");
+    body = f"""
+    <!DOCTYPE html>
+    <html lang="ru">
+    <head>
+      <meta charset="utf-8" />
+      <title>Таймлайн Элайи</title>
+      <style>
+        body {{
+          background: #050811;
+          color: #f5f5f5;
+          font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+          padding: 24px;
+        }}
+        h1 {{
+          margin-bottom: 8px;
+        }}
+        .cycle-meta {{
+          margin-bottom: 24px;
+          font-size: 14px;
+          color: #b0b8ff;
+        }}
+        .event {{
+          margin-bottom: 16px;
+          padding-bottom: 8px;
+          border-bottom: 1px solid #22263a;
+        }}
+        .ts {{
+          font-size: 13px;
+          color: #9ca3af;
+        }}
+        .meta {{
+          font-weight: 600;
+          margin-top: 2px;
+          margin-bottom: 4px;
+        }}
+        .payload {{
+          margin: 0;
+          font-size: 13px;
+          color: #e5e7eb;
+          background: #0b1020;
+          padding: 6px 8px;
+          border-radius: 4px;
+          white-space: pre-wrap;
+        }}
+      </style>
+    </head>
+    <body>
+      <h1>Таймлайн Элайи</h1>
+      <div class="cycle-meta">
+        Цикл: <strong>{cycle_state.cycle}</strong> ·
+        Фаза: <strong>{cycle_state.phase}</strong> ·
+        Обновлено: {cycle_state.updated_at}
+      </div>
 
-    if (!data.ok) {
-        root.innerHTML = "<b>Ошибка загрузки</b>";
-        return;
-    }
+      {_render_timeline(events)}
+    </body>
+    </html>
+    """
 
-    if (!data.events.length) {
-        root.innerHTML = "<i>Пока нет событий</i>";
-        return;
-    }
-
-    root.innerHTML = data.events
-      .map(ev => `
-        <div class="event">
-            <div class="ts">${ev.ts}</div>
-            <div><b>${ev.source}</b> — <span class="scene">${ev.scene}</span></div>
-            <div class="payload">${JSON.stringify(ev.payload)}</div>
-        </div>
-      `)
-      .join("");
-}
-
-setInterval(loadTimeline, 5000);
-loadTimeline();
-</script>
-
-</body>
-</html>
-"""
+    return HTMLResponse(content=body)

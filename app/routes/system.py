@@ -1,48 +1,52 @@
 # app/routes/system.py
-
 from __future__ import annotations
 
-import os
-import threading
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
+import os
+
 from fastapi import APIRouter, Header, HTTPException
+from pydantic import BaseModel
+
+from app.core.cycle_state import CycleState
 
 router = APIRouter(prefix="/api", tags=["api"])
 
-# ----------------- защита (для мутаций) -----------------
+# --- защита для мутаций (по желанию через GUARD_KEY) ---
 
 GUARD_KEY = os.getenv("GUARD_KEY", "").strip()
 
 
 def _check_guard(x_guard_key: Optional[str]) -> None:
     """
-    Если GUARD_KEY не задан — защита выключена.
-    Если задан — сверяем с заголовком X-Guard-Key, иначе 401.
+    Простая защита для мутирующих запросов.
+
+    Если GUARD_KEY не задан в окружении — защита выключена.
+    Если задан — все запросы с изменением состояния должны
+    присылать заголовок X-Guard-Key.
     """
     if not GUARD_KEY:
         return
-
     if (x_guard_key or "").strip() != GUARD_KEY:
         raise HTTPException(status_code=401, detail="invalid guard key")
 
 
-# ----------------- простое ядро состояния -----------------
+# --- внутренняя модель хранилища ядра ---
 
 
-class CoreState:
+class StateStore:
     """
-    Минимальное состояние ядра Элайи в памяти процесса.
+    Минимальное in-memory ядро состояния Элайи.
 
-    Этого достаточно для:
-    — счётчиков intro / reflect / transition
-    — цикла обновлений
-    — хранения последних событий для таймлайна.
+    Здесь живут:
+    - номер цикла
+    - счётчики фаз
+    - список событий таймлайна
+    - последний текст reflection
     """
 
     def __init__(self) -> None:
-        self._lock = threading.Lock()
         self.cycle: int = 0
         self.last_update: str = "-"
         self.intro: int = 0
@@ -51,131 +55,362 @@ class CoreState:
         self.events: List[Dict[str, Any]] = []
         self.reflection: Dict[str, Any] = {"text": "", "updated_at": "-"}
 
-    def snapshot(self) -> Dict[str, Any]:
-        with self._lock:
-            return {
-                "cycle": self.cycle,
-                "last_update": self.last_update,
-                "intro": self.intro,
-                "reflect": self.reflect,
-                "transition": self.transition,
-                "events": list(self.events),
-                "reflection": dict(self.reflection),
-            }
+    # --- основная логика ядра ---
 
-    def push_event(self, *, source: str, scene: str, payload: Dict[str, Any]) -> Dict[str, Any]:
-        ts = datetime.now(timezone.utc).isoformat()
+    def _now(self) -> str:
+        return datetime.now(timezone.utc).isoformat()
 
-        with self._lock:
-            # обновляем цикл и счётчики сцен
-            self.cycle += 1
-            self.last_update = ts
+    def add_event(self, *, source: str, scene: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Добавляет событие в таймлайн и обновляет счётчики.
 
-            if scene == "intro":
-                self.intro += 1
-            elif scene == "reflect":
-                self.reflect += 1
-            elif scene == "transition":
-                self.transition += 1
+        Логика:
+        - если сцена intro:
+            * увеличиваем счётчик intro
+            * если предыдущая сцена была transition/next/нет событий — увеличиваем номер цикла
+        - reflect / transition — только счётчики
+        - next — просто событие (служебная отметка между циклами)
+        """
+        ts = self._now()
+        scene = (scene or "").strip() or "manual"
 
-            event = {
-                "ts": ts,
-                "cycle": self.cycle,
-                "source": source,
-                "scene": scene,
-                "payload": payload,
-            }
+        prev_scene: Optional[str] = self.events[-1]["scene"] if self.events else None
 
-            self.events.append(event)
+        if scene == "intro":
+            self.intro += 1
+            if prev_scene in (None, "transition", "next"):
+                self.cycle += 1
+        elif scene == "reflect":
+            self.reflect += 1
+        elif scene == "transition":
+            self.transition += 1
 
+        event = {
+            "ts": ts,
+            "source": source,
+            "scene": scene,
+            "payload": payload or {},
+        }
+        self.events.append(event)
+        self.last_update = ts
         return event
 
+    def set_reflection(self, text: str) -> None:
+        ts = self._now()
+        self.reflection = {"text": text, "updated_at": ts}
+        self.last_update = ts
 
-STATE = CoreState()
+    def to_dict(self) -> Dict[str, Any]:
+        """
+        Снимок состояния для /api/status.
+        """
+        return {
+            "cycle": self.cycle,
+            "last_update": self.last_update,
+            "intro": self.intro,
+            "reflect": self.reflect,
+            "transition": self.transition,
+            "events": list(self.events),
+            "reflection": dict(self.reflection),
+        }
 
-# ----------------- healthcheck -----------------
+
+# Глобальное ядро для текущего процесса.
+state = StateStore()
+
+# --- модели запросов / ответов ---
 
 
-@router.get("/healthz")
-async def healthz() -> Dict[str, Any]:
-    """
-    Простой healthcheck для Render.
-    """
-    return {"ok": True}
+class EventIn(BaseModel):
+    source: str
+    scene: str
+    payload: Dict[str, Any] = {}
 
 
-# ----------------- status -----------------
+class ReflectionIn(BaseModel):
+    text: str
+
+
+# --- эндпоинты ядра ---
 
 
 @router.get("/status")
-async def status() -> Dict[str, Any]:
+def get_status() -> Dict[str, Any]:
     """
-    Отдаём минимальное состояние ядра для HQ / dashboard.
-
-    Формат:
-    {
-      "ok": true,
-      "core": {
-        "cycle": ...,
-        "last_update": "...",
-        "intro": ...,
-        "reflect": ...,
-        "transition": ...,
-        "events": [...],
-        "reflection": {...}
-      }
-    }
+    Текущий статус ядра Элайи.
+    Используется CLI-командой `elaya3 status`.
     """
-    core = STATE.snapshot()
+    core = state.to_dict()
     return {"ok": True, "core": core}
 
 
-# ----------------- приём событий от бота / UI / CLI -----------------
+@router.get("/timeline")
+def get_timeline() -> Dict[str, Any]:
+    """
+    Сырой таймлайн для внутренних клиентов (UI, отладка).
+    """
+    core = state.to_dict()
+    return {"ok": True, "events": core.get("events", [])}
 
 
 @router.post("/event")
-async def event(
-    body: Dict[str, Any],
-    x_guard_key: Optional[str] = Header(default=None, alias="X-Guard-Key"),
+def post_event(
+    event_in: EventIn,
+    x_guard_key: Optional[str] = Header(None, alias="X-Guard-Key"),
 ) -> Dict[str, Any]:
     """
-    Универсальная точка входа событий от бота / UI / CLI.
+    Приём события от CLI / других агентов.
 
-    Ожидаемый формат тела:
+    Тело:
     {
-      "source": "bot" | "ui" | "cli" | "...",
-      "scene": "start" | "intro" | "reflect" | "transition" | "manual" | "...",
-      "payload": { ... }    # любой JSON-словарь
+      "source": "cli",
+      "scene": "intro" | "reflect" | "transition" | "next" | ...,
+      "payload": {...}   # произвольный JSON
     }
     """
     _check_guard(x_guard_key)
 
-    source = str(body.get("source") or "unknown")
-    scene = str(body.get("scene") or "unknown")
-    raw_payload = body.get("payload") or {}
-
-    if not isinstance(raw_payload, dict):
-        payload: Dict[str, Any] = {"value": raw_payload}
-    else:
-        payload = raw_payload
-
-    event = STATE.push_event(source=source, scene=scene, payload=payload)
+    event = state.add_event(
+        source=event_in.source,
+        scene=event_in.scene,
+        payload=event_in.payload,
+    )
     return {"ok": True, "event": event}
 
 
-# ----------------- API для таймлайна -----------------
+@router.post("/reflection")
+def post_reflection(
+    reflection_in: ReflectionIn,
+    x_guard_key: Optional[str] = Header(None, alias="X-Guard-Key"),
+) -> Dict[str, Any]:
+    """
+    Сохранение короткого отражения / заметки в ядре.
+
+    Это может использоваться тренер-ботом или CLI.
+    """
+    _check_guard(x_guard_key)
+    state.set_reflection(reflection_in.text)
+    return {"ok": True, "reflection": state.reflection}
+
+
+@router.get("/cycle/state")
+def get_cycle_state() -> Dict[str, Any]:
+    """
+    Высокоуровневое состояние цикла Элайи.
+
+    Используется для:
+    - CLI-команд вроде `elaya3 cycle`
+    - UI-панели /timeline (заголовок)
+    - тренер-бота (понимать, где мы в цикле)
+    """
+    core = state.to_dict()
+    cycle_state = CycleState.from_core(core).to_dict()
+    return {"ok": True, "cycle": cycle_state}
+# app/routes/system.py
+from __future__ import annotations
+
+from datetime import datetime, timezone
+from typing import Any, Dict, List, Optional
+
+import os
+
+from fastapi import APIRouter, Header, HTTPException
+from pydantic import BaseModel
+
+from app.core.cycle_state import CycleState
+
+router = APIRouter(prefix="/api", tags=["api"])
+
+# --- защита для мутаций (по желанию через GUARD_KEY) ---
+
+GUARD_KEY = os.getenv("GUARD_KEY", "").strip()
+
+
+def _check_guard(x_guard_key: Optional[str]) -> None:
+    """
+    Простая защита для мутирующих запросов.
+
+    Если GUARD_KEY не задан в окружении — защита выключена.
+    Если задан — все запросы с изменением состояния должны
+    присылать заголовок X-Guard-Key.
+    """
+    if not GUARD_KEY:
+        return
+    if (x_guard_key or "").strip() != GUARD_KEY:
+        raise HTTPException(status_code=401, detail="invalid guard key")
+
+
+# --- внутренняя модель хранилища ядра ---
+
+
+class StateStore:
+    """
+    Минимальное in-memory ядро состояния Элайи.
+
+    Здесь живут:
+    - номер цикла
+    - счётчики фаз
+    - список событий таймлайна
+    - последний текст reflection
+    """
+
+    def __init__(self) -> None:
+        self.cycle: int = 0
+        self.last_update: str = "-"
+        self.intro: int = 0
+        self.reflect: int = 0
+        self.transition: int = 0
+        self.events: List[Dict[str, Any]] = []
+        self.reflection: Dict[str, Any] = {"text": "", "updated_at": "-"}
+
+    # --- основная логика ядра ---
+
+    def _now(self) -> str:
+        return datetime.now(timezone.utc).isoformat()
+
+    def add_event(self, *, source: str, scene: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Добавляет событие в таймлайн и обновляет счётчики.
+
+        Логика:
+        - если сцена intro:
+            * увеличиваем счётчик intro
+            * если предыдущая сцена была transition/next/нет событий — увеличиваем номер цикла
+        - reflect / transition — только счётчики
+        - next — просто событие (служебная отметка между циклами)
+        """
+        ts = self._now()
+        scene = (scene or "").strip() or "manual"
+
+        prev_scene: Optional[str] = self.events[-1]["scene"] if self.events else None
+
+        if scene == "intro":
+            self.intro += 1
+            if prev_scene in (None, "transition", "next"):
+                self.cycle += 1
+        elif scene == "reflect":
+            self.reflect += 1
+        elif scene == "transition":
+            self.transition += 1
+
+        event = {
+            "ts": ts,
+            "source": source,
+            "scene": scene,
+            "payload": payload or {},
+        }
+        self.events.append(event)
+        self.last_update = ts
+        return event
+
+    def set_reflection(self, text: str) -> None:
+        ts = self._now()
+        self.reflection = {"text": text, "updated_at": ts}
+        self.last_update = ts
+
+    def to_dict(self) -> Dict[str, Any]:
+        """
+        Снимок состояния для /api/status.
+        """
+        return {
+            "cycle": self.cycle,
+            "last_update": self.last_update,
+            "intro": self.intro,
+            "reflect": self.reflect,
+            "transition": self.transition,
+            "events": list(self.events),
+            "reflection": dict(self.reflection),
+        }
+
+
+# Глобальное ядро для текущего процесса.
+state = StateStore()
+
+# --- модели запросов / ответов ---
+
+
+class EventIn(BaseModel):
+    source: str
+    scene: str
+    payload: Dict[str, Any] = {}
+
+
+class ReflectionIn(BaseModel):
+    text: str
+
+
+# --- эндпоинты ядра ---
+
+
+@router.get("/status")
+def get_status() -> Dict[str, Any]:
+    """
+    Текущий статус ядра Элайи.
+    Используется CLI-командой `elaya3 status`.
+    """
+    core = state.to_dict()
+    return {"ok": True, "core": core}
 
 
 @router.get("/timeline")
-async def api_timeline() -> Dict[str, Any]:
+def get_timeline() -> Dict[str, Any]:
     """
-    Лёгкий API для страницы /timeline.
+    Сырой таймлайн для внутренних клиентов (UI, отладка).
+    """
+    core = state.to_dict()
+    return {"ok": True, "events": core.get("events", [])}
 
-    Страница ожидает:
+
+@router.post("/event")
+def post_event(
+    event_in: EventIn,
+    x_guard_key: Optional[str] = Header(None, alias="X-Guard-Key"),
+) -> Dict[str, Any]:
+    """
+    Приём события от CLI / других агентов.
+
+    Тело:
     {
-      "ok": true,
-      "events": [ {ts, source, scene, payload, ...}, ... ]
+      "source": "cli",
+      "scene": "intro" | "reflect" | "transition" | "next" | ...,
+      "payload": {...}   # произвольный JSON
     }
     """
-    core = STATE.snapshot()
-    return {"ok": True, "events": core["events"]}
+    _check_guard(x_guard_key)
+
+    event = state.add_event(
+        source=event_in.source,
+        scene=event_in.scene,
+        payload=event_in.payload,
+    )
+    return {"ok": True, "event": event}
+
+
+@router.post("/reflection")
+def post_reflection(
+    reflection_in: ReflectionIn,
+    x_guard_key: Optional[str] = Header(None, alias="X-Guard-Key"),
+) -> Dict[str, Any]:
+    """
+    Сохранение короткого отражения / заметки в ядре.
+
+    Это может использоваться тренер-ботом или CLI.
+    """
+    _check_guard(x_guard_key)
+    state.set_reflection(reflection_in.text)
+    return {"ok": True, "reflection": state.reflection}
+
+
+@router.get("/cycle/state")
+def get_cycle_state() -> Dict[str, Any]:
+    """
+    Высокоуровневое состояние цикла Элайи.
+
+    Используется для:
+    - CLI-команд вроде `elaya3 cycle`
+    - UI-панели /timeline (заголовок)
+    - тренер-бота (понимать, где мы в цикле)
+    """
+    core = state.to_dict()
+    cycle_state = CycleState.from_core(core).to_dict()
+    return {"ok": True, "cycle": cycle_state}
