@@ -200,18 +200,47 @@ def get_cycle_state() -> Dict[str, Any]:
 
 
 @router.post("/cycle/next")
-def post_cycle_next() -> Dict[str, Any]:
+def post_cycle_next(
+    x_guard_key: Optional[str] = Header(None, alias="X-Guard-Key"),
+) -> Dict[str, Any]:
     """
-    Временный автоматический шаг цикла.
+    Автоматический шаг цикла.
 
-    Пока что это заглушка: состояние в ядре не меняется,
-    мы просто возвращаем актуальное состояние цикла.
+    Берём текущее состояние, вычисляем следующую фазу
+    и записываем событие от источника "cycle_engine".
     """
-    core = state.to_dict()
-    cycle_state = CycleState.from_core(core).to_dict()
-    return {"ok": True, "cycle": cycle_state}
+    _check_guard(x_guard_key)
 
+    # 1) читаем текущее состояние
+    core_before = state.to_dict()
+    cycle_state = CycleState.from_core(core_before)
 
-@router.get("/healthz")
-def healthz() -> dict:
-    return {"ok": True}
+    phase = (cycle_state.phase or "idle").strip() or "idle"
+
+    # 2) определяем следующую сцену
+    if phase == "intro":
+        next_scene = "reflect"
+    elif phase == "reflect":
+        next_scene = "transition"
+    elif phase == "transition":
+        next_scene = "next"
+    else:
+        # idle, next, неизвестное → стартуем / перезапускаем цикл
+        next_scene = "intro"
+
+    # 3) записываем событие в ядро
+    event = state.add_event(
+        source="cycle_engine",
+        scene=next_scene,
+        payload={"prev_phase": phase},
+    )
+
+    # 4) берём обновлённое состояние
+    core_after = state.to_dict()
+    new_cycle_state = CycleState.from_core(core_after).to_dict()
+
+    return {
+        "ok": True,
+        "cycle": new_cycle_state,
+        "event": event,
+    }
