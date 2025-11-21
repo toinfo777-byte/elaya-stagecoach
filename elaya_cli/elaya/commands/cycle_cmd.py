@@ -1,97 +1,86 @@
 from __future__ import annotations
 
-from typing import Any, Dict, List
+from typing import Any, Dict
+import json
+import os
 
+import requests
 import typer
 
-from ..core.api_client import get_core_status, send_event
-
-# Порядок фаз в одном цикле
-PHASES = ["intro", "reflect", "transition", "outro"]
-
-
-def _detect_last_scene(core: Dict[str, Any]) -> str | None:
-    """Определить сцену последнего события из /api/status."""
-    events: List[Dict[str, Any]] = core.get("events") or []
-    if not events:
-        return None
-    return events[-1].get("scene")
+# Базовый URL web-core
+CORE_URL = os.getenv("ELAYA_CORE_URL", "https://elaya-stagecoach-web.onrender.com").rstrip("/")
+TIMEOUT = 10
 
 
-def _choose_next_scene(last_scene: str | None) -> str:
+def _fetch_cycle_state() -> Dict[str, Any]:
     """
-    Выбрать следующую фазу:
-
-    None / manual / другое → intro
-    intro      → reflect
-    reflect    → transition
-    transition → outro
-    outro      → intro (новый цикл)
+    Запросить высокоуровневое состояние цикла у web-core.
     """
-    if last_scene in PHASES:
-        idx = PHASES.index(last_scene)
-        if idx + 1 < len(PHASES):
-            return PHASES[idx + 1]
-        return "intro"
-    return "intro"
+    url = f"{CORE_URL}/api/cycle/state"
+    resp = requests.get(url, timeout=TIMEOUT)
+    resp.raise_for_status()
+    return resp.json()
 
 
-def _compute_cycle(core: Dict[str, Any], next_scene: str) -> int:
+def _print_cycle_state(cycle_state: Dict[str, Any]) -> None:
     """
-    Прикинуть номер цикла по количеству intro в таймлайне.
-
-    Если следующая сцена intro — считаем, что начинается новый цикл.
+    Красиво вывести состояние цикла.
     """
-    events: List[Dict[str, Any]] = core.get("events") or []
-    intro_count = sum(1 for e in events if e.get("scene") == "intro")
+    cycle_num = cycle_state.get("cycle", 0)
+    phase = cycle_state.get("phase", "idle")
+    last_update = cycle_state.get("last_update", "-")
 
-    if next_scene == "intro":
-        return intro_count + 1
+    typer.echo("🔁  Состояние цикла Элайи")
+    typer.echo(f"  • Цикл: {cycle_num}")
+    typer.echo(f"  • Фаза: {phase}")
+    typer.echo(f"  • Обновлено: {last_update}")
 
-    # Если ещё ни одного intro не было — считаем, что идёт первый цикл
-    return intro_count or 1
 
-
-def next_command(
-    text: str = typer.Option(
-        "",
-        "--text",
-        "-t",
-        help="Текст события. Если не задан — формируется автоматически.",
-    ),
-) -> None:
+def cycle() -> None:
     """
-    Автоматический переход к следующей фазе цикла:
-
-    intro → reflect → transition → outro → intro → ...
+    Показать состояние цикла Элайи (для CLI).
     """
     try:
-        core = get_core_status()
-    except Exception as exc:  # сеть / HTTP / JSON
-        typer.echo(f"⚠ Ошибка запроса /api/status: {exc}")
-        raise typer.Exit(code=1)
-
-    last_scene = _detect_last_scene(core)
-    next_scene = _choose_next_scene(last_scene)
-    cycle = _compute_cycle(core, next_scene)
-
-    if not text:
-        text = f"Цикл {cycle}, фаза {next_scene}"
-
-    payload: Dict[str, Any] = {
-        "text": text,
-        "cycle": cycle,
-        "auto": True,
-    }
-
-    try:
-        result = send_event(source="cli", scene=next_scene, payload=payload)
+        data = _fetch_cycle_state()
     except Exception as exc:
-        typer.echo(f"⚠ Ошибка отправки события: {exc}")
+        typer.echo(f"⚠️ Ошибка запроса /api/cycle/state: {exc}")
         raise typer.Exit(code=1)
 
-    if result.get("ok"):
-        typer.echo(f"✅ [{cycle}:{next_scene}] Событие отправлено.")
-    else:
-        typer.echo(f"⚠ Ядро ответило без ok=true: {result}")
+    if not data.get("ok"):
+        typer.echo(f"⚠️ Ядро ответило без ok=true: {data}")
         raise typer.Exit(code=1)
+
+    cycle_state: Dict[str, Any] = data.get("cycle", {}) or {}
+
+    _print_cycle_state(cycle_state)
+    typer.echo()
+    typer.echo("Полное состояние:")
+    typer.echo(json.dumps(cycle_state, ensure_ascii=False, indent=2))
+
+
+def next() -> None:
+    """
+    Попросить ядро перейти к следующему шагу цикла (если endpoint поддерживается)
+    и вывести обновлённое состояние.
+    """
+    url = f"{CORE_URL}/api/cycle/next"
+
+    try:
+        resp = requests.post(url, timeout=TIMEOUT)
+        resp.raise_for_status()
+        data = resp.json()
+    except Exception as exc:
+        typer.echo(f"⚠️ Ошибка запроса /api/cycle/next: {exc}")
+        raise typer.Exit(code=1)
+
+    if not data.get("ok"):
+        typer.echo(f"⚠️ Ядро ответило без ok=true: {data}")
+        raise typer.Exit(code=1)
+
+    cycle_state: Dict[str, Any] = data.get("cycle", {}) or {}
+
+    typer.echo("⏭  Переход к следующему шагу цикла выполнен")
+    _print_cycle_state(cycle_state)
+    typer.echo()
+    typer.echo("Полное состояние:")
+    typer.echo(json.dumps(cycle_state, ensure_ascii=False, indent=2))
