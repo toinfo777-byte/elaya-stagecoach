@@ -1,4 +1,3 @@
-# app/routes/system.py
 from __future__ import annotations
 
 from datetime import datetime, timezone
@@ -13,7 +12,6 @@ from app.core.cycle_state import CycleState
 router = APIRouter(prefix="/api", tags=["api"])
 
 # --- защита для мутаций (по желанию через GUARD_KEY) ---
-
 
 GUARD_KEY = os.getenv("GUARD_KEY", "").strip()
 
@@ -142,6 +140,21 @@ def get_status() -> Dict[str, Any]:
     """
     core = state.to_dict()
     return {"ok": True, "core": core}
+
+
+@router.get("/healthz", include_in_schema=False)
+def healthz() -> Dict[str, Any]:
+    """
+    Health-check для Render.
+
+    Render стучится сюда: /api/healthz.
+    Возвращаем простой ok=True, если процесс жив.
+    """
+    return {
+        "ok": True,
+        "service": "elaya-core",
+        "time": datetime.now(timezone.utc).isoformat(),
+    }
 
 
 @router.get("/timeline")
