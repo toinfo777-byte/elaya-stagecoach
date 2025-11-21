@@ -206,7 +206,6 @@ def get_cycle_state() -> Dict[str, Any]:
     cycle_state = CycleState.from_core(core).to_dict()
     return {"ok": True, "cycle": cycle_state}
 # app/routes/system.py
-from __future__ import annotations
 
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
