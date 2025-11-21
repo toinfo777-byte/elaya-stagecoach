@@ -57,5 +57,5 @@
 [Пульс · 2025-11-04](docs/hq/pulse/2025/11/2025-11-04.md)
 
 <!-- HQ_PULSE:START -->
-🪶 **Last Pulse** → [HQ_Pulse_2025-11-20.md](https://github.com/toinfo777-byte/elaya-stagecoach/blob/develop/docs/hq/pulse/HQ_Pulse_2025-11-20.md)
+🪶 **Last Pulse** → [HQ_Pulse_2025-11-21.md](https://github.com/toinfo777-byte/elaya-stagecoach/blob/develop/docs/hq/pulse/HQ_Pulse_2025-11-21.md)
 <!-- HQ_PULSE:END -->
