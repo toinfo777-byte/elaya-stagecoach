@@ -1,9 +1,14 @@
 # trainer/app/routes/__init__.py
+from __future__ import annotations
 
-from . import training
-from . import menu
+from aiogram import Router
 
-__all__ = [
-    "training",
-    "menu",
-]
+from .menu import router as menu_router
+from .training import router as training_router
+
+router = Router(name="root")
+
+# порядок важен только если где-то есть "заглушки" на все сообщения.
+# У нас их нет, так что просто подключаем оба.
+router.include_router(menu_router)
+router.include_router(training_router)
