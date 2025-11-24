@@ -7,8 +7,9 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import Message, ReplyKeyboardRemove
 
-from app.core_api import scene_enter, scene_reflect, scene_transition
+from app.keyboards.main_menu import MAIN_MENU
 from app.elaya_core import send_timeline_event
+
 
 router = Router(name="training")
 
@@ -19,79 +20,85 @@ class TrainingFlow(StatesGroup):
     transition = State()
 
 
-# 🚀 Вход в "Тренировку дня"
-# 1) команда /training
-# 2) кнопка/фраза "Тренировка дня"
+# ───────────────────────────
+# ВХОД В ТРЕНИРОВКУ
+# ───────────────────────────
+
 @router.message(Command("training"))
-@router.message(F.text.lower().contains("тренировка дня"))
+@router.message(F.text == "🏋️‍♂️ Тренировка дня")
 async def start_training(message: Message, state: FSMContext) -> None:
     """
-    Старт тренировки:
-    - дергаем старое ядро через scene_enter (если настроено CORE_API_BASE)
-    - отправляем событие intro в новое ядро Элайи
-    - ставим состояние intro
+    Старт тренировочного цикла.
+    Переводим пользователя в состояние intro и даём первый текст.
+    Параллельно шлём событие в ядро.
     """
-    user_id = message.from_user.id if message.from_user else 0
+    user_id = message.from_user.id
     chat_id = message.chat.id
 
-    # 1) старый core_api (опционально, если у тебя настроен CORE_API_BASE)
-    try:
-        reply_text = await scene_enter(
-            user_id=user_id,
-            chat_id=chat_id,
-            scene="intro",
-        )
-    except Exception:
-        # fallback, если старое ядро не отвечает
-        reply_text = (
-            "Привет! Я Элайя — тренер сцены.\n\n"
-            "Помогу прокачать голос, дыхание, уверенность и выразительность.\n"
-            "Напиши пару слов о своём состоянии или запросе перед тренировкой."
-        )
+    await state.set_state(TrainingFlow.intro)
 
-    # 2) новое ядро Элайи — событие intro
+    # событие в ядро — вход в тренировку
     await send_timeline_event(
         "intro",
         {
             "user_id": user_id,
             "chat_id": chat_id,
-            "text": "trainer intro started",
+            "text": "",
         },
     )
 
-    await state.set_state(TrainingFlow.intro)
-    await message.answer(reply_text, reply_markup=ReplyKeyboardRemove())
+    intro_text = (
+        "Начинаем тренировку сцены.\n\n"
+        "Шаг 1 — Вход.\n\n"
+        "Опиши в нескольких фразах, как сейчас чувствует себя "
+        "твоё тело, дыхание и голос."
+    )
+
+    await message.answer(intro_text, reply_markup=ReplyKeyboardRemove())
 
 
-# 🪞 Фаза reflect — пользователь пишет текст
+# ───────────────────────────
+# ШАГ 1 — INTRO
+# ───────────────────────────
+
 @router.message(TrainingFlow.intro)
-async def handle_reflect(message: Message, state: FSMContext) -> None:
-    """
-    Пользователь отвечает после вступления.
-    Это уходит:
-    - в старое ядро через scene_reflect (если нужно)
-    - в новое ядро как событие reflect
-    """
-    user_id = message.from_user.id if message.from_user else 0
+async def handle_intro(message: Message, state: FSMContext) -> None:
+    user_id = message.from_user.id
     chat_id = message.chat.id
     user_text = message.text or ""
 
-    # 1) старое ядро (опционально)
-    try:
-        reply_text = await scene_reflect(
-            user_id=user_id,
-            chat_id=chat_id,
-            scene="reflect",
-            text=user_text,
-        )
-    except Exception:
-        reply_text = (
-            "Я услышала тебя.\n"
-            "Сейчас мы сделаем небольшой переход к практике.\n\n"
-            "Когда будешь готов — напиши: «Дальше»."
-        )
+    # фиксируем событие intro с текстом
+    await send_timeline_event(
+        "intro",
+        {
+            "user_id": user_id,
+            "chat_id": chat_id,
+            "text": user_text,
+        },
+    )
 
-    # 2) новое ядро — событие reflect
+    reply_text = (
+        "Спасибо.\n\n"
+        "Шаг 2 — Отражение.\n"
+        "Что ты заметил(а) в своём состоянии, пока писал(а) это? "
+        "Одно-два наблюдения — без оценки."
+    )
+
+    await state.set_state(TrainingFlow.reflect)
+    await message.answer(reply_text)
+
+
+# ───────────────────────────
+# ШАГ 2 — REFLECT
+# ───────────────────────────
+
+@router.message(TrainingFlow.reflect)
+async def handle_reflect(message: Message, state: FSMContext) -> None:
+    user_id = message.from_user.id
+    chat_id = message.chat.id
+    user_text = message.text or ""
+
+    # событие reflect
     await send_timeline_event(
         "reflect",
         {
@@ -101,37 +108,28 @@ async def handle_reflect(message: Message, state: FSMContext) -> None:
         },
     )
 
-    await state.set_state(TrainingFlow.reflect)
+    reply_text = (
+        "Отлично.\n\n"
+        "Шаг 3 — Переход.\n"
+        "Сделай один вывод: что из того, что ты сейчас заметил(а), "
+        "ты хочешь забрать с собой на сегодня?"
+    )
+
+    await state.set_state(TrainingFlow.transition)
     await message.answer(reply_text)
 
 
-# 🔁 Фаза transition — переход к упражнению / завершению
-@router.message(TrainingFlow.reflect)
+# ───────────────────────────
+# ШАГ 3 — TRANSITION / ЗАВЕРШЕНИЕ
+# ───────────────────────────
+
+@router.message(TrainingFlow.transition)
 async def handle_transition(message: Message, state: FSMContext) -> None:
-    """
-    Переходная фаза:
-    - фиксация результата отражения
-    - событие transition в ядро
-    """
-    user_id = message.from_user.id if message.from_user else 0
+    user_id = message.from_user.id
     chat_id = message.chat.id
     user_text = message.text or ""
 
-    # 1) старое ядро (опционально)
-    try:
-        reply_text = await scene_transition(
-            user_id=user_id,
-            chat_id=chat_id,
-            scene="transition",
-        )
-    except Exception:
-        reply_text = (
-            "Переходим к следующему шагу.\n\n"
-            "На сегодня этого достаточно. "
-            "Если захочешь продолжить — снова нажми «Тренировка дня»."
-        )
-
-    # 2) новое ядро — событие transition
+    # событие transition
     await send_timeline_event(
         "transition",
         {
@@ -141,5 +139,11 @@ async def handle_transition(message: Message, state: FSMContext) -> None:
         },
     )
 
+    reply_text = (
+        "Хорошо.\n\n"
+        "На сегодня этого достаточно. "
+        "Если захочешь продолжить — просто снова нажми «🏋️‍♂️ Тренировка дня»."
+    )
+
     await state.clear()
-    await message.answer(reply_text)
+    await message.answer(reply_text, reply_markup=MAIN_MENU)
