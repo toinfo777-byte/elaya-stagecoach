@@ -8,13 +8,12 @@ import os
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 
-from app.routes import menu, training
+from app.routes import router as routes_router
 
 
 def _get_bot_token() -> str:
     """
     Ищем токен тренер-бота в нескольких переменных окружения.
-    Можно использовать любую из них на Render.
     """
     for name in ("TRAINER_BOT_TOKEN", "BOT_TOKEN", "TELEGRAM_BOT_TOKEN"):
         token = os.getenv(name, "").strip()
@@ -22,7 +21,7 @@ def _get_bot_token() -> str:
             return token
     raise RuntimeError(
         "Trainer bot token is not set. "
-        "Set TRAINER_BOT_TOKEN (или BOT_TOKEN / TELEGRAM_BOT_TOKEN) в переменных окружения."
+        "Set TRAINER_BOT_TOKEN (или BOT_TOKEN / TELEGRAM_BOT_TOKEN)."
     )
 
 
@@ -37,11 +36,9 @@ async def main() -> None:
     )
     dp = Dispatcher()
 
-    # --- подключаем роутеры тренера ---
-    dp.include_router(menu.router)
-    dp.include_router(training.router)
+    # --- подключаем все роутеры тренера через routes.__init__ ---
+    dp.include_router(routes_router)
 
-    # --- стартуем ---
     await bot.delete_webhook(drop_pending_updates=True)
     await dp.start_polling(bot)
 
