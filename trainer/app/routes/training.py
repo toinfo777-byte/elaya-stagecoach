@@ -21,9 +21,9 @@ class TrainingFlow(StatesGroup):
 
 
 # Вход в тренировку:
-# 1) /training
-# 2) кнопка "🏋️‍♂️ Тренировка дня"
-# 3) любой текст с "Тренировка дня"
+# 1) команда /training
+# 2) точное нажатие кнопки "🏋️‍♂️ Тренировка дня"
+# 3) подстраховка — любое сообщение, где есть "Тренировка дня"
 @router.message(Command("training"))
 @router.message(F.text == "🏋️‍♂️ Тренировка дня")
 @router.message(F.text.contains("Тренировка дня"))
@@ -31,7 +31,7 @@ async def start_training(message: Message, state: FSMContext) -> None:
     user_id = message.from_user.id
     chat_id = message.chat.id
 
-    # 1) пробуем спросить текст у ядра
+    # 1) пробуем спросить текст у ядра (CORE)
     try:
         reply_text = await scene_enter(
             user_id=user_id,
@@ -39,6 +39,7 @@ async def start_training(message: Message, state: FSMContext) -> None:
             scene="intro",
         )
     except Exception:
+        # запасной текст, если CORE недоступен
         reply_text = (
             "Начнём тренировку.\n\n"
             "Напиши в двух-трёх предложениях, что ты хочешь прокачать сегодня."
@@ -54,9 +55,12 @@ async def start_training(message: Message, state: FSMContext) -> None:
         },
     )
 
-    # 3) ставим состояние и ждём ответ
+    # 3) ставим состояние и ждём ответ пользователя
     await state.set_state(TrainingFlow.intro)
-    await message.answer(reply_text, reply_markup=ReplyKeyboardRemove())
+    await message.answer(
+        reply_text,
+        reply_markup=ReplyKeyboardRemove(),
+    )
 
 
 # Шаг 2 — пользователь отвечает в "intro"

@@ -6,6 +6,11 @@ from aiogram import Router
 from . import menu
 from . import training
 
-router = Router(name="trainer-root")
+# Общий роутер для бота
+router = Router(name="root")
+
+# Подключаем отдельные модули
 router.include_router(menu.router)
 router.include_router(training.router)
+
+__all__ = ["router", "menu", "training"]
