@@ -6,8 +6,7 @@ from typing import Any, Dict, List
 from fastapi import APIRouter
 from fastapi.responses import HTMLResponse
 
-from app.routes.system import state
-from app.core.cycle_state import CycleState
+from app.routes.system import TIMELINE  # берём события прямо из system.py
 
 router = APIRouter(tags=["ui"])
 
@@ -44,13 +43,17 @@ def timeline_page() -> HTMLResponse:
     """
     Живая страница таймлайна Элайи.
 
-    Использует:
-    - state.to_dict()         — сырые данные ядра
-    - CycleState.from_core()  — агрегированное состояние цикла
+    Берёт события напрямую из in-memory TIMELINE.
     """
-    core = state.to_dict()
-    cycle_state = CycleState.from_core(core)
-    events = core.get("events", [])
+    # превращаем объекты Pydantic в dict'ы
+    events: List[Dict[str, Any]] = []
+    for ev in TIMELINE:
+        if hasattr(ev, "model_dump"):      # Pydantic v2
+            events.append(ev.model_dump())
+        elif hasattr(ev, "dict"):          # Pydantic v1
+            events.append(ev.dict())
+        else:
+            events.append(dict(ev))
 
     body = f"""
     <!DOCTYPE html>
@@ -66,12 +69,7 @@ def timeline_page() -> HTMLResponse:
           padding: 24px;
         }}
         h1 {{
-          margin-bottom: 8px;
-        }}
-        .cycle-meta {{
-          margin-bottom: 24px;
-          font-size: 14px;
-          color: #b0b8ff;
+          margin-bottom: 16px;
         }}
         .event {{
           margin-bottom: 16px;
@@ -100,12 +98,6 @@ def timeline_page() -> HTMLResponse:
     </head>
     <body>
       <h1>Таймлайн Элайи</h1>
-      <div class="cycle-meta">
-        Цикл: <strong>{cycle_state.cycle}</strong> ·
-        Фаза: <strong>{cycle_state.phase}</strong> ·
-        Обновлено: {cycle_state.updated_at}
-      </div>
-
       {_render_timeline(events)}
     </body>
     </html>
