@@ -92,3 +92,12 @@ async def post_event(
     _check_guard(x_guard_key)
     _add_event(event)
     return {"ok": True}
+
+
+@router.get("/healthz")
+async def healthz() -> Dict[str, Any]:
+    """
+    Простой healthcheck для Render.
+    Должен возвращать 200 OK.
+    """
+    return {"ok": True, "status": "healthy"}
