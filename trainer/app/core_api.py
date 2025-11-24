@@ -1,47 +1,57 @@
 # trainer/app/core_api.py
 from __future__ import annotations
+
 import os
+from typing import Any, Dict, Optional
+
 import httpx
 
-CORE_API_BASE = os.getenv("CORE_API_BASE", "").rstrip("/")
-CORE_API_TOKEN = os.getenv("CORE_API_TOKEN", "")
+# Базовый URL ядра (elaya-stagecoach-web)
+# Берём из нескольких переменных, чтобы не зависеть от конкретного имени
+CORE_API_BASE = (
+    os.getenv("CORE_API_BASE", "")
+    or os.getenv("CORE_URL", "")
+    or os.getenv("CORE_BASE_URL", "")
+    or os.getenv("TRAINER_CORE_URL", "")
+).rstrip("/")
 
-_headers = {"X-Core-Token": CORE_API_TOKEN} if CORE_API_TOKEN else {}
+# Путь для событий таймлайна (по умолчанию /api/timeline)
+CORE_EVENTS_PATH = os.getenv("CORE_EVENTS_PATH", "/api/timeline")
 
-class CoreAPIError(RuntimeError):
-    pass
+# Ключ защиты (если на ядре GUARD выключен — можно оставить пустым)
+GUARD_KEY = os.getenv("GUARD_KEY", "").strip()
 
-async def _post(path: str, payload: dict) -> dict:
+
+async def send_timeline_event(
+    scene: str,
+    payload: Optional[Dict[str, Any]] = None,
+) -> None:
+    """
+    Асинхронная отправка события тренера в ядро Элайи.
+
+    scene  — короткое имя сцены ("training_start", "training_done" и т.п.)
+    payload — любые данные по событию (dict)
+    """
     if not CORE_API_BASE:
-        raise CoreAPIError("CORE_API_BASE is not set")
-    url = f"{CORE_API_BASE}{path}"
-    async with httpx.AsyncClient(timeout=15) as client:
-        r = await client.post(url, headers=_headers, json=payload)
-        try:
-            data = r.json()
-        except Exception:
-            data = {"detail": r.text}
-        if r.status_code >= 400:
-            raise CoreAPIError(f"{r.status_code}: {data}")
-        return data
+        print("WARN: CORE_API_BASE is not set, timeline event skipped")
+        return
 
-async def scene_enter(user_id: int, chat_id: int, scene: str) -> str:
-    data = await _post(
-        "/api/scene/enter",
-        {"user_id": user_id, "chat_id": chat_id, "scene": scene, "text": None},
-    )
-    return data.get("reply", "")
+    url = f"{CORE_API_BASE}{CORE_EVENTS_PATH}"
 
-async def scene_reflect(user_id: int, chat_id: int, scene: str, text: str | None) -> str:
-    data = await _post(
-        "/api/scene/reflect",
-        {"user_id": user_id, "chat_id": chat_id, "scene": scene, "text": text},
-    )
-    return data.get("reply", "")
+    headers: Dict[str, str] = {}
+    if GUARD_KEY:
+        headers["X-Guard-Key"] = GUARD_KEY
 
-async def scene_transition(user_id: int, chat_id: int, scene: str) -> str:
-    data = await _post(
-        "/api/scene/transition",
-        {"user_id": user_id, "chat_id": chat_id, "scene": scene, "text": None},
-    )
-    return data.get("reply", "")
+    data: Dict[str, Any] = {
+        "source": "trainer",
+        "scene": scene,
+        "payload": payload or {},
+    }
+
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.post(url, json=data, headers=headers)
+            resp.raise_for_status()
+            print(f"[trainer→core] event sent: {scene} -> {url}")
+    except Exception as exc:
+        print(f"[trainer→core] event error: {exc} | URL={url}")
