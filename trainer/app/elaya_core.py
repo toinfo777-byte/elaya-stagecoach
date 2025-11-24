@@ -7,7 +7,6 @@ from typing import Any, Dict, Optional
 import httpx
 
 # базовый URL ядра (elaya-stagecoach-web)
-# Берём сначала CORE_API_BASE, если его нет — TRAINER_CORE_URL
 CORE_API_BASE = (
     os.getenv("CORE_API_BASE", "")
     or os.getenv("TRAINER_CORE_URL", "")

@@ -6,11 +6,8 @@ from aiogram import Router
 from . import menu
 from . import training
 
-# Общий роутер для бота
 router = Router(name="root")
 
-# Подключаем отдельные модули
+# порядок не критичен, но логично: сначала меню, потом тренировка
 router.include_router(menu.router)
 router.include_router(training.router)
-
-__all__ = ["router", "menu", "training"]
