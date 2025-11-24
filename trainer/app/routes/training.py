@@ -22,14 +22,16 @@ class TrainingFlow(StatesGroup):
 
 # Вход в тренировку:
 # 1) команда /training
-# 2) любая кнопка / текст, где есть "Тренировка дня"
+# 2) кнопка "🏋️‍♂️ Тренировка дня"
+# 3) любой текст, который содержит "Тренировка дня" (запасной вариант)
 @router.message(Command("training"))
+@router.message(F.text == "🏋️‍♂️ Тренировка дня")
 @router.message(F.text.contains("Тренировка дня"))
-async def start_training(message: Message, state: FSMContext):
+async def start_training(message: Message, state: FSMContext) -> None:
     user_id = message.from_user.id
     chat_id = message.chat.id
 
-    # 1) обращаемся к CORE за текстом сцены "intro"
+    # 1) просим CORE выдать текст сцены "intro"
     try:
         reply_text = await scene_enter(
             user_id=user_id,
@@ -37,7 +39,7 @@ async def start_training(message: Message, state: FSMContext):
             scene="intro",
         )
     except Exception:
-        # запасной текст, если CORE недоступен
+        # запасной текст, если CORE упал/недоступен
         reply_text = (
             "Начнём тренировку.\n\n"
             "Напиши в двух-трёх предложениях, что ты хочешь прокачать сегодня."
@@ -63,7 +65,7 @@ async def start_training(message: Message, state: FSMContext):
 
 # Шаг 2 — пользователь отвечает в "intro"
 @router.message(TrainingFlow.intro)
-async def handle_intro(message: Message, state: FSMContext):
+async def handle_intro(message: Message, state: FSMContext) -> None:
     user_id = message.from_user.id
     chat_id = message.chat.id
     user_text = message.text or ""
@@ -96,7 +98,7 @@ async def handle_intro(message: Message, state: FSMContext):
 
 # Шаг 3 — финальный переход
 @router.message(TrainingFlow.reflect)
-async def handle_reflect(message: Message, state: FSMContext):
+async def handle_reflect(message: Message, state: FSMContext) -> None:
     user_id = message.from_user.id
     chat_id = message.chat.id
     user_text = message.text or ""
