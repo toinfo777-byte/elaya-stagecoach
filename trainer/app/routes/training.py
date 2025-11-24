@@ -7,9 +7,8 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import Message, ReplyKeyboardRemove
 
-from app.core_api import scene_enter, scene_reflect, scene_transition
-from app.keyboards.main_menu import MAIN_MENU
 from app.elaya_core import send_timeline_event
+from app.keyboards.main_menu import MAIN_MENU
 
 router = Router(name="training")
 
@@ -17,103 +16,78 @@ router = Router(name="training")
 class TrainingFlow(StatesGroup):
     intro = State()
     reflect = State()
-    transition = State()
+    finish = State()
 
 
-# вход в тренировку
+# 🚀 Вход в "Тренировку дня"
+# 1) запасной вход: команда /training
+# 2) основной вход: нажатие кнопки "🏋️‍♂️ Тренировка дня"
 @router.message(Command("training"))
-@router.message(F.text == "🏋️‍♂️ Тренировка дня")
 @router.message(F.text.contains("Тренировка дня"))
-async def start_training(message: Message, state: FSMContext) -> None:
-    user_id = message.from_user.id
-    chat_id = message.chat.id
-
-    # 1) пробуем спросить текст у ядра
-    try:
-        reply_text = await scene_enter(
-            user_id=user_id,
-            chat_id=chat_id,
-            scene="intro",
-        )
-    except Exception:
-        reply_text = (
-            "Начнём тренировку.\n\n"
-            "Напиши в двух-трёх предложениях, что ты хочешь прокачать сегодня."
-        )
-
-    # 2) шлём событие в таймлайн
+async def training_entry(message: Message, state: FSMContext) -> None:
+    # фиксируем событие в ядре
     await send_timeline_event(
-        scene="intro",
+        scene="training_day_start",
         payload={
-            "user_id": user_id,
-            "chat_id": chat_id,
-            "text": message.text or "",
+            "user_id": message.from_user.id,
+            "username": message.from_user.username,
+            "full_name": message.from_user.full_name,
         },
     )
 
-    # 3) ставим состояние и ждём ответ
     await state.set_state(TrainingFlow.intro)
-    await message.answer(reply_text, reply_markup=ReplyKeyboardRemove())
+
+    text = (
+        "🟣 Стартуем тренировку дня.\n\n"
+        "1. Встань или сядь ровно.\n"
+        "2. Сделай 3 спокойных цикла дыхания: вдох 4с — выдох 6с.\n"
+        "3. На выдохе отметь, как опускается напряжение.\n\n"
+        "Когда будешь готов — напиши мне одно слово: <b>Готов</b>."
+    )
+
+    await message.answer(text)
 
 
-@router.message(TrainingFlow.intro)
-async def handle_intro(message: Message, state: FSMContext) -> None:
-    user_id = message.from_user.id
-    chat_id = message.chat.id
-    user_text = message.text or ""
-
-    try:
-        reply_text = await scene_reflect(
-            user_id=user_id,
-            chat_id=chat_id,
-            scene="reflect",
-            text=user_text,
-        )
-    except Exception:
-        reply_text = (
-            "Принял.\n\n"
-            "Теперь опиши, как ты поймёшь, что тренировка прошла удачно."
-        )
-
+# 🧩 Рефлексия после первой фазы
+@router.message(TrainingFlow.intro, F.text.func(lambda t: t and "готов" in t.lower()))
+async def training_reflect(message: Message, state: FSMContext) -> None:
     await send_timeline_event(
-        scene="reflect",
+        scene="training_day_phase1_done",
         payload={
-            "user_id": user_id,
-            "chat_id": chat_id,
-            "text": user_text,
+            "user_id": message.from_user.id,
+            "text": message.text,
         },
     )
 
     await state.set_state(TrainingFlow.reflect)
-    await message.answer(reply_text)
+
+    text = (
+        "Отлично 💫\n\n"
+        "Теперь короткая рефлексия:\n"
+        "— что изменилось в теле за эти 3 цикла?\n"
+        "— стало ли дыхание свободнее?\n\n"
+        "Ответь парой фраз — как чувствуешь."
+    )
+    await message.answer(text)
 
 
 @router.message(TrainingFlow.reflect)
-async def handle_reflect(message: Message, state: FSMContext) -> None:
-    user_id = message.from_user.id
-    chat_id = message.chat.id
-    user_text = message.text or ""
-
-    try:
-        reply_text = await scene_transition(
-            user_id=user_id,
-            chat_id=chat_id,
-            scene="transition",
-        )
-    except Exception:
-        reply_text = (
-            "Переходим к следующему шагу.\n\n"
-            "Сделай сегодня один маленький, но реальный шаг в эту сторону."
-        )
-
+async def training_finish(message: Message, state: FSMContext) -> None:
     await send_timeline_event(
-        scene="transition",
+        scene="training_day_finish",
         payload={
-            "user_id": user_id,
-            "chat_id": chat_id,
-            "text": user_text,
+            "user_id": message.from_user.id,
+            "reflection": message.text,
         },
     )
 
     await state.clear()
-    await message.answer(reply_text, reply_markup=MAIN_MENU)
+
+    text = (
+        "Спасибо, тренировка зафиксирована ✅\n\n"
+        "Если захочешь — можешь запустить её снова через кнопку "
+        "«🏋️‍♂️ Тренировка дня» или команду /training.\n\n"
+        "Главное меню всегда доступно снизу."
+    )
+
+    await message.answer(text, reply_markup=MAIN_MENU)

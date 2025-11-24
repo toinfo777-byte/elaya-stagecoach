@@ -22,10 +22,7 @@ GUARD_KEY = (
 )
 
 
-async def send_timeline_event(
-    scene: str,
-    payload: Optional[Dict[str, Any]] = None,
-) -> None:
+async def send_timeline_event(scene: str, payload: Optional[Dict[str, Any]] = None) -> None:
     """
     Асинхронная отправка события тренера в ядро Элайи.
     """

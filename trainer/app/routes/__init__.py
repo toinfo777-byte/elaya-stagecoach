@@ -3,9 +3,12 @@ from __future__ import annotations
 
 from aiogram import Router
 
-from . import menu
+from . import basic
 from . import training
 
-router = Router()
-router.include_router(menu.router)
+router = Router(name="root")
+
+# порядок важен: сначала базовые вещи (/start и т.п.),
+# потом — тренировка
+router.include_router(basic.router)
 router.include_router(training.router)
