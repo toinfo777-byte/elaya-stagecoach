@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from fastapi import FastAPI
 
-from app.routes import api, ui, system
+from app.routes import api, system, ui
 
 app = FastAPI()
 
@@ -12,7 +12,7 @@ app = FastAPI()
 # API (если используешь)
 app.include_router(api.router)
 
-# системные /api-эндпоинты (таймлайн и т.п.)
+# системные /api-эндпоинты (healthz, timeline и т.п.)
 app.include_router(system.router)
 
 # UI-страницы
