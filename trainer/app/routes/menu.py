@@ -6,7 +6,7 @@ from aiogram.filters import CommandStart
 from aiogram.types import Message
 
 from app.keyboards.main_menu import MAIN_MENU
-from app.elaya_core import send_timeline_event
+from app.core_api import send_timeline_event
 
 router = Router(name="menu")
 

@@ -7,7 +7,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import Message, ReplyKeyboardRemove
 
-from app.elaya_core import send_timeline_event
+from app.core_api import send_timeline_event
 from app.keyboards.main_menu import MAIN_MENU
 
 router = Router(name="training")

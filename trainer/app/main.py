@@ -15,14 +15,15 @@ def _get_bot_token() -> str:
     """
     Ищем токен тренер-бота в нескольких переменных окружения.
     """
-    for name in ("TRAINER_BOT_TOKEN", "BOT_TOKEN", "TELEGRAM_BOT_TOKEN"):
+    for name in ("TRAINER_BOT_TOKEN", "TG_BOT_TOKEN", "BOT_TOKEN", "TELEGRAM_BOT_TOKEN"):
         token = os.getenv(name, "").strip()
         if token:
             return token
     raise RuntimeError(
         "Trainer bot token is not set. "
-        "Set TRAINER_BOT_TOKEN (или BOT_TOKEN / TELEGRAM_BOT_TOKEN)."
+        "Set TRAINER_BOT_TOKEN (или TG_BOT_TOKEN / BOT_TOKEN / TELEGRAM_BOT_TOKEN)."
     )
+
 
 
 async def main() -> None:
