@@ -1,4 +1,3 @@
-# trainer/app/routes/menu.py
 from __future__ import annotations
 
 from aiogram import Router
@@ -16,7 +15,6 @@ async def cmd_start(message: Message) -> None:
     user_id = message.from_user.id
     chat_id = message.chat.id
 
-    # пишем в таймлайн факт входа в тренер-бота
     await send_timeline_event(
         scene="start",
         payload={
