@@ -1,21 +1,20 @@
 from __future__ import annotations
 
-"""
-Переходный слой для старого кода.
+from fastapi import APIRouter
 
-Старый бот импортирует:
-    from app.routers import router as main_router
+from . import api
+from . import system
+from . import ui
 
-Теперь мы просто пробрасываем его к новому агрегированному
-роутеру тренера из `trainer.app.routes`.
-"""
+router = APIRouter()
 
-from aiogram import Router
+# API ядра
+router.include_router(api.router)
 
-from trainer.app.routes import router as _trainer_router
+# системные /api эндпоинты
+router.include_router(system.router)
 
-
-# этот router будет использовать старый `app.bot.main`
-router: Router = _trainer_router
+# UI-страницы
+router.include_router(ui.router)
 
 __all__ = ["router"]
