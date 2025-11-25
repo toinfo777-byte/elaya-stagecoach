@@ -21,8 +21,12 @@ async def send_timeline_event(
     scene: str,
     payload: Optional[Dict[str, Any]] = None,
 ) -> None:
+    """
+    Асинхронная отправка события тренера в ядро Элайи.
+    """
+
     if not CORE_API_BASE:
-        print("WARN: CORE_API_BASE is not set, timeline event skipped")
+        print("[trainer→core] CORE_API_BASE is empty, skip event:", scene)
         return
 
     url = f"{CORE_API_BASE}{CORE_EVENTS_PATH}"
@@ -37,10 +41,14 @@ async def send_timeline_event(
         "payload": payload or {},
     }
 
+    # 🔍 Явный лог перед запросом
+    print(f"[trainer→core] send event '{scene}' -> {url} | headers={headers} | data={data}")
+
     try:
         async with httpx.AsyncClient(timeout=10) as client:
             resp = await client.post(url, json=data, headers=headers)
+            print(f"[trainer→core] response status={resp.status_code}, body={resp.text!r}")
             resp.raise_for_status()
-            print(f"[trainer→core] event sent: {scene} -> {url}")
+            print(f"[trainer→core] event sent OK: {scene}")
     except Exception as exc:
-        print(f"[trainer→core] event error: {exc} | URL={url}")
+        print(f"[trainer→core] event error for scene '{scene}': {exc} | URL={url}")
