@@ -94,3 +94,21 @@ async def post_event(
     _check_guard(x_guard_key)
     _add_event(event)
     return {"ok": True}
+
+# app/routes/system.py
+
+@router.post("/timeline")
+async def post_timeline(
+    event: TimelineEventIn,
+    x_guard_key: Optional[str] = Header(default=None, alias="X-Guard-Key"),
+) -> Dict[str, Any]:
+    """
+    Добавить событие в таймлайн.
+    """
+    _check_guard(x_guard_key)
+
+    # 🔍 лог при любом POST
+    print(f"[core] timeline POST: source={event.source}, scene={event.scene}, payload={event.payload}")
+
+    _add_event(event)
+    return {"ok": True}
