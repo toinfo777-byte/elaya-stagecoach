@@ -1,4 +1,3 @@
-# trainer/app/main.py
 from __future__ import annotations
 
 import asyncio
@@ -8,7 +7,11 @@ import os
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 
+# основной агрегированный роутер
 from app.routes import router as routes_router
+
+# отдельный роутер тренировки дня
+from app.routes.training_flow import router as training_router
 
 
 def _get_bot_token() -> str:
@@ -25,7 +28,6 @@ def _get_bot_token() -> str:
     )
 
 
-
 async def main() -> None:
     logging.basicConfig(level=logging.INFO)
 
@@ -37,8 +39,11 @@ async def main() -> None:
     )
     dp = Dispatcher()
 
-    # --- подключаем все роутеры тренера через routes.__init__ ---
+    # --- основной роутер (меню, общие entrypoints, статус и т.д.) ---
     dp.include_router(routes_router)
+
+    # --- тренировка дня: отдельный роутер ---
+    dp.include_router(training_router)
 
     await bot.delete_webhook(drop_pending_updates=True)
     await dp.start_polling(bot)

@@ -2,53 +2,51 @@
 from __future__ import annotations
 
 import os
-from typing import Any, Dict, Optional
+from typing import Any, Dict
 
 import httpx
 
-CORE_API_BASE = (
-    os.getenv("CORE_API_BASE", "")
-    or os.getenv("CORE_URL", "")
-    or os.getenv("CORE_BASE_URL", "")
-    or os.getenv("TRAINER_CORE_URL", "")
-).rstrip("/")
+# базовый URL ядра (web-сервис)
+CORE_API_BASE = os.getenv("CORE_API_BASE", "").rstrip("/")
+# путь для событий; по умолчанию шлём в /api/timeline
+CORE_EVENTS_PATH = os.getenv("CORE_EVENTS_PATH", "/api/timeline").strip()
+if CORE_EVENTS_PATH and not CORE_EVENTS_PATH.startswith("/"):
+    CORE_EVENTS_PATH = "/" + CORE_EVENTS_PATH
 
-CORE_EVENTS_PATH = os.getenv("CORE_EVENTS_PATH", "/api/timeline")
-GUARD_KEY = os.getenv("GUARD_KEY", "").strip()
+CORE_API_TOKEN = os.getenv("CORE_API_TOKEN", "").strip()
+TRAINER_GUARD_KEY = os.getenv("TRAINER_GUARD_KEY", "").strip()
+CORE_TIMEOUT = float(os.getenv("CORE_TIMEOUT", "5.0"))
 
 
-async def send_timeline_event(
-    scene: str,
-    payload: Optional[Dict[str, Any]] = None,
-) -> None:
+async def send_timeline_event(scene: str, payload: Dict[str, Any]) -> None:
     """
-    Асинхронная отправка события тренера в ядро Элайи.
+    Отправка события в ядро (таймлайн Элайи).
+    Никаких исключений наружу не выбрасываем — только логируем.
     """
-
     if not CORE_API_BASE:
-        print("[trainer→core] CORE_API_BASE is empty, skip event:", scene)
+        print(f"[trainer] CORE_API_BASE not set, skip timeline: scene={scene}, payload={payload}")
         return
 
     url = f"{CORE_API_BASE}{CORE_EVENTS_PATH}"
-
-    headers: Dict[str, str] = {}
-    if GUARD_KEY:
-        headers["X-Guard-Key"] = GUARD_KEY
-
     data: Dict[str, Any] = {
         "source": "trainer",
         "scene": scene,
         "payload": payload or {},
     }
 
-    # 🔍 Явный лог перед запросом
-    print(f"[trainer→core] send event '{scene}' -> {url} | headers={headers} | data={data}")
+    headers: Dict[str, str] = {}
+    if CORE_API_TOKEN:
+        headers["Authorization"] = f"Bearer {CORE_API_TOKEN}"
+    if TRAINER_GUARD_KEY:
+        headers["X-Guard-Key"] = TRAINER_GUARD_KEY
 
     try:
-        async with httpx.AsyncClient(timeout=10) as client:
+        async with httpx.AsyncClient(timeout=CORE_TIMEOUT) as client:
             resp = await client.post(url, json=data, headers=headers)
-            print(f"[trainer→core] response status={resp.status_code}, body={resp.text!r}")
-            resp.raise_for_status()
-            print(f"[trainer→core] event sent OK: {scene}")
-    except Exception as exc:
-        print(f"[trainer→core] event error for scene '{scene}': {exc} | URL={url}")
+
+        print(
+            f"[trainer] timeline POST {url} -> {resp.status_code}, "
+            f"scene={scene}, payload={payload}, resp={resp.text!r}"
+        )
+    except Exception as e:
+        print(f"[trainer] timeline error: scene={scene}, payload={payload}, error={e!r}")
