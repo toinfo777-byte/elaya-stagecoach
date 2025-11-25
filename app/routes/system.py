@@ -112,3 +112,8 @@ async def post_timeline(
 
     _add_event(event)
     return {"ok": True}
+
+@router.get("/timeline/test-add")
+async def test_add() -> Dict[str, Any]:
+    evt = _add_event(TimelineEventIn(source="test", scene="ping", payload={"hello": "world"}))
+    return {"ok": True, "event": evt.dict()}
