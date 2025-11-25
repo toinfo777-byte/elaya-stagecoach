@@ -1,18 +1,10 @@
-from aiogram import Router
+from fastapi import APIRouter
+from . import api, system, ui
 
-from . import start, reviews, training
+router = APIRouter()
 
-# общий корневой роутер бота
-router = Router(name="root-router")
+router.include_router(api.router)
+router.include_router(system.router)
+router.include_router(ui.router)
 
-# порядок важен только логически, для нас так наглядно
-router.include_router(start.router)
-router.include_router(reviews.router)
-router.include_router(training.router)
-
-__all__ = (
-    "router",      # корневой роутер
-    "start",
-    "reviews",
-    "training",
-)
+__all__ = ["router"]

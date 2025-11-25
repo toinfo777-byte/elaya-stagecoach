@@ -1,13 +1,10 @@
-# trainer/app/routes/__init__.py
-from __future__ import annotations
-
 from aiogram import Router
 
-from .start import router as start_router
-from .training_flow import router as training_router
+from . import menu, training_flow
 
-router = Router(name="root")
+router = Router(name="root-router")
 
-# порядок важен: сначала /start, потом тренировка
-router.include_router(start_router)
-router.include_router(training_router)
+router.include_router(menu.router)
+router.include_router(training_flow.router)
+
+__all__ = ["router"]
