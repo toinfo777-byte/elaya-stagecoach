@@ -152,5 +152,51 @@
     "payload": {
       "user_id": 1
     }
+  },
+  {
+    "ts": "2025-12-01T14:04:38.706923+00:00",
+    "source": "trainer",
+    "scene": "trainer:start",
+    "payload": {
+      "user_id": 1
+    }
+  },
+  {
+    "ts": "2025-12-01T14:04:42.473805+00:00",
+    "source": "trainer",
+    "scene": "trainer:reflect",
+    "payload": {
+      "user_id": 1,
+      "reflect": "ывы"
+    }
+  },
+  {
+    "ts": "2025-12-01T14:04:44.333312+00:00",
+    "source": "trainer",
+    "scene": "trainer:transition",
+    "payload": {
+      "user_id": 1,
+      "transition": "ывы"
+    }
+  },
+  {
+    "ts": "2025-12-01T14:04:46.072373+00:00",
+    "source": "trainer",
+    "scene": "trainer:review",
+    "payload": {
+      "user_id": 1,
+      "vector": "ывв",
+      "reflect": "ывы",
+      "transition": "ывы",
+      "review": "ывы"
+    }
+  },
+  {
+    "ts": "2025-12-01T14:04:46.784961+00:00",
+    "source": "trainer",
+    "scene": "trainer:done",
+    "payload": {
+      "user_id": 1
+    }
   }
 ]

@@ -1,15 +1,22 @@
+# Dockerfile — контейнер для elaya-trainer-bot
+
 FROM python:3.12-slim
 
-ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
 
+# --- базовый рабочий каталог ---
 WORKDIR /app
 
+# зависимости
 COPY requirements.txt .
-RUN python -m pip install --upgrade pip && \
-    pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt
 
-COPY app ./app
+# весь проект внутрь
+COPY . .
 
-# Render задаёт PORT; локально по умолчанию будет 10000
-CMD exec uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-10000}
+# --- переходим в папку тренера ---
+WORKDIR /app/trainer
+
+# точка входа тренера (как ты запускаешь локально)
+CMD ["python", "-m", "app.main"]
