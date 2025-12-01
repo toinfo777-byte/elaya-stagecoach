@@ -1,13 +1,21 @@
 from __future__ import annotations
 
-from aiogram import Router
+from fastapi import APIRouter
 
-from . import api  # наш основной модуль с хендлерами
+from . import system
+from . import ui
+from . import api
 
-# Корневой роутер aiogram
-router = Router(name="main")
+# Корневой роутер ядра
+router = APIRouter()
 
-# Подключаем подроутеры
+# системные /api эндпоинты (timeline, event, status и т.п.)
+router.include_router(system.router)
+
+# дополнительные API (пока пустой, но на будущее)
 router.include_router(api.router)
+
+# UI-страницы (если есть шаблоны)
+router.include_router(ui.router)
 
 __all__ = ["router"]

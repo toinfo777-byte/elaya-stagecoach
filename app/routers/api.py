@@ -1,30 +1,11 @@
 from __future__ import annotations
 
-from aiogram import Router
-from aiogram.filters import CommandStart, Command
-from aiogram.types import Message
+from fastapi import APIRouter
 
-router = Router(name="api")
+# Пока это просто "заглушка" под будущее API ядра.
+# Важно, что файл существует и у него есть router,
+# чтобы импорт в app/routers/__init__.py не ломался.
 
+router = APIRouter()
 
-@router.message(CommandStart())
-async def cmd_start(message: Message) -> None:
-    """
-    Базовая команда /start для бота.
-    Здесь можно будет подключать настоящее меню,
-    когда решим, что HQ-бот должен уметь.
-    """
-    await message.answer(
-        "Привет. Я — бот Элайи.\n"
-        "Я запущен и готов к работе. "
-        "Основная логика тренера живёт в отдельном сервисе, "
-        "но я уже на связи."
-    )
-
-
-@router.message(Command("ping"))
-async def cmd_ping(message: Message) -> None:
-    """
-    Простая проверка живости бота.
-    """
-    await message.answer("pong")
+__all__ = ["router"]

@@ -1,27 +1,12 @@
-from __future__ import annotations
-
-from pydantic_settings import BaseSettings, SettingsConfigDict
-
+from pydantic import BaseSettings
 
 class Settings(BaseSettings):
-    """
-    Настройки веб-ядра Элайи.
-    Читает переменные из корневого .env.
-    """
+    SAFE_MODE: bool = False
+    SENTRY_DSN: str | None = None
+    SQLITE_PATH: str = "stagecoach.db"
+    GUARD_KEY: str | None = None
 
-    tg_bot_token: str
-    webhook_secret: str
-    base_url: str
-
-    core_api_token: str
-    guard_key: str | None = None
-    env: str = "dev"
-    mode: str = "local"
-
-    model_config = SettingsConfigDict(
-        env_file=".env",   # корневой .env в репозитории
-        extra="ignore",    # игнорируем лишние (если вдруг появятся)
-    )
-
+    class Config:
+        env_file = ".env"
 
 settings = Settings()
