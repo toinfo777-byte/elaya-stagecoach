@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.fsm.storage.memory import MemoryStorage
@@ -11,19 +13,21 @@ from app.routers import router as main_router
 
 # --- aiogram: бот и диспетчер ---
 
+
 bot = Bot(
     token=settings.TG_BOT_TOKEN,
     default=DefaultBotProperties(parse_mode="HTML"),
 )
 
-# пока держим всё в памяти; при желании поменяем на Redis
+# пока держим всё в памяти; при желании можно поменять на Redis
 dp = Dispatcher(storage=MemoryStorage())
 
-# подключаем только корневой роутер (внутри него уже start/reviews/training)
+# подключаем только корневой роутер (внутри него уже все хендлеры)
 dp.include_router(main_router)
 
 
 # --- ASGI-приложение для Render / uvicorn ---
+
 
 app = FastAPI()
 

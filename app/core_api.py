@@ -1,33 +1,40 @@
-import logging
-from typing import Any, Dict
+# app/core_api.py
+from __future__ import annotations
 
 import httpx
 
 from app.config import settings
 
-logger = logging.getLogger(__name__)
 
+async def send_timeline_event(scene: str, payload: dict | None = None) -> None:
+    base = settings.base_url.rstrip("/")
+    url = f"{base}/api/event"
 
-async def send_timeline_event(kind: str, payload: Dict[str, Any] | None = None) -> bool:
-    """
-    Отправка события в web-ядро Элайи (/api/timeline).
-
-    Ошибки логируем, но НЕ ломаем работу бота.
-    """
-    base = settings.BASE_URL.rstrip("/")
-    url = f"{base}/api/timeline"
+    headers = {}
+    if settings.guard_key:
+        headers["X-Guard-Key"] = settings.guard_key
 
     data = {
-        "kind": kind,
+        "source": "trainer-bot",
+        "scene": scene,
         "payload": payload or {},
     }
 
-    try:
-        async with httpx.AsyncClient(timeout=5.0) as client:
-            resp = await client.post(url, json=data)
-        resp.raise_for_status()
-    except Exception as e:  # noqa: BLE001
-        logger.warning("Failed to send timeline event %s: %s", kind, e)
-        return False
+    async with httpx.AsyncClient(timeout=10) as client:
+        r = await client.post(url, json=data, headers=headers)
+        r.raise_for_status()
 
-    return True
+
+async def fetch_training_progress(user_id: int) -> dict:
+    """
+    Забираем прогресс из ядра (/api/progress).
+    """
+    base = settings.base_url.rstrip("/")
+    url = f"{base}/api/progress"
+
+    params = {"user_id": user_id}
+
+    async with httpx.AsyncClient(timeout=10) as client:
+        r = await client.get(url, params=params)
+        r.raise_for_status()
+        return r.json()

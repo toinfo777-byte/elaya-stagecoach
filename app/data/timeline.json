@@ -1,0 +1,156 @@
+[
+  {
+    "ts": "2025-11-28T12:07:53.594174+00:00",
+    "source": "trainer",
+    "scene": "trainer:day:start",
+    "payload": {
+      "user_id": 1
+    }
+  },
+  {
+    "ts": "2025-11-28T12:07:57.144427+00:00",
+    "source": "trainer",
+    "scene": "trainer:day:intro_done",
+    "payload": {
+      "user_id": 1,
+      "ping": "паа"
+    }
+  },
+  {
+    "ts": "2025-11-28T12:07:59.591137+00:00",
+    "source": "trainer",
+    "scene": "trainer:day:reflect",
+    "payload": {
+      "user_id": 1,
+      "text": "ипааи"
+    }
+  },
+  {
+    "ts": "2025-11-28T12:08:01.708429+00:00",
+    "source": "trainer",
+    "scene": "trainer:day:transition",
+    "payload": {
+      "user_id": 1,
+      "text": "иппаи"
+    }
+  },
+  {
+    "ts": "2025-11-28T12:08:04.270158+00:00",
+    "source": "trainer",
+    "scene": "trainer:day:review",
+    "payload": {
+      "user_id": 1,
+      "review": "ипаиа",
+      "reflect": "ипааи",
+      "transition": "иппаи"
+    }
+  },
+  {
+    "ts": "2025-11-28T13:46:28.440074+00:00",
+    "source": "trainer",
+    "scene": "trainer:day:start",
+    "payload": {
+      "user_id": 1
+    }
+  },
+  {
+    "ts": "2025-11-28T13:46:44.927611+00:00",
+    "source": "trainer",
+    "scene": "trainer:day:intro_done",
+    "payload": {
+      "user_id": 1,
+      "ping": "ok"
+    }
+  },
+  {
+    "ts": "2025-11-28T13:46:55.805927+00:00",
+    "source": "trainer",
+    "scene": "trainer:day:reflect",
+    "payload": {
+      "user_id": 1,
+      "text": "держать звезду мягко"
+    }
+  },
+  {
+    "ts": "2025-11-28T13:47:06.464870+00:00",
+    "source": "trainer",
+    "scene": "trainer:day:transition",
+    "payload": {
+      "user_id": 1,
+      "text": "при каждом вдохе вспоминать про звезду"
+    }
+  },
+  {
+    "ts": "2025-11-28T13:47:14.807132+00:00",
+    "source": "trainer",
+    "scene": "trainer:day:review",
+    "payload": {
+      "user_id": 1,
+      "review": "Стало чуть спокойнее и собраннее"
+    }
+  },
+  {
+    "ts": "2025-11-28T13:47:28.059733+00:00",
+    "source": "trainer",
+    "scene": "trainer:day:review",
+    "payload": {
+      "user_id": 1,
+      "review": "🙂"
+    }
+  },
+  {
+    "ts": "2025-11-28T13:54:35.746081+00:00",
+    "source": "trainer",
+    "scene": "trainer:day:review",
+    "payload": {
+      "user_id": 1,
+      "review": "/start"
+    }
+  },
+  {
+    "ts": "2025-12-01T10:40:17.671628+00:00",
+    "source": "trainer",
+    "scene": "trainer:start",
+    "payload": {
+      "user_id": 1
+    }
+  },
+  {
+    "ts": "2025-12-01T10:40:20.710203+00:00",
+    "source": "trainer",
+    "scene": "trainer:reflect",
+    "payload": {
+      "user_id": 1,
+      "reflect": "ываыв"
+    }
+  },
+  {
+    "ts": "2025-12-01T10:40:22.328751+00:00",
+    "source": "trainer",
+    "scene": "trainer:transition",
+    "payload": {
+      "user_id": 1,
+      "transition": "ыавы"
+    }
+  },
+  {
+    "ts": "2025-12-01T10:40:24.518645+00:00",
+    "source": "trainer",
+    "scene": "trainer:review",
+    "payload": {
+      "user_id": 1,
+      "vector": "выв",
+      "reflect": "ываыв",
+      "transition": "ыавы",
+      "review": "аыа"
+    }
+  },
+  {
+    "ts": "2025-12-01T10:40:25.234206+00:00",
+    "source": "trainer",
+    "scene": "trainer:done",
+    "payload": {
+      "user_id": 1
+    }
+  }
+]

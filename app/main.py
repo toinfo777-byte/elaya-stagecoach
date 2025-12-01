@@ -1,19 +1,9 @@
-# app/main.py
 from __future__ import annotations
 
 from fastapi import FastAPI
+from app.routes import router as routes_router
 
-from app.routes import api, system, ui
+app = FastAPI(title="Elaya Core", version="0.1.0")
 
-app = FastAPI()
-
-# --- роутеры веб-ядра ---
-
-# API (если используешь)
-app.include_router(api.router)
-
-# системные /api-эндпоинты (healthz, timeline и т.п.)
-app.include_router(system.router)
-
-# UI-страницы
-app.include_router(ui.router)
+# Подключаем все маршруты (/api/sync, /api/progress, и т.п.)
+app.include_router(routes_router)

@@ -1,24 +1,18 @@
 # app/core/cycle_state.py
 from __future__ import annotations
 
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass, asdict, field
 from typing import Any, Dict, List
+from datetime import datetime, timezone
 
 
 @dataclass
 class CycleState:
     """
-    Высокоуровневое представление состояния цикла Элайи.
-
-    Это надстройка над "сырым" core-состоянием:
-    - cycle        — номер цикла
-    - phase        — текущая фаза (intro / reflect / transition / next / idle)
-    - started_at   — время первого события (условное начало цикла)
-    - updated_at   — последнее обновление ядра
-    - last_event_* — информация о последнем событии
-    - total_*      — счётчики по фазам
+    Высокоуровневое состояние цикла Элайи.
     """
 
+    # --- основные поля цикла ---
     cycle: int = 0
     phase: str = "idle"
 
@@ -33,45 +27,60 @@ class CycleState:
     total_reflect: int = 0
     total_transition: int = 0
 
+    # список сырых событий
+    events: List[Dict[str, Any]] = field(default_factory=list)
+
+    # singleton
+    _instance: "CycleState" | None = None
+
+    # -------------------------------------------------
+    # Singleton доступ
+    # -------------------------------------------------
     @classmethod
-    def from_core(cls, core: Dict[str, Any]) -> "CycleState":
+    def get(cls) -> "CycleState":
+        if cls._instance is None:
+            cls._instance = CycleState()
+        return cls._instance
+
+    # -------------------------------------------------
+    # Добавление события
+    # -------------------------------------------------
+    def append_event(self, source: str, scene: str, payload: Dict[str, Any]) -> None:
         """
-        Собираем CycleState из core.to_dict(), не трогая сам store.
+        Добавляет событие и обновляет агрегированные поля.
         """
-        cycle = int(core.get("cycle", 0) or 0)
-        intro_count = int(core.get("intro", 0) or 0)
-        reflect_count = int(core.get("reflect", 0) or 0)
-        transition_count = int(core.get("transition", 0) or 0)
+        now_ts = datetime.now(tz=timezone.utc).isoformat()
 
-        last_update = core.get("last_update") or "-"
-        events: List[Dict[str, Any]] = core.get("events") or []
+        event = {
+            "ts": now_ts,
+            "source": source,
+            "scene": scene,
+            "payload": payload,
+        }
+        self.events.append(event)
 
-        if events:
-            last_event = events[-1]
-            phase = (last_event.get("scene") or "idle").strip() or "idle"
-            last_ts = last_event.get("ts", "-")
-            source = last_event.get("source", "") or ""
-            started_at = events[0].get("ts", "-")
-        else:
-            phase = "idle"
-            last_ts = "-"
-            source = ""
-            started_at = "-"
+        # обновление основных полей
+        self.last_event_ts = now_ts
+        self.last_event_scene = scene
+        self.last_event_source = source
+        self.updated_at = now_ts
 
-        updated_at = last_update if last_update not in (None, "", "-") else last_ts
+        if self.started_at == "-":
+            self.started_at = now_ts  # первое событие цикла
 
-        return cls(
-            cycle=cycle,
-            phase=phase,
-            started_at=started_at,
-            updated_at=updated_at,
-            last_event_ts=last_ts,
-            last_event_scene=phase,
-            last_event_source=source,
-            total_intro=intro_count,
-            total_reflect=reflect_count,
-            total_transition=transition_count,
-        )
+        # обновление фазы
+        self.phase = scene
 
+        # обновление счетчиков
+        if scene == "intro":
+            self.total_intro += 1
+        elif scene == "reflect":
+            self.total_reflect += 1
+        elif scene == "transition":
+            self.total_transition += 1
+
+    # -------------------------------------------------
+    # Для отладки / API
+    # -------------------------------------------------
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
