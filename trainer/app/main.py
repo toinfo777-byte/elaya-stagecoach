@@ -2,55 +2,56 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import uuid
 
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
-from aiogram.exceptions import TelegramConflictError
 
 from app.config import settings
 from app.routes import router as routes_router
 
 
-logger = logging.getLogger(__name__)
-
+# --- уникальный тег запуска (чтобы отличить в логах) ---
+RUN_TAG = uuid.uuid4().hex[:8]
 
 def _get_bot_token() -> str:
+    return settings.tg_bot_token
+
+
+async def heartbeat_loop(bot: Bot) -> None:
     """
-    Берём токен тренера из настроек.
-    Если токен не задан — сразу падаем, чтобы это было видно.
+    Каждые 30 секунд бот делает heartbeat в логах.
+    Это покажет, КТО реально живой.
     """
-    token = settings.tg_bot_token
-    if not token:
-        raise RuntimeError("TG_BOT_TOKEN is not set in settings")
-    return token
+    while True:
+        try:
+            me = await bot.get_me()
+            logging.warning(f"[HEARTBEAT] bot={me.username}, tag={RUN_TAG}")
+        except Exception as e:
+            logging.error(f"[HEARTBEAT ERROR] {e}")
+        await asyncio.sleep(30)
 
 
 async def main() -> None:
-    # Базовая настройка логирования
-    logging.basicConfig(level=logging.INFO)
+    logging.warning("=== TRAINER STARTING ===")
+    logging.warning(f"RUN_TAG = {RUN_TAG}")
 
-    # УНИКАЛЬНЫЙ UID запуска тренера — чтобы видеть, кто именно поднялся
-    startup_uid = uuid.uuid4().hex[:8]
-    logger.warning("🚨 TRAINER BOT ONLINE — UID: %s", startup_uid)
-
-    # Логируем префикс токена, чтобы различать, какой именно токен используется
-    token = _get_bot_token()
-    logger.warning("🚨 Trainer starting with token prefix: %s…", token[:10])
-
-    # Стартуем бота
-    bot = Bot(token=token, default=DefaultBotProperties(parse_mode="HTML"))
+    bot = Bot(token=_get_bot_token(), default=DefaultBotProperties(parse_mode="HTML"))
     dp = Dispatcher()
 
-    # Подключаем агрегированный роутер тренера
+    # добавляем роутеры
     dp.include_router(routes_router)
 
-    try:
-        await dp.start_polling(bot)
-    except TelegramConflictError:
-        logger.error("❌ TELEGRAM CONFLICT: second bot instance detected for this token")
-        # Пробрасываем дальше, чтобы в логах Render было видно падение
-        raise
+    # печатаем имя бота
+    me = await bot.get_me()
+    logging.warning(f"Trainer bot launched as @{me.username}, RUN_TAG={RUN_TAG}")
+
+    # запускаем heartbeat
+    asyncio.create_task(heartbeat_loop(bot))
+
+    # стартуем
+    await dp.start_polling(bot)
 
 
 if __name__ == "__main__":
