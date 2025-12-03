@@ -20,11 +20,11 @@ async def send_timeline_event(
     """
     Асинхронная отправка события тренера в ядро Элайи (Stagecoach Web).
 
-    ВАЖНО: любые ошибки логируем, но НЕ пробрасываем выше,
-    чтобы бот не молчал из-за проблем ядра.
+    ВАЖНО: любые ошибки логируются, но НЕ пробрасываются выше,
+    чтобы тренер не ломал диалог с пользователем.
     """
     if not CORE_URL:
-        logger.warning("Trainer core URL is not set; skip event %r", scene)
+        logger.warning("Trainer core URL is not set; skip event scene=%r", scene)
         return
 
     url = f"{CORE_URL}/api/event"
@@ -43,21 +43,24 @@ async def send_timeline_event(
         async with httpx.AsyncClient(timeout=10) as client:
             resp = await client.post(url, json=data, headers=headers)
 
-            try:
-                resp.raise_for_status()
-            except httpx.HTTPStatusError as e:
-                # ядро ответило 4xx/5xx — пишем подробности и выходим
-                logger.error(
-                    "Trainer event FAILED: status=%s url=%s headers=%r body=%r",
-                    e.response.status_code,
-                    e.request.url,
-                    headers,
-                    e.response.text,
-                )
-                return
+        # Если ядро ответило ошибкой — логируем и тихо выходим
+        if resp.status_code >= 400:
+            logger.error(
+                "Trainer event FAILED: status=%s url=%s headers=%r body=%r",
+                resp.status_code,
+                resp.url,
+                headers,
+                resp.text,
+            )
+            return
 
-        logger.info("Trainer event sent: scene=%s", scene)
+        logger.info(
+            "Trainer event sent: scene=%s status=%s",
+            scene,
+            resp.status_code,
+        )
 
     except Exception as e:
-        # любая сетевая/другая ошибка — просто лог
-        logger.error("ERROR sending trainer event %r: %s", scene, e)
+        # Любая сетевая/другая ошибка — только лог
+        logger.error("Trainer event ERROR scene=%s: %s", scene, e)
+        return
