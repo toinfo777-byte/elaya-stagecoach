@@ -1,3 +1,4 @@
+# app/routes/system.py
 from __future__ import annotations
 
 import logging
@@ -6,7 +7,7 @@ from datetime import date, datetime, timezone
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Header, HTTPException, Query
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from app.core.timeline import add_event, get_timeline
 from app.training_progress import add_training_day, get_progress_summary
@@ -42,7 +43,8 @@ def _check_guard(x_guard_key: Optional[str]) -> None:
 class TimelineEvent(BaseModel):
     source: str
     scene: str
-    payload: Dict[str, Any] = {}
+    # через Field, чтобы не было общей мутируемой ссылки
+    payload: Dict[str, Any] = Field(default_factory=dict)
 
 
 class TrainingDay(BaseModel):
@@ -61,7 +63,7 @@ class TrainingDay(BaseModel):
 async def api_event(
     event: TimelineEvent,
     x_guard_key: Optional[str] = Header(None, alias="X-Guard-Key"),
-) -> Dict[str, str]:
+) -> Dict[str, Any]:
     """
     Принимает событие от тренера (или других источников) и кладёт в таймлайн.
     """
@@ -81,7 +83,7 @@ async def api_event(
         payload=event.payload,
     )
 
-    return {"status": "ok"}
+    return {"ok": True}
 
 
 @router.get("/timeline")
@@ -90,10 +92,14 @@ async def api_timeline(
 ) -> Dict[str, Any]:
     """
     Возвращает последние события таймлайна.
+
+    Формат оставлен совместимым со старым:
+    { "ok": true, "events": [...] }
     """
     items: List[Dict[str, Any]] = get_timeline(limit=limit)
     return {
-        "items": items,
+        "ok": True,
+        "events": items,
         "count": len(items),
         "ts": datetime.now(timezone.utc).isoformat(),
     }
@@ -103,7 +109,7 @@ async def api_timeline(
 async def api_trainer_day(
     day: TrainingDay,
     x_guard_key: Optional[str] = Header(None, alias="X-Guard-Key"),
-) -> Dict[str, str]:
+) -> Dict[str, Any]:
     """
     Сохранение тренировочного дня (если ты решишь слать сюда агрегированные данные).
     """
@@ -118,7 +124,7 @@ async def api_trainer_day(
         review=day.review,
     )
 
-    return {"status": "ok"}
+    return {"ok": True}
 
 
 @router.get("/trainer/progress")
@@ -129,4 +135,7 @@ async def api_trainer_progress(
     Сводка по прогрессу конкретного пользователя.
     """
     summary = get_progress_summary(user_id=user_id)
-    return summary
+    return {
+        "ok": True,
+        "data": summary,
+    }

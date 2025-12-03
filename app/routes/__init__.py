@@ -5,7 +5,8 @@ from fastapi import APIRouter
 
 from .system import router as system_router
 
+# Корневой роутер ядра
 router = APIRouter()
 
-# только API ядра, без телеграм-меню
+# Подключаем только API-роутер ядра (таймлайн, прогресс и т.п.)
 router.include_router(system_router)
