@@ -67,6 +67,14 @@ async def api_event(
     """
     _check_guard(x_guard_key)
 
+    # Лог в ядре, чтобы видеть, что именно прилетает
+    logger.info(
+        "CORE EVENT: source=%s scene=%s payload_keys=%s",
+        event.source,
+        event.scene,
+        list(event.payload.keys()),
+    )
+
     add_event(
         source=event.source,
         scene=event.scene,

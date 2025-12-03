@@ -9,6 +9,7 @@ from aiogram.client.default import DefaultBotProperties
 
 from app.config import settings
 from app.routes import router as routes_router
+from app.core_client import send_timeline_event  # <- добавили
 
 # Тег запуска, чтобы отличать экземпляры в логах
 RUN_TAG = uuid.uuid4().hex[:8]
@@ -67,6 +68,17 @@ async def main() -> None:
 
     me = await bot.get_me()
     logging.warning(f"Trainer bot launched as @{me.username}, RUN_TAG={RUN_TAG}")
+
+    # Отправляем событие в ядро: тренер вышел в эфир
+    try:
+        asyncio.create_task(
+            send_timeline_event(
+                scene="trainer_online",
+                payload={"run_tag": RUN_TAG},
+            )
+        )
+    except Exception as e:
+        logging.error("Failed to schedule trainer_online event: %s", e)
 
     # Запускаем heartbeat
     asyncio.create_task(heartbeat_loop(bot))
