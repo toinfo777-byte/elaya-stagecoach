@@ -1,22 +1,24 @@
 from __future__ import annotations
 
 from pydantic import Field
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import BaseSettings
 
 
 class Settings(BaseSettings):
-    # Единственное обязательное поле: токен бота
-    tg_bot_token: str = Field(..., alias="TG_BOT_TOKEN")
+    # Telegram
+    tg_bot_token: str = Field(..., env="TG_BOT_TOKEN")
 
-    # Остальное сейчас не обязательно
-    base_url: str | None = None
+    # Связь с ядром (Stagecoach Web)
+    trainer_core_url: str = Field("", env="TRAINER_CORE_URL")
+    trainer_guard_key: str = Field("", env="TRAINER_GUARD_KEY")
 
-    model_config = SettingsConfigDict(
-        # Ищем .env и в trainer/.env, и в корне ../.env
-        env_file=(".env", "../.env"),
-        extra="ignore",
-        populate_by_name=True,
-    )
+    # Прочее
+    env: str = Field("dev", env="ENV")
+    mode: str = Field("dev", env="MODE")
+
+    class Config:
+        env_file = ".env"
+        env_file_encoding = "utf-8"
 
 
 settings = Settings()

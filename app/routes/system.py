@@ -1,10 +1,9 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
-
 import logging
 import os
+from datetime import date, datetime, timezone
+from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Header, HTTPException, Query
 from pydantic import BaseModel
@@ -17,6 +16,7 @@ router = APIRouter(prefix="/api", tags=["api"])
 # --- GUARD ---------------------------------------------------------
 
 GUARD_KEY = os.getenv("GUARD_KEY", "").strip()
+logger = logging.getLogger(__name__)
 
 
 def _check_guard(x_guard_key: Optional[str]) -> None:
@@ -31,12 +31,8 @@ def _check_guard(x_guard_key: Optional[str]) -> None:
         return
 
     if not x_guard_key or x_guard_key != GUARD_KEY:
-        # временный лог, чтобы видеть, что реально прилетает
-        logging.warning(
-            "GUARD FAIL: header=%r, expected=%r",
-            x_guard_key,
-            GUARD_KEY,
-        )
+        # Диагностика: что реально прилетело и что мы ждём
+        logger.warning("GUARD FAIL: header=%r expected=%r", x_guard_key, GUARD_KEY)
         raise HTTPException(status_code=403, detail="Forbidden")
 
 
@@ -51,37 +47,23 @@ class TimelineEvent(BaseModel):
 
 class TrainingDay(BaseModel):
     user_id: int
-    date: str  # ISO-строка даты: 'YYYY-MM-DD'
-    vector: str
-    reflect: str
-    transition: str
-    review: str
+    date: date
+    vector: str = ""
+    reflect: str = ""
+    transition: str = ""
+    review: str = ""
 
 
-# --- Healthcheck ---------------------------------------------------
-
-
-@router.get("/healthz")
-async def healthz() -> Dict[str, Any]:
-    """
-    Простой healthcheck для Render.
-    """
-    return {
-        "status": "ok",
-        "ts": datetime.now(timezone.utc).isoformat(),
-    }
-
-
-# --- Таймлайн ядра -------------------------------------------------
+# --- Эндпоинты ядра -----------------------------------------------
 
 
 @router.post("/event")
 async def api_event(
     event: TimelineEvent,
-    x_guard_key: Optional[str] = Header(default=None, alias="X-Guard-Key"),
-) -> Dict[str, Any]:
+    x_guard_key: Optional[str] = Header(None, alias="X-Guard-Key"),
+) -> Dict[str, str]:
     """
-    Приём события от тренера / других источников.
+    Принимает событие от тренера (или других источников) и кладёт в таймлайн.
     """
     _check_guard(x_guard_key)
 
@@ -91,51 +73,52 @@ async def api_event(
         payload=event.payload,
     )
 
-    return {"ok": True}
+    return {"status": "ok"}
 
 
 @router.get("/timeline")
 async def api_timeline(
     limit: int = Query(100, ge=1, le=1000),
-) -> Dict[str, List[Dict[str, Any]]]:
-    """
-    Получить последние события таймлайна.
-    """
-    events = get_timeline(limit=limit)
-    return {"events": events}
-
-
-# --- Тренировки ----------------------------------------------------
-
-
-@router.post("/training/day")
-async def api_training_day(
-    body: TrainingDay,
-    x_guard_key: Optional[str] = Header(default=None, alias="X-Guard-Key"),
 ) -> Dict[str, Any]:
     """
-    Регистрация одного дня тренировки.
+    Возвращает последние события таймлайна.
+    """
+    items: List[Dict[str, Any]] = get_timeline(limit=limit)
+    return {
+        "items": items,
+        "count": len(items),
+        "ts": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+@router.post("/trainer/day")
+async def api_trainer_day(
+    day: TrainingDay,
+    x_guard_key: Optional[str] = Header(None, alias="X-Guard-Key"),
+) -> Dict[str, str]:
+    """
+    Сохранение тренировочного дня (если ты решишь слать сюда агрегированные данные).
     """
     _check_guard(x_guard_key)
 
     add_training_day(
-        user_id=body.user_id,
-        date=body.date,
-        vector=body.vector,
-        reflect=body.reflect,
-        transition=body.transition,
-        review=body.review,
+        user_id=day.user_id,
+        date=day.date,
+        vector=day.vector,
+        reflect=day.reflect,
+        transition=day.transition,
+        review=day.review,
     )
 
-    return {"ok": True}
+    return {"status": "ok"}
 
 
-@router.get("/training/progress")
-async def api_training_progress(
-    user_id: int = Query(..., description="ID пользователя"),
+@router.get("/trainer/progress")
+async def api_trainer_progress(
+    user_id: int = Query(..., ge=1),
 ) -> Dict[str, Any]:
     """
-    Сводка по прогрессу тренировок.
+    Сводка по прогрессу конкретного пользователя.
     """
     summary = get_progress_summary(user_id=user_id)
     return summary

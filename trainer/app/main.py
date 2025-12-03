@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import os
 import uuid
 
 from aiogram import Bot, Dispatcher
@@ -11,18 +10,31 @@ from aiogram.client.default import DefaultBotProperties
 from app.config import settings
 from app.routes import router as routes_router
 
-
-# --- уникальный тег запуска (чтобы отличить в логах) ---
+# Тег запуска, чтобы отличать экземпляры в логах
 RUN_TAG = uuid.uuid4().hex[:8]
 
+
+class TelegramConflictFilter(logging.Filter):
+    """
+    Фильтр, который вырезает TelegramConflictError из логгера aiogram.dispatcher,
+    чтобы при деплое лог не был полностью красным.
+    """
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        msg = record.getMessage()
+        return "TelegramConflictError" not in msg
+
+
 def _get_bot_token() -> str:
-    return settings.tg_bot_token
+    token = settings.tg_bot_token
+    if not token:
+        raise RuntimeError("TG_BOT_TOKEN is empty")
+    return token
 
 
 async def heartbeat_loop(bot: Bot) -> None:
     """
-    Каждые 30 секунд бот делает heartbeat в логах.
-    Это покажет, КТО реально живой.
+    Периодический heartbeat, чтобы видеть, какой именно экземпляр бота живой.
     """
     while True:
         try:
@@ -34,23 +46,32 @@ async def heartbeat_loop(bot: Bot) -> None:
 
 
 async def main() -> None:
+    # Базовая настройка логов
+    logging.basicConfig(level=logging.INFO)
+
+    # Приглушаем именно dispatcher-логгер
+    dlogger = logging.getLogger("aiogram.dispatcher")
+    dlogger.addFilter(TelegramConflictFilter())
+
     logging.warning("=== TRAINER STARTING ===")
     logging.warning(f"RUN_TAG = {RUN_TAG}")
 
-    bot = Bot(token=_get_bot_token(), default=DefaultBotProperties(parse_mode="HTML"))
+    bot = Bot(
+        token=_get_bot_token(),
+        default=DefaultBotProperties(parse_mode="HTML"),
+    )
     dp = Dispatcher()
 
-    # добавляем роутеры
+    # Подключаем агрегированный роутер
     dp.include_router(routes_router)
 
-    # печатаем имя бота
     me = await bot.get_me()
     logging.warning(f"Trainer bot launched as @{me.username}, RUN_TAG={RUN_TAG}")
 
-    # запускаем heartbeat
+    # Запускаем heartbeat
     asyncio.create_task(heartbeat_loop(bot))
 
-    # стартуем
+    # Стартуем polling
     await dp.start_polling(bot)
 
 
