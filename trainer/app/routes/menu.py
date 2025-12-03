@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, timedelta  # 👈 добавили timedelta
 
 from aiogram import Router, F
 from aiogram.filters import CommandStart, Command
@@ -37,15 +37,45 @@ async def cmd_menu(message: Message) -> None:
 async def btn_progress(message: Message) -> None:
     stats = get_stats(USER_ID)
     total = stats.get("total", 0)
-    today_count = stats.get("by_date", {}).get(date.today().isoformat(), 0)
+    by_date: dict[str, int] = stats.get("by_date", {})
+
+    today = date.today()
+
+    # считаем серию — сколько подряд дней до сегодня были тренировки
+    streak = 0
+    for i in range(0, 30):  # максимум смотрим 30 дней назад
+        d = today - timedelta(days=i)
+        if by_date.get(d.isoformat(), 0) > 0:
+            streak += 1
+        else:
+            break
+
+    # собираем мини-календарь за последние 7 дней
+    lines: list[str] = []
+    for i in range(6, -1, -1):
+        d = today - timedelta(days=i)
+        iso = d.isoformat()
+        count = by_date.get(iso, 0)
+
+        mark = "✅" if count > 0 else "—"
+        label = d.strftime("%d.%m")
+        if i == 0:
+            label += " (сегодня)"
+
+        suffix = "" if count <= 1 else f" ×{count}"
+        lines.append(f"{label}: {mark}{suffix}")
+
+    calendar_block = "\n".join(lines)
 
     text = (
         "📈 <b>Твой прогресс</b>\n\n"
         f"Всего завершено тренировок: <b>{total}</b>\n"
-        f"Сегодня: <b>{today_count}</b>\n\n"
-        "Пока это базовая статистика.\n"
-        "Дальше здесь появится более детальный и красивый отчёт."
+        f"Текущая серия по дням: <b>{streak}</b>\n\n"
+        "<b>Последние 7 дней:</b>\n"
+        f"{calendar_block}\n\n"
+        "Даже одна короткая тренировка в день — уже движение вперёд."
     )
+
     await message.answer(text, reply_markup=MAIN_MENU)
 
 
