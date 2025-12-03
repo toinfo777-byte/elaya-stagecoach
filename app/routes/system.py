@@ -1,27 +1,18 @@
-# app/routes/system.py
 from __future__ import annotations
 
-import os
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
+
+import logging
+import os
 
 from fastapi import APIRouter, Header, HTTPException, Query
 from pydantic import BaseModel
 
-from app.core.cycle_state import CycleState
 from app.core.timeline import add_event, get_timeline
-
-# training_progress в ядре у тебя уже был, но делаем импорт мягким
-try:
-    from app.training_progress import get_progress_summary  # type: ignore
-except ImportError:
-    get_progress_summary = None  # type: ignore[assignment]
+from app.training_progress import add_training_day, get_progress_summary
 
 router = APIRouter(prefix="/api", tags=["api"])
-
-# --- Версия ядра ---------------------------------------------------
-
-CORE_VERSION = "0.6.0"
 
 # --- GUARD ---------------------------------------------------------
 
@@ -33,14 +24,19 @@ def _check_guard(x_guard_key: Optional[str]) -> None:
     Простая защита для мутирующих запросов.
 
     Если GUARD_KEY не задан в окружении — защита выключена.
-    Если задан — любые мутирующие запросы (POST /sync, POST /event, ...)
-    должны присылать заголовок X-Guard-Key с корректным значением.
+    Если задан — все запросы с изменением состояния должны
+    присылать заголовок X-Guard-Key.
     """
     if not GUARD_KEY:
-        # защита выключена — разрешаем всё
         return
 
     if not x_guard_key or x_guard_key != GUARD_KEY:
+        # временный лог, чтобы видеть, что реально прилетает
+        logging.warning(
+            "GUARD FAIL: header=%r, expected=%r",
+            x_guard_key,
+            GUARD_KEY,
+        )
         raise HTTPException(status_code=403, detail="Forbidden")
 
 
@@ -53,84 +49,39 @@ class TimelineEvent(BaseModel):
     payload: Dict[str, Any] = {}
 
 
-class SyncPayload(BaseModel):
+class TrainingDay(BaseModel):
+    user_id: int
+    date: str  # ISO-строка даты: 'YYYY-MM-DD'
+    vector: str
+    reflect: str
+    transition: str
+    review: str
+
+
+# --- Healthcheck ---------------------------------------------------
+
+
+@router.get("/healthz")
+async def healthz() -> Dict[str, Any]:
     """
-    Минимальная модель для синхронизации состояния цикла.
-    CLI/Trainer могут присылать любую полезную инфу в client.
-    """
-    client: Dict[str, Any] | None = None
-
-
-# --- Состояние цикла -----------------------------------------------
-
-_cycle_state = CycleState()
-
-
-def _cycle_snapshot() -> Dict[str, Any]:
-    """
-    Единая точка, откуда берём состояние цикла для /status и /sync.
-    Если в CycleState у тебя другой API — адаптируй здесь.
-    """
-    if hasattr(_cycle_state, "get_state"):
-        return _cycle_state.get_state()  # type: ignore[no-any-return]
-    if hasattr(_cycle_state, "to_dict"):
-        return _cycle_state.to_dict()  # type: ignore[no-any-return]
-    return {}
-
-
-# --- /status -------------------------------------------------------
-
-@router.get("/status")
-async def api_status() -> Dict[str, Any]:
-    """
-    Лёгкий health-check ядра.
-    Формат ответа согласован с /sync.
+    Простой healthcheck для Render.
     """
     return {
-        "core_version": CORE_VERSION,
-        "server_time": datetime.now(timezone.utc).isoformat(),
-        "cycle": _cycle_snapshot(),
+        "status": "ok",
+        "ts": datetime.now(timezone.utc).isoformat(),
     }
 
 
-# --- /sync ---------------------------------------------------------
+# --- Таймлайн ядра -------------------------------------------------
 
-@router.post("/sync")
-async def api_sync(
-    payload: SyncPayload,
-    x_guard_key: Optional[str] = Header(None),
-) -> Dict[str, Any]:
-    """
-    Синхронизация состояния с клиентом (CLI, Trainer и т.п.).
-
-    ВСЕГДА под защитой GUARD_KEY.
-    """
-    _check_guard(x_guard_key)
-
-    client_data = payload.client or {}
-
-    # Если у CycleState есть своя логика обновления — адаптируй.
-    if hasattr(_cycle_state, "update_from_client"):
-        _cycle_state.update_from_client(client_data)  # type: ignore[arg-type]
-
-    # Ответ в том же формате, что и /status
-    return {
-        "core_version": CORE_VERSION,
-        "server_time": datetime.now(timezone.utc).isoformat(),
-        "cycle": _cycle_snapshot(),
-    }
-
-
-# --- /event (таймлайн) ---------------------------------------------
 
 @router.post("/event")
-async def api_add_event(
+async def api_event(
     event: TimelineEvent,
-    x_guard_key: Optional[str] = Header(None),
+    x_guard_key: Optional[str] = Header(default=None, alias="X-Guard-Key"),
 ) -> Dict[str, Any]:
     """
-    Добавление события в таймлайн ядра.
-    Используется Trainer/CLI/etc.
+    Приём события от тренера / других источников.
     """
     _check_guard(x_guard_key)
 
@@ -138,42 +89,53 @@ async def api_add_event(
         source=event.source,
         scene=event.scene,
         payload=event.payload,
-        ts=datetime.now(timezone.utc),
     )
-    return {"status": "ok"}
+
+    return {"ok": True}
 
 
 @router.get("/timeline")
-async def api_get_timeline(
-    limit: int = Query(50, ge=1, le=500),
+async def api_timeline(
+    limit: int = Query(100, ge=1, le=1000),
+) -> Dict[str, List[Dict[str, Any]]]:
+    """
+    Получить последние события таймлайна.
+    """
+    events = get_timeline(limit=limit)
+    return {"events": events}
+
+
+# --- Тренировки ----------------------------------------------------
+
+
+@router.post("/training/day")
+async def api_training_day(
+    body: TrainingDay,
+    x_guard_key: Optional[str] = Header(default=None, alias="X-Guard-Key"),
 ) -> Dict[str, Any]:
     """
-    Получение последних событий таймлайна.
-
-    ВАЖНО:
-    - возвращаем ключ "events", а не "items", чтобы не ломать extended.py
-      и прочие места, где уже ожидается data["events"].
+    Регистрация одного дня тренировки.
     """
-    items: List[Dict[str, Any]] = get_timeline(limit=limit)
-    return {
-        "core_version": CORE_VERSION,
-        "events": items,
-    }
+    _check_guard(x_guard_key)
 
+    add_training_day(
+        user_id=body.user_id,
+        date=body.date,
+        vector=body.vector,
+        reflect=body.reflect,
+        transition=body.transition,
+        review=body.review,
+    )
 
-# --- (опционально) /training/progress ------------------------------
+    return {"ok": True}
+
 
 @router.get("/training/progress")
-async def api_training_progress() -> Dict[str, Any]:
+async def api_training_progress(
+    user_id: int = Query(..., description="ID пользователя"),
+) -> Dict[str, Any]:
     """
-    Опциональный эндпоинт, если в ядре есть training_progress и
-    функция get_progress_summary.
+    Сводка по прогрессу тренировок.
     """
-    if get_progress_summary is None:
-        raise HTTPException(status_code=501, detail="Training progress disabled")
-
-    summary = get_progress_summary()
-    return {
-        "core_version": CORE_VERSION,
-        "summary": summary,
-    }
+    summary = get_progress_summary(user_id=user_id)
+    return summary
