@@ -19,9 +19,12 @@ async def send_timeline_event(
 ) -> None:
     """
     Асинхронная отправка события тренера в ядро Элайи (Stagecoach Web).
+
+    ВАЖНО: любые ошибки логируем, но НЕ пробрасываем выше,
+    чтобы бот не молчал из-за проблем ядра.
     """
     if not CORE_URL:
-        logger.warning("Trainer core URL is not set; skip sending event %r", scene)
+        logger.warning("Trainer core URL is not set; skip event %r", scene)
         return
 
     url = f"{CORE_URL}/api/event"
@@ -39,19 +42,22 @@ async def send_timeline_event(
     try:
         async with httpx.AsyncClient(timeout=10) as client:
             resp = await client.post(url, json=data, headers=headers)
-            resp.raise_for_status()
-            logger.info("Trainer event sent: %s", scene)
 
-    except httpx.HTTPStatusError as e:
-        # Ключевая диагностическая строка: сразу видно статус, URL, заголовки и ответ ядра
-        logger.error(
-            "ERROR sending trainer event: %s %s headers=%r body=%r",
-            e.response.status_code,
-            e.request.url,
-            headers,
-            e.response.text,
-        )
-        raise
+            try:
+                resp.raise_for_status()
+            except httpx.HTTPStatusError as e:
+                # ядро ответило 4xx/5xx — пишем подробности и выходим
+                logger.error(
+                    "Trainer event FAILED: status=%s url=%s headers=%r body=%r",
+                    e.response.status_code,
+                    e.request.url,
+                    headers,
+                    e.response.text,
+                )
+                return
+
+        logger.info("Trainer event sent: scene=%s", scene)
+
     except Exception as e:
-        # Любая другая ошибка — логируем, но не роняем бота
+        # любая сетевая/другая ошибка — просто лог
         logger.error("ERROR sending trainer event %r: %s", scene, e)
