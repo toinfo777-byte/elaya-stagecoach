@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 from pydantic import Field
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
+    # Сказать Pydantic: лишние env-переменные игнорируем, не падаем
+    model_config = SettingsConfigDict(extra="ignore")
+
     # Telegram
     tg_bot_token: str = Field(..., env="TG_BOT_TOKEN")
 
