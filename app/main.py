@@ -1,34 +1,21 @@
+# app/main.py
 from __future__ import annotations
 
 from fastapi import FastAPI
 
-from app.routers import router as main_router
+from app.routes import router as routes_router
 
 
-app = FastAPI()
+def create_app() -> FastAPI:
+    app = FastAPI(
+        title="Elaya Core",
+        version="0.1.0",
+    )
+
+    # подключаем все маршруты из app/routes/__init__.py
+    app.include_router(routes_router)
+
+    return app
 
 
-# --- healthchecks -------------------------------------------------
-
-
-@app.get("/healthz")
-async def root_healthcheck() -> dict:
-    """
-    Простой healthcheck для локального запуска.
-    """
-    return {"status": "ok"}
-
-
-@app.get("/api/healthz")
-async def api_healthcheck() -> dict:
-    """
-    Healthcheck для Render (он ходит именно в /api/healthz).
-    """
-    return {"status": "ok"}
-
-
-# --- маршруты ядра ------------------------------------------------
-
-
-# Подключаем корневой роутер (внутри уже system/ui/api и т.д.)
-app.include_router(main_router)
+app = create_app()
