@@ -103,9 +103,17 @@ def _get_last_trainer_event() -> Dict[str, Any]:
     return {}
 
 
-def _build_health_payload() -> Dict[str, Any]:
+@router.get("/health")
+def api_health() -> Dict[str, Any]:
     """
-    Общая логика health-ответа, используется и /health, и /healthhz.
+    Внутренний health-check ядра Элайи.
+
+    Не требует GUARD_KEY — можно дергать из браузера.
+    Даёт сводку:
+    - текущее время
+    - env/mode/image_tag
+    - краткий статус web
+    - информация о последних событиях тренера
     """
     now = datetime.now(timezone.utc)
 
@@ -114,7 +122,6 @@ def _build_health_payload() -> Dict[str, Any]:
 
     if last_trainer:
         trainer_ts_raw = last_trainer.get("ts_utc")
-        # ts_utc мы записываем как ISO-строку — восстановим datetime
         try:
             trainer_ts = datetime.fromisoformat(trainer_ts_raw)
         except Exception:
@@ -143,25 +150,3 @@ def _build_health_payload() -> Dict[str, Any]:
         },
         "trainer": trainer_block,
     }
-
-
-@router.get("/health")
-def api_health() -> Dict[str, Any]:
-    """
-    Внутренний health-check ядра Элайи.
-
-    Не требует GUARD_KEY — можно дергать из коннекторов / браузера.
-    """
-    return _build_health_payload()
-
-
-# --- Для обратной совместимости: старый путь Render'а ----------------
-
-
-@router.get("/healthhz")
-def api_healthhz() -> Dict[str, Any]:
-    """
-    Старый health-эндпоинт для Render'а.
-    Оставляем, чтобы не трогать настройки сервиса.
-    """
-    return _build_health_payload()
