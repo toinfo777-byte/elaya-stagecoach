@@ -1,49 +1,26 @@
-# app/core_client.py
+# trainer/app/core_client.py
 from __future__ import annotations
 
-import logging
+import os
 from typing import Any, Dict, Optional
 
 import httpx
 
-from .config import settings
-
-logger = logging.getLogger(__name__)
-
-# URL ядра (Stagecoach Web), обрезаем хвостовой слэш на всякий случай
-CORE_URL = (settings.trainer_core_url or "").rstrip("/")
-
-# Ключ защиты, приводим к "чистому" виду
-GUARD_KEY = (settings.trainer_guard_key or "").strip()
+# URL ядра (web-сервиса)
+CORE_URL = os.getenv("TRAINER_CORE_URL", "").rstrip("/")
+# Ключ охраны для мутирующих запросов (POST /api/event)
+GUARD_KEY = os.getenv("TRAINER_GUARD_KEY", "").strip()
 
 
-def _mask_secret(value: str) -> str:
+async def send_timeline_event(scene: str, payload: Optional[Dict[str, Any]] = None) -> None:
     """
-    Маскируем секреты в логах, чтобы случайно не светить ключи.
-    """
-    if not value:
-        return ""
-    if len(value) <= 4:
-        return "***"
-    return value[:2] + "***" + value[-2:]
+    Асинхронная отправка события тренера в таймлайн ядра Элайи.
 
-
-async def send_timeline_event(
-    scene: str,
-    payload: Optional[Dict[str, Any]] = None,
-) -> None:
-    """
-    Асинхронная отправка события тренера в ядро Элайи (Stagecoach Web).
-
-    ВАЖНО:
-    - Любые ошибки логируем, но НЕ пробрасываем выше,
-      чтобы тренер не ломал диалог с пользователем.
-    - В логах не светим полный GUARD_KEY.
+    Используется для всех сцен тренировки:
+    - trainer:day:start / intro_done / reflect / transition / review / finish
     """
     if not CORE_URL:
-        logger.warning(
-            "Trainer core URL is not set; skip event scene=%r", scene
-        )
+        print("WARN: TRAINER_CORE_URL not set")
         return
 
     url = f"{CORE_URL}/api/event"
@@ -60,32 +37,42 @@ async def send_timeline_event(
 
     try:
         async with httpx.AsyncClient(timeout=10) as client:
-            resp = await client.post(url, json=data, headers=headers)
+            r = await client.post(url, json=data, headers=headers)
+            r.raise_for_status()
+            print("Trainer event sent:", scene)
+    except httpx.RequestError as e:
+        print(f"ERROR: failed to send trainer event {scene}: {e!r}")
 
-        if resp.status_code >= 400:
-            # Только диагностическая информация, без явного ключа
-            logger.error(
-                "Trainer event FAILED: scene=%s status=%s url=%s guard_set=%s body=%r",
-                scene,
-                resp.status_code,
-                str(resp.url),
-                bool(GUARD_KEY),
-                resp.text[:200],  # обрежем, чтобы не раздувать лог
-            )
-            return
 
-        logger.info(
-            "Trainer event sent: scene=%s status=%s",
-            scene,
-            resp.status_code,
-        )
+async def fetch_progress(user_id: int, limit: int = 7) -> Dict[str, Any]:
+    """
+    Получить сводку прогресса пользователя из ядра.
 
-    except Exception as e:
-        logger.error(
-            "Trainer event ERROR scene=%s: %s (core_url=%s, guard=%s)",
-            scene,
-            e,
-            CORE_URL,
-            _mask_secret(GUARD_KEY),
-        )
-        return
+    Ожидаемый ответ ядра (обобщённо):
+    {
+        "status": "ok",
+        "user_id": 123,
+        "total_days": 3,
+        "last_date": {...} | {},
+        "days": [ {...}, ... ]
+    }
+    """
+    if not CORE_URL:
+        print("WARN: TRAINER_CORE_URL not set")
+        return {}
+
+    url = f"{CORE_URL}/api/trainer/progress"
+
+    params = {
+        "user_id": user_id,
+        "limit": limit,
+    }
+
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            r = await client.get(url, params=params)
+            r.raise_for_status()
+            return r.json()
+    except httpx.RequestError as e:
+        print(f"ERROR: failed to fetch progress for {user_id}: {e!r}")
+        return {}

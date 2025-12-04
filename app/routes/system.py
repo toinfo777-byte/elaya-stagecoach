@@ -15,6 +15,10 @@ router = APIRouter(prefix="/api", tags=["api"])
 
 logger = logging.getLogger(__name__)
 
+# --------------------------------------------------------------
+# ENV
+# --------------------------------------------------------------
+
 GUARD_KEY = os.getenv("GUARD_KEY", "").strip()
 ENV = os.getenv("ENV", "dev")
 MODE = os.getenv("MODE", "dev")
@@ -43,7 +47,7 @@ def _check_guard(x_guard_key: Optional[str]) -> None:
 
 
 # --------------------------------------------------------------
-# МОДЕЛЬ ДЛЯ СОБЫТИЙ ТАЙМЛАЙНА
+# МОДЕЛЬ СОБЫТИЯ
 # --------------------------------------------------------------
 
 class TimelineEvent(BaseModel):
@@ -89,7 +93,7 @@ def api_timeline(
 
 
 # --------------------------------------------------------------
-# ВНУТРЕННИЙ HEALTH CHECK
+# ПОИСК ПОСЛЕДНЕГО trainer-СОБЫТИЯ
 # --------------------------------------------------------------
 
 def _get_last_trainer_event() -> Dict[str, Any]:
@@ -103,18 +107,19 @@ def _get_last_trainer_event() -> Dict[str, Any]:
     return {}
 
 
+# --------------------------------------------------------------
+# HEALTH CHECK
+# --------------------------------------------------------------
+
 @router.get("/health")
 def api_health() -> Dict[str, Any]:
-    """
-    Внутренний health-check ядра Элайи.
-    """
+    """Внутренний health-check ядра Элайи."""
     now = datetime.now(timezone.utc)
 
     last_trainer = _get_last_trainer_event()
     trainer_block: Dict[str, Any] = {"has_events": False}
 
     if last_trainer:
-        # сначала пробуем ts_utc, если нет — берём ts
         trainer_ts_raw = last_trainer.get("ts_utc") or last_trainer.get("ts")
 
         trainer_ts = None
@@ -142,18 +147,15 @@ def api_health() -> Dict[str, Any]:
         "mode": MODE,
         "image_tag": IMAGE_TAG,
         "guard_enabled": bool(GUARD_KEY),
-        "web": {
-            "status": "ok",
-        },
+        "web": {"status": "ok"},
         "trainer": trainer_block,
     }
 
 
 # --------------------------------------------------------------
-# КОРОТКИЙ HEALTH CHECK (для Render)
+# `/healthz` — короткий alias
 # --------------------------------------------------------------
 
 @router.get("/healthz")
 def api_healthz() -> Dict[str, Any]:
-    """Технический alias для оркестраторов."""
     return api_health()
