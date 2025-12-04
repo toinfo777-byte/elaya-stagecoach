@@ -1,15 +1,11 @@
-from __future__ import annotations
-
-from datetime import date
-
 from aiogram import Router, F
 from aiogram.fsm.context import FSMContext
-from aiogram.fsm.state import State, StatesGroup
+from aiogram.fsm.state import StatesGroup, State
 from aiogram.types import Message
 
-from app.keyboards.main_menu import MAIN_MENU
-from app.training_progress import register_training, register_training_simple
-from app.core_client import send_timeline_event
+from ..menu import MAIN_MENU              # ← здесь ДВЕ точки
+from ..core_client import send_timeline_event
+
 
 router = Router(name="training_flow")
 
@@ -38,6 +34,7 @@ class TrainingFlow(StatesGroup):
 async def start_training(message: Message, state: FSMContext) -> None:
     """
     Запуск тренировки дня:
+    - очищаем состояние
     - ставим состояние на ввод "vector"
     - шлём событие trainer.day.start в ядро
     """
@@ -70,8 +67,8 @@ async def handle_vector(message: Message, state: FSMContext) -> None:
     text = (message.text or "").strip()
 
     await state.update_data(vector=text)
-
     await state.set_state(TrainingFlow.reflect)
+
     await message.answer(
         "2️⃣ Теперь отражение.\n\n"
         "Посмотри на свой день / практику со стороны — "
@@ -88,8 +85,8 @@ async def handle_reflect(message: Message, state: FSMContext) -> None:
     text = (message.text or "").strip()
 
     await state.update_data(reflect=text)
-
     await state.set_state(TrainingFlow.transition)
+
     await message.answer(
         "3️⃣ Маленький шаг.\n\n"
         "Какой один небольшой переход ты готов сделать после этой тренировки?\n"
@@ -106,11 +103,12 @@ async def handle_transition(message: Message, state: FSMContext) -> None:
     text = (message.text or "").strip()
 
     await state.update_data(transition=text)
-
     await state.set_state(TrainingFlow.review)
+
     await message.answer(
         "4️⃣ Финальное слово.\n\n"
-        "Напиши пару фраз — как тебе эта тренировка, в каком состоянии ты выходишь.",
+        "Напиши пару фраз — как тебе эта тренировка, "
+        "в каком состоянии ты выходишь.",
         reply_markup=MAIN_MENU,
     )
 
@@ -121,44 +119,26 @@ async def handle_transition(message: Message, state: FSMContext) -> None:
 @router.message(TrainingFlow.review)
 async def handle_review(message: Message, state: FSMContext) -> None:
     review = (message.text or "").strip()
-
     data = await state.get_data()
 
-    vector = data.get("vector", "")
-    reflect = data.get("reflect", "")
-    transition = data.get("transition", "")
-
-    # 🗂 Локальное сохранение тренировки
-    register_training(
-        user_id=USER_ID,
-        date=date.today(),
-        vector=vector,
-        reflect=reflect,
-        transition=transition,
-        review=review,
-    )
-
-    # 🟣 Событие «тренировка завершена» → ядро
+    # 👉 отправляем событие в ядро (Stagecoach Web)
     await send_timeline_event(
         scene="trainer.day.finish",
         payload={
-            "user_id": USER_ID,
+            "user_id": message.from_user.id,
             "date": date.today().isoformat(),
-            "vector": vector,
-            "reflect": reflect,
-            "transition": transition,
+            "vector": data.get("vector", ""),
+            "reflect": data.get("reflect", ""),
+            "transition": data.get("transition", ""),
             "review": review,
-            "chat_id": message.chat.id,
         },
     )
 
-    # упрощённая метрика для счётчиков
-    await register_training_simple(USER_ID)
-
     await state.clear()
 
+    # ⭐ Финальное сообщение + возвращаем меню
     await message.answer(
-        "Хорошая работа. Я сохранил твою тренировку.\n\n"
+        "Хорошая работа. Я сохранил твою тренировку.\n"
         "Если захочешь — нажимай «🎭 Тренировка дня».",
         reply_markup=MAIN_MENU,
     )

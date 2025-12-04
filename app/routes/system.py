@@ -1,81 +1,68 @@
 # app/routes/system.py
 from __future__ import annotations
 
+from datetime import datetime, timezone
+from typing import Any, Dict, List, Optional
 import logging
 import os
-from datetime import date, datetime, timezone
-from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Header, HTTPException, Query
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 from app.core.timeline import add_event, get_timeline
-from app.training_progress import add_training_day, get_progress_summary
 
 router = APIRouter(prefix="/api", tags=["api"])
 
-# --- GUARD ---------------------------------------------------------
+logger = logging.getLogger(__name__)
 
 GUARD_KEY = os.getenv("GUARD_KEY", "").strip()
-logger = logging.getLogger(__name__)
+ENV = os.getenv("ENV", "dev")
+MODE = os.getenv("MODE", "dev")
+IMAGE_TAG = os.getenv("IMAGE_TAG", "dev")
+
+
+# --------- GUARD ----------------------------------------------------
 
 
 def _check_guard(x_guard_key: Optional[str]) -> None:
     """
     Простая защита для мутирующих запросов.
-
-    Если GUARD_KEY не задан в окружении — защита выключена.
-    Если задан — все запросы с изменением состояния должны
-    присылать заголовок X-Guard-Key.
+    Если GUARD_KEY не задан — защита выключена.
     """
     if not GUARD_KEY:
         return
 
     if not x_guard_key or x_guard_key != GUARD_KEY:
-        # Диагностика: что реально прилетело и что мы ждём
-        logger.warning("GUARD FAIL: header=%r expected=%r", x_guard_key, GUARD_KEY)
+        logger.warning(
+            "GUARD FAIL: header=%r expected=%r",
+            x_guard_key,
+            GUARD_KEY,
+        )
         raise HTTPException(status_code=403, detail="Forbidden")
 
 
-# --- Модели --------------------------------------------------------
+# --------- МОДЕЛИ ДЛЯ ТАЙМЛАЙНА ------------------------------------
 
 
 class TimelineEvent(BaseModel):
     source: str
     scene: str
-    # через Field, чтобы не было общей мутируемой ссылки
-    payload: Dict[str, Any] = Field(default_factory=dict)
+    payload: Dict[str, Any] = {}  # маленькие payload'ы, тут ок
 
 
-class TrainingDay(BaseModel):
-    user_id: int
-    date: date
-    vector: str = ""
-    reflect: str = ""
-    transition: str = ""
-    review: str = ""
-
-
-# --- Эндпоинты ядра -----------------------------------------------
+# --------- API: ПРИЁМ СОБЫТИЙ ОТ ТРЕНЕРА / ДРУГИХ УЗЛОВ ------------
 
 
 @router.post("/event")
-async def api_event(
+def api_event(
     event: TimelineEvent,
-    x_guard_key: Optional[str] = Header(None, alias="X-Guard-Key"),
-) -> Dict[str, Any]:
+    x_guard_key: Optional[str] = Header(default=None, alias="X-Guard-Key"),
+) -> Dict[str, str]:
     """
-    Принимает событие от тренера (или других источников) и кладёт в таймлайн.
+    Приём события от тренера / других сервисов.
+    Требует корректного X-Guard-Key, если GUARD_KEY задан.
     """
     _check_guard(x_guard_key)
-
-    # Лог в ядре, чтобы видеть, что именно прилетает
-    logger.info(
-        "CORE EVENT: source=%s scene=%s payload_keys=%s",
-        event.source,
-        event.scene,
-        list(event.payload.keys()),
-    )
 
     add_event(
         source=event.source,
@@ -83,59 +70,84 @@ async def api_event(
         payload=event.payload,
     )
 
-    return {"ok": True}
+    return {"status": "ok"}
+
+
+# --------- API: ЧТЕНИЕ ТАЙМЛАЙНА ------------------------------------
 
 
 @router.get("/timeline")
-async def api_timeline(
+def api_timeline(
     limit: int = Query(100, ge=1, le=1000),
-) -> Dict[str, Any]:
+) -> List[Dict[str, Any]]:
     """
-    Возвращает последние события таймлайна.
+    Вернуть последние события таймлайна.
+    """
+    return get_timeline(limit=limit)
 
-    Формат оставлен совместимым со старым:
-    { "ok": true, "events": [...] }
+
+# --------- ВНУТРЕННЕЕ ЗДОРОВЬЕ СИСТЕМЫ ------------------------------
+
+
+def _get_last_trainer_event() -> Dict[str, Any]:
     """
-    items: List[Dict[str, Any]] = get_timeline(limit=limit)
+    Находит последнее событие с source == 'trainer' в таймлайне.
+    Если событий нет — возвращает пустой словарь.
+    """
+    events = get_timeline(limit=200)
+
+    for ev in reversed(events):
+        if ev.get("source") == "trainer":
+            return ev
+
+    return {}
+
+
+@router.get("/health")
+def api_health() -> Dict[str, Any]:
+    """
+    Внутренний health-check ядра Элайи.
+
+    Не требует GUARD_KEY — можно дергать из коннекторов / браузера.
+    Даёт сводку:
+    - текущее время
+    - env/mode/image_tag
+    - краткий статус web
+    - информация о последних событиях тренера
+    """
+    now = datetime.now(timezone.utc)
+
+    last_trainer = _get_last_trainer_event()
+    trainer_block: Dict[str, Any] = {"has_events": False}
+
+    if last_trainer:
+        trainer_ts_raw = last_trainer.get("ts_utc")
+        # ts_utc мы записываем как ISO-строку — восстановим datetime
+        try:
+            trainer_ts = datetime.fromisoformat(trainer_ts_raw)
+        except Exception:
+            trainer_ts = None
+
+        trainer_block = {
+            "has_events": True,
+            "last_scene": last_trainer.get("scene"),
+            "last_source": last_trainer.get("source"),
+            "last_timestamp": trainer_ts_raw,
+        }
+
+        if trainer_ts is not None and trainer_ts.tzinfo is not None:
+            delta = now - trainer_ts
+            trainer_block["seconds_since_last_event"] = int(delta.total_seconds())
+
     return {
-        "ok": True,
-        "events": items,
-        "count": len(items),
-        "ts": datetime.now(timezone.utc).isoformat(),
-    }
-
-
-@router.post("/trainer/day")
-async def api_trainer_day(
-    day: TrainingDay,
-    x_guard_key: Optional[str] = Header(None, alias="X-Guard-Key"),
-) -> Dict[str, Any]:
-    """
-    Сохранение тренировочного дня (если ты решишь слать сюда агрегированные данные).
-    """
-    _check_guard(x_guard_key)
-
-    add_training_day(
-        user_id=day.user_id,
-        date=day.date,
-        vector=day.vector,
-        reflect=day.reflect,
-        transition=day.transition,
-        review=day.review,
-    )
-
-    return {"ok": True}
-
-
-@router.get("/trainer/progress")
-async def api_trainer_progress(
-    user_id: int = Query(..., ge=1),
-) -> Dict[str, Any]:
-    """
-    Сводка по прогрессу конкретного пользователя.
-    """
-    summary = get_progress_summary(user_id=user_id)
-    return {
-        "ok": True,
-        "data": summary,
+        "status": "ok",
+        "time_utc": now.isoformat(),
+        "env": ENV,
+        "mode": MODE,
+        "image_tag": IMAGE_TAG,
+        "guard_enabled": bool(GUARD_KEY),
+        "web": {
+            "status": "ok",
+        },
+        "trainer": trainer_block,
     }

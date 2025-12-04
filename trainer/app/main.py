@@ -7,8 +7,10 @@ import uuid
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 
-from app.config import settings
-from app.routes import router as routes_router
+from .config import settings                 # <- относительный импорт
+from .routes import router as routes_router  # <- относительный
+from .core_client import send_timeline_event # <- относительный
+
 
 # Тег запуска, чтобы отличать экземпляры в логах
 RUN_TAG = uuid.uuid4().hex[:8]

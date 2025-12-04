@@ -1,139 +1,92 @@
-# trainer/app/training_progress.py
 from __future__ import annotations
 
-import json
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
-from typing import Any, Dict, List, Optional
-
-# ------------------------------
-# ХРАНИЛИЩЕ
-# ------------------------------
-
-DATA_FILE = Path(__file__).with_name("training_records.json")
+from typing import Dict, List, Any
+import json
 
 
-def _load() -> List[Dict[str, Any]]:
+# Путь к локальному JSON с прогрессом тренера
+DATA_PATH = Path(__file__).resolve().parent / "data" / "training_progress.json"
+DATA_PATH.parent.mkdir(parents=True, exist_ok=True)
+
+
+def _load_data() -> Dict[str, List[str]]:
     """
-    Загружаем весь список тренировок.
-    Если файла нет — возвращаем пустой список.
+    Загружаем словарь {user_id_str: [ "YYYY-MM-DD", ... ]}.
+    Если файла нет или он битый — возвращаем пустой словарь.
     """
+    if not DATA_PATH.exists():
+        return {}
     try:
-        with DATA_FILE.open("r", encoding="utf-8") as f:
+        with DATA_PATH.open("r", encoding="utf-8") as f:
             return json.load(f)
-    except FileNotFoundError:
-        return []
     except Exception:
-        # на всякий случай не ломаемся от битого файла
-        return []
+        return {}
 
 
-def _save(records: List[Dict[str, Any]]) -> None:
+def _save_data(data: Dict[str, List[str]]) -> None:
     """
-    Сохраняем все тренировочные записи.
+    Сохраняем словарь в JSON.
     """
-    with DATA_FILE.open("w", encoding="utf-8") as f:
-        json.dump(records, f, ensure_ascii=False, indent=2)
+    with DATA_PATH.open("w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
 
 
-# ------------------------------
-# ЗАПИСЬ ТРЕНИРОВКИ (НОВЫЙ API)
-# ------------------------------
-
-def register_training(
-    *,
-    user_id: int,
-    date: date,
-    vector: str,
-    reflect: str,
-    transition: str,
-    review: Optional[str] = None,
-) -> None:
+def add_training_day(user_id: int, d: date | None = None) -> None:
     """
-    Регистрирует завершённую Тренировку Дня.
-
-    review — НЕобязательный параметр.
-    Если он не передан — запись остаётся валидной.
+    Добавить день с завершённой тренировкой для пользователя.
     """
-    record: Dict[str, Any] = {
-        "user_id": user_id,
-        "date": date.isoformat(),
-        "vector": vector,
-        "reflect": reflect,
-        "transition": transition,
-    }
+    if d is None:
+        d = date.today()
 
-    if review is not None:
-        record["review"] = review
-
-    records = _load()
-    records.append(record)
-    _save(records)
+    data = _load_data()
+    key = str(user_id)
+    days = set(data.get(key, []))
+    days.add(d.isoformat())
+    data[key] = sorted(days)
+    _save_data(data)
 
 
-def _calc_streak(records: List[Dict[str, Any]]) -> int:
+def get_progress_summary(user_id: int) -> Dict[str, Any]:
     """
-    Очень простая «серия по дням»:
-    считаем количество уникальных дат, когда были тренировки.
-    (Пока без сложной логики подряд и пропусков.)
+    Вернуть сводку по прогрессу:
+    - total_days: всего дней с тренировками
+    - current_streak: текущая серия по дням (без разрывов > 1 дня)
+    - last_date: дата последней тренировки (строкой) или None
     """
-    dates = {r.get("date") for r in records if r.get("date")}
-    return len(dates)
+    data = _load_data()
+    key = str(user_id)
+    day_strings = data.get(key, [])
 
-
-def get_overview(user_id: int) -> Optional[Dict[str, Any]]:
-    """
-    Возвращает сводку по тренировкам пользователя:
-    - total: всего завершено тренировок
-    - streak: сколько дней с тренировками (упрощённая серия)
-    - last: словарь с последней тренировкой (date, vector, reflect, transition, review?)
-    """
-    records = [r for r in _load() if r.get("user_id") == user_id]
-    if not records:
-        return None
-
-    # сортируем по дате (она лежит в ISO-формате)
-    records_sorted = sorted(records, key=lambda r: r.get("date", ""), reverse=True)
-    last = records_sorted[0]
-
-    overview: Dict[str, Any] = {
-        "total": len(records),
-        "streak": _calc_streak(records),
-        "last": last,
-    }
-    return overview
-
-
-# ------------------------------
-# СТАРЫЙ IN-MEMORY API (для совместимости)
-# ------------------------------
-
-_USER_STATS: Dict[int, Dict[str, Any]] = {}
-
-
-def _ensure_user(user_id: int) -> Dict[str, Any]:
-    if user_id not in _USER_STATS:
-        _USER_STATS[user_id] = {
-            "total": 0,
-            "by_date": {},
+    if not day_strings:
+        return {
+            "total_days": 0,
+            "current_streak": 0,
+            "last_date": None,
         }
-    return _USER_STATS[user_id]
 
+    days = [date.fromisoformat(s) for s in day_strings]
+    days.sort()
 
-async def register_training_simple(user_id: int) -> None:
-    """
-    Старый in-memory регистратор.
-    Работает параллельно с файловым хранилищем.
-    """
-    stats = _ensure_user(user_id)
-    stats["total"] += 1
-    today = date.today().isoformat()
-    stats["by_date"][today] = stats["by_date"].get(today, 0) + 1
+    total_days = len(days)
+    last_date = days[-1]
 
+    # Считаем серию: двигаемся назад, пока разрывы <= 1 дня
+    streak = 1
+    cur = last_date
+    idx = len(days) - 2
+    while idx >= 0:
+        prev = days[idx]
+        if (cur - prev) <= timedelta(days=1):
+            streak += 1
+            cur = prev
+            idx -= 1
+        else:
+            break
 
-def get_stats(user_id: int) -> Dict[str, Any]:
-    """
-    Возвращает очень простую статистику in-memory.
-    Это сохраняем для старых обработчиков.
-    """
-    return _ensure_user(user_id).copy()
+    return {
+        "total_days": total_days,
+        "current_streak": streak,
+        "last_date": last_date.isoformat(),
+    }

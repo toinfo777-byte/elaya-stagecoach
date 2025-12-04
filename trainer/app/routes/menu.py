@@ -1,119 +1,96 @@
 from __future__ import annotations
 
-from datetime import date, timedelta  # 👈 добавили timedelta
-
 from aiogram import Router, F
-from aiogram.filters import CommandStart, Command
-from aiogram.types import Message
+from aiogram.types import Message, ReplyKeyboardMarkup, KeyboardButton
 
-from app.keyboards.main_menu import MAIN_MENU
-from app.training_progress import get_stats
+from ..training_progress import get_progress_summary
+
+# --- Главное меню тренера -------------------------------------------------
+
+MAIN_MENU = ReplyKeyboardMarkup(
+    keyboard=[
+        [KeyboardButton(text="🎭 Тренировка дня")],
+        [
+            KeyboardButton(text="📈 Мой прогресс"),
+            KeyboardButton(text="💬 Помощь"),
+        ],
+        [
+            KeyboardButton(text="🔐 Политика"),
+            KeyboardButton(text="⭐️ Расширенная версия"),
+        ],
+    ],
+    resize_keyboard=True,
+)
 
 router = Router(name="menu")
 
-USER_ID = 1  # пока один пользователь — этого достаточно
+
+# --- Обработчик "Мой прогресс" -------------------------------------------
 
 
-# /start — приветствие и показ меню
-@router.message(CommandStart())
-async def cmd_start(message: Message) -> None:
-    text = (
-        "Привет! Я <b>🎭 Элайя · Тренер сцены</b>.\n\n"
-        "Я здесь, чтобы поддерживать твой ритм практики:\n"
-        "короткие тренировки, честная рефлексия и мягкое сопровождение.\n\n"
-        "Нажми <b>«🎭 Тренировка дня»</b>, когда будешь готов."
-    )
-    await message.answer(text, reply_markup=MAIN_MENU)
-
-
-# /menu — просто показать главное меню
-@router.message(Command("menu"))
-async def cmd_menu(message: Message) -> None:
-    await message.answer("Главное меню открыто 👇", reply_markup=MAIN_MENU)
-
-
-# 📈 Мой прогресс
 @router.message(F.text == "📈 Мой прогресс")
-async def btn_progress(message: Message) -> None:
-    stats = get_stats(USER_ID)
-    total = stats.get("total", 0)
-    by_date: dict[str, int] = stats.get("by_date", {})
+async def handle_progress(message: Message) -> None:
+    """
+    Показываем простой прогресс по локальным данным тренера.
+    (Для локального запуска — JSON в trainer/app/data/training_progress.json)
+    """
+    stats = get_progress_summary(user_id=1)  # пока один пользователь
 
-    today = date.today()
+    total = stats["total_days"]
+    streak = stats["current_streak"]
+    last_date = stats["last_date"]
 
-    # считаем серию — сколько подряд дней до сегодня были тренировки
-    streak = 0
-    for i in range(0, 30):  # максимум смотрим 30 дней назад
-        d = today - timedelta(days=i)
-        if by_date.get(d.isoformat(), 0) > 0:
-            streak += 1
-        else:
-            break
+    lines = [
+        f"Всего завершено тренировок: {total}",
+        f"Текущая серия по дням: {streak}",
+    ]
 
-    # собираем мини-календарь за последние 7 дней
-    lines: list[str] = []
-    for i in range(6, -1, -1):
-        d = today - timedelta(days=i)
-        iso = d.isoformat()
-        count = by_date.get(iso, 0)
+    if last_date:
+        lines.append(f"Последний завершённый день: {last_date}")
+    else:
+        lines.append("Пока ещё нет завершённых тренировок.")
 
-        mark = "✅" if count > 0 else "—"
-        label = d.strftime("%d.%m")
-        if i == 0:
-            label += " (сегодня)"
+    lines.append("")
+    lines.append("Даже одна короткая тренировка в день — уже движение вперёд.")
 
-        suffix = "" if count <= 1 else f" ×{count}"
-        lines.append(f"{label}: {mark}{suffix}")
-
-    calendar_block = "\n".join(lines)
-
-    text = (
-        "📈 <b>Твой прогресс</b>\n\n"
-        f"Всего завершено тренировок: <b>{total}</b>\n"
-        f"Текущая серия по дням: <b>{streak}</b>\n\n"
-        "<b>Последние 7 дней:</b>\n"
-        f"{calendar_block}\n\n"
-        "Даже одна короткая тренировка в день — уже движение вперёд."
-    )
-
-    await message.answer(text, reply_markup=MAIN_MENU)
+    await message.answer("\n".join(lines), reply_markup=MAIN_MENU)
 
 
-# 💬 Помощь
+# --- Обработчик 'Помощь' --------------------------------------------------
+
+
 @router.message(F.text == "💬 Помощь")
-async def btn_help(message: Message) -> None:
-    text = (
-        "💬 <b>Помощь</b>\n\n"
-        "— Нажимай <b>«🎭 Тренировка дня»</b>, когда хочешь пройти короткую практику.\n"
-        "— После практики я помогу зафиксировать состояние и маленький шаг.\n"
-        "— Через <b>«📈 Мой прогресс»</b> можно смотреть, как ты держишь ритм.\n\n"
-        "Если что-то сломалось или есть идеи — просто напиши мне сюда текстом."
+async def handle_help(message: Message) -> None:
+    await message.answer(
+        "Я — тренер сцены Элайи.\n\n"
+        "Нажимай «🎭 Тренировка дня», проходи шаги и в конце пиши короткое "
+        "финальное слово. Кнопка «📈 Мой прогресс» покажет общую динамику.\n\n"
+        "Остальные кнопки пока-заглушки и будут постепенно наполняться.",
+        reply_markup=MAIN_MENU,
     )
-    await message.answer(text, reply_markup=MAIN_MENU)
 
 
-# 🔐 Политика
+# --- Обработчик 'Политика' -----------------------------------------------
+
+
 @router.message(F.text == "🔐 Политика")
-async def btn_policy(message: Message) -> None:
-    text = (
-        "🔐 <b>Политика тренера</b>\n\n"
-        "— Я не собираю и не анализирую личные данные вне тренировок.\n"
-        "— Всё, что ты пишешь, используется только для улучшения практики\n"
-        "  и отражения в твоём личном прогрессе.\n\n"
-        "Если появится отдельная публичная политика — ссылка появится здесь."
+async def handle_policy(message: Message) -> None:
+    await message.answer(
+        "Политика конфиденциальности:\n\n"
+        "Все ответы тренировки используются только для твоего прогресса "
+        "и развития проекта Элайи. Никаких публичных публикаций без "
+        "твоего отдельного согласия.",
+        reply_markup=MAIN_MENU,
     )
-    await message.answer(text, reply_markup=MAIN_MENU)
 
 
-# ⭐️ Расширенная версия
+# --- Обработчик 'Расширенная версия' --------------------------------------
+
+
 @router.message(F.text == "⭐️ Расширенная версия")
-async def btn_extended(message: Message) -> None:
-    text = (
-        "⭐️ <b>Расширенная версия Элайя · Тренер</b>\n\n"
-        "Здесь появятся:\n"
-        "— индивидуальные программы\n"
-        "— сцены и модули под разные задачи\n"
-        "— глубокие разборы практики и прогресса\n\n"
-        "Пока это в разработке. Ты уже на базовом уровне, который станет ядром."
+async def handle_pro(message: Message) -> None:
+    await message.answer(
+        "Расширенная версия тренера пока в разработке.\n"
+        "Здесь появятся дополнительные форматы тренировок и сцены.",
+        reply_markup=MAIN_MENU,
     )
-    await message.answer(text, reply_markup=MAIN_MENU)
