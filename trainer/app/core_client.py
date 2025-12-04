@@ -6,18 +6,13 @@ from typing import Any, Dict, Optional
 
 import httpx
 
-# URL ядра (web-сервиса)
 CORE_URL = os.getenv("TRAINER_CORE_URL", "").rstrip("/")
-# Ключ охраны для мутирующих запросов (POST /api/event)
 GUARD_KEY = os.getenv("TRAINER_GUARD_KEY", "").strip()
 
 
 async def send_timeline_event(scene: str, payload: Optional[Dict[str, Any]] = None) -> None:
     """
-    Асинхронная отправка события тренера в таймлайн ядра Элайи.
-
-    Используется для всех сцен тренировки:
-    - trainer:day:start / intro_done / reflect / transition / review / finish
+    Асинхронная отправка события тренера в ядро Элайи.
     """
     if not CORE_URL:
         print("WARN: TRAINER_CORE_URL not set")
@@ -54,7 +49,7 @@ async def fetch_progress(user_id: int, limit: int = 7) -> Dict[str, Any]:
         "user_id": 123,
         "total_days": 3,
         "last_date": {...} | {},
-        "days": [ {...}, ... ]
+        "days": [{...}, ...]
     }
     """
     if not CORE_URL:
@@ -73,6 +68,9 @@ async def fetch_progress(user_id: int, limit: int = 7) -> Dict[str, Any]:
             r = await client.get(url, params=params)
             r.raise_for_status()
             return r.json()
+    except httpx.HTTPStatusError as e:
+        print(f"ERROR: fetch_progress HTTP {e.response.status_code} for url={e.request.url}")
+        return {}
     except httpx.RequestError as e:
-        print(f"ERROR: failed to fetch progress for {user_id}: {e!r}")
+        print(f"ERROR: fetch_progress request error {e!r}")
         return {}

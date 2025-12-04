@@ -78,50 +78,32 @@ async def handle_progress(message: Message) -> None:
 
     total_days = data.get("total_days", 0)
     last_date = data.get("last_date") or {}
-    days_raw = data.get("days") or {}
+    days = data.get("days") or []
 
     lines: list[str] = []
 
     lines.append("📈 <b>Твой прогресс</b>")
     lines.append("")
-
-    if total_days <= 0:
-        lines.append("Пока нет завершённых тренировок.")
-        lines.append("Нажимай «🎭 Тренировка дня», чтобы начать.")
-        await message.answer("\n".join(lines), reply_markup=MAIN_MENU)
-        return
-
     lines.append(f"Всего тренированных дней: <b>{total_days}</b>")
 
-    # last_date может быть либо словарём, либо пустым {}
     ld_date = last_date.get("date") if isinstance(last_date, dict) else None
     if ld_date:
         lines.append(f"Последняя тренировка: <b>{ld_date}</b>")
 
-    # Универсальная обработка: поддерживаем и dict, и list
-    days_list: list[dict] = []
-    if isinstance(days_raw, dict):
-        # формат: {"2025-12-04": {...}, ...}
-        for d, v in sorted(days_raw.items(), reverse=True):
-            day_data = dict(v or {})
-            day_data.setdefault("date", d)
-            days_list.append(day_data)
-    elif isinstance(days_raw, list):
-        days_list = [d for d in days_raw if isinstance(d, dict)]
-
-    if days_list:
+    if days:
         lines.append("")
         lines.append("Последние дни:")
 
-        for day in days_list:
-            d_date = day.get("date", "—")
+        for day in days:
+            if not isinstance(day, dict):
+                continue
 
+            d_date = day.get("date", "—")
             vector = day.get("vector") or "—"
             reflect = day.get("reflect") or "—"
             transition = day.get("transition") or "—"
             review = day.get("review") or "—"
 
-            # один блок на день
             lines.append(
                 f"\n🗓 <b>{d_date}</b>\n"
                 f"  🎯 Вектор: {vector}\n"
@@ -129,6 +111,12 @@ async def handle_progress(message: Message) -> None:
                 f"  🔁 Шаг: {transition}\n"
                 f"  📝 Слово дня: {review}"
             )
+    else:
+        lines.append("")
+        lines.append(
+            "Пока нет завершённых тренировок. "
+            "Нажимай «🎭 Тренировка дня», чтобы начать."
+        )
 
     await message.answer(
         "\n".join(lines),
@@ -144,7 +132,7 @@ async def handle_help(message: Message) -> None:
         "Я веду тренировки сцены в формате короткой рефлексии.\n"
         "• «🎭 Тренировка дня» — 4 шага (вход, отражение, шаг, финальное слово).\n"
         "• «📈 Мой прогресс» — сводка по дням.\n"
-        "Расширенная версия — в разработке.",
+        "⭐️ Расширенная версия» — в разработке.",
         reply_markup=MAIN_MENU,
     )
 

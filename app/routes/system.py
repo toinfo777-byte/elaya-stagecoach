@@ -1,4 +1,3 @@
-# app/routes/system.py
 from __future__ import annotations
 
 from datetime import datetime, timezone
@@ -10,14 +9,13 @@ from fastapi import APIRouter, Header, HTTPException, Query
 from pydantic import BaseModel
 
 from app.core.timeline import add_event, get_timeline
+from app.training_progress import get_progress_summary  # 👈 прогресс тренера
 
 router = APIRouter(prefix="/api", tags=["api"])
 
 logger = logging.getLogger(__name__)
 
-# --------------------------------------------------------------
-# ENV
-# --------------------------------------------------------------
+# --- ENV ---------------------------------------------------------
 
 GUARD_KEY = os.getenv("GUARD_KEY", "").strip()
 ENV = os.getenv("ENV", "dev")
@@ -47,7 +45,7 @@ def _check_guard(x_guard_key: Optional[str]) -> None:
 
 
 # --------------------------------------------------------------
-# МОДЕЛЬ СОБЫТИЯ
+# МОДЕЛЬ ДЛЯ СОБЫТИЙ ТАЙМЛАЙНА
 # --------------------------------------------------------------
 
 class TimelineEvent(BaseModel):
@@ -93,7 +91,29 @@ def api_timeline(
 
 
 # --------------------------------------------------------------
-# ПОИСК ПОСЛЕДНЕГО trainer-СОБЫТИЯ
+# ПРОГРЕСС ТРЕНЕРА
+# --------------------------------------------------------------
+
+@router.get("/trainer/progress")
+def api_trainer_progress(
+    user_id: int = Query(..., ge=1),
+    limit: int = Query(7, ge=1, le=30),
+) -> Dict[str, Any]:
+    """
+    Сводка прогресса по дням для конкретного пользователя.
+    """
+    summary = get_progress_summary(user_id=user_id, limit=limit)
+
+    # summary уже возвращает dict нужного формата,
+    # просто гарантируем статус.
+    summary.setdefault("status", "ok")
+    summary.setdefault("user_id", user_id)
+
+    return summary
+
+
+# --------------------------------------------------------------
+# ВНУТРЕННИЙ HEALTH CHECK
 # --------------------------------------------------------------
 
 def _get_last_trainer_event() -> Dict[str, Any]:
@@ -107,19 +127,18 @@ def _get_last_trainer_event() -> Dict[str, Any]:
     return {}
 
 
-# --------------------------------------------------------------
-# HEALTH CHECK
-# --------------------------------------------------------------
-
 @router.get("/health")
 def api_health() -> Dict[str, Any]:
-    """Внутренний health-check ядра Элайи."""
+    """
+    Внутренний health-check ядра Элайи.
+    """
     now = datetime.now(timezone.utc)
 
     last_trainer = _get_last_trainer_event()
     trainer_block: Dict[str, Any] = {"has_events": False}
 
     if last_trainer:
+        # сначала пробуем ts_utc, если нет — берём ts
         trainer_ts_raw = last_trainer.get("ts_utc") or last_trainer.get("ts")
 
         trainer_ts = None
@@ -147,15 +166,18 @@ def api_health() -> Dict[str, Any]:
         "mode": MODE,
         "image_tag": IMAGE_TAG,
         "guard_enabled": bool(GUARD_KEY),
-        "web": {"status": "ok"},
+        "web": {
+            "status": "ok",
+        },
         "trainer": trainer_block,
     }
 
 
 # --------------------------------------------------------------
-# `/healthz` — короткий alias
+# КОРОТКИЙ HEALTH CHECK (для Render)
 # --------------------------------------------------------------
 
 @router.get("/healthz")
 def api_healthz() -> Dict[str, Any]:
+    """Технический alias для оркестраторов."""
     return api_health()
