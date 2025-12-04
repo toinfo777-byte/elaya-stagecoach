@@ -198,5 +198,11 @@
     "payload": {
       "user_id": 1
     }
+  },
+  {
+    "ts": "2025-12-04T11:58:11.174854+00:00",
+    "source": "manual",
+    "scene": "test",
+    "payload": {}
   }
 ]

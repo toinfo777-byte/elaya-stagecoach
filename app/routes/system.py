@@ -21,8 +21,9 @@ MODE = os.getenv("MODE", "dev")
 IMAGE_TAG = os.getenv("IMAGE_TAG", "dev")
 
 
-# --------- GUARD ----------------------------------------------------
-
+# --------------------------------------------------------------
+# GUARD
+# --------------------------------------------------------------
 
 def _check_guard(x_guard_key: Optional[str]) -> None:
     """
@@ -41,8 +42,9 @@ def _check_guard(x_guard_key: Optional[str]) -> None:
         raise HTTPException(status_code=403, detail="Forbidden")
 
 
-# --------- МОДЕЛИ ДЛЯ ТАЙМЛАЙНА ------------------------------------
-
+# --------------------------------------------------------------
+# МОДЕЛЬ ДЛЯ СОБЫТИЙ ТАЙМЛАЙНА
+# --------------------------------------------------------------
 
 class TimelineEvent(BaseModel):
     source: str
@@ -50,8 +52,9 @@ class TimelineEvent(BaseModel):
     payload: Dict[str, Any] = {}
 
 
-# --------- API: ПРИЁМ СОБЫТИЙ ОТ ТРЕНЕРА / ДРУГИХ УЗЛОВ ------------
-
+# --------------------------------------------------------------
+# ПРИЁМ СОБЫТИЙ
+# --------------------------------------------------------------
 
 @router.post("/event")
 def api_event(
@@ -73,27 +76,24 @@ def api_event(
     return {"status": "ok"}
 
 
-# --------- API: ЧТЕНИЕ ТАЙМЛАЙНА ------------------------------------
-
+# --------------------------------------------------------------
+# ЧТЕНИЕ ТАЙМЛАЙНА
+# --------------------------------------------------------------
 
 @router.get("/timeline")
 def api_timeline(
     limit: int = Query(100, ge=1, le=1000),
 ) -> List[Dict[str, Any]]:
-    """
-    Вернуть последние события таймлайна.
-    """
+    """Вернуть последние события таймлайна."""
     return get_timeline(limit=limit)
 
 
-# --------- ВНУТРЕННЕЕ ЗДОРОВЬЕ СИСТЕМЫ ------------------------------
-
+# --------------------------------------------------------------
+# ВНУТРЕННИЙ HEALTH CHECK
+# --------------------------------------------------------------
 
 def _get_last_trainer_event() -> Dict[str, Any]:
-    """
-    Находит последнее событие с source == 'trainer' в таймлайне.
-    Если событий нет — возвращает пустой словарь.
-    """
+    """Находит последнее событие с source == 'trainer'."""
     events = get_timeline(limit=200)
 
     for ev in reversed(events):
@@ -107,13 +107,6 @@ def _get_last_trainer_event() -> Dict[str, Any]:
 def api_health() -> Dict[str, Any]:
     """
     Внутренний health-check ядра Элайи.
-
-    Не требует GUARD_KEY — можно дергать из браузера.
-    Даёт сводку:
-    - текущее время
-    - env/mode/image_tag
-    - краткий статус web
-    - информация о последних событиях тренера
     """
     now = datetime.now(timezone.utc)
 
@@ -121,11 +114,15 @@ def api_health() -> Dict[str, Any]:
     trainer_block: Dict[str, Any] = {"has_events": False}
 
     if last_trainer:
-        trainer_ts_raw = last_trainer.get("ts_utc")
-        try:
-            trainer_ts = datetime.fromisoformat(trainer_ts_raw)
-        except Exception:
-            trainer_ts = None
+        # сначала пробуем ts_utc, если нет — берём ts
+        trainer_ts_raw = last_trainer.get("ts_utc") or last_trainer.get("ts")
+
+        trainer_ts = None
+        if isinstance(trainer_ts_raw, str):
+            try:
+                trainer_ts = datetime.fromisoformat(trainer_ts_raw)
+            except Exception:
+                trainer_ts = None
 
         trainer_block = {
             "has_events": True,
@@ -134,7 +131,7 @@ def api_health() -> Dict[str, Any]:
             "last_timestamp": trainer_ts_raw,
         }
 
-        if trainer_ts is not None and trainer_ts.tzinfo is not None:
+        if trainer_ts and trainer_ts.tzinfo:
             delta = now - trainer_ts
             trainer_block["seconds_since_last_event"] = int(delta.total_seconds())
 
@@ -150,3 +147,13 @@ def api_health() -> Dict[str, Any]:
         },
         "trainer": trainer_block,
     }
+
+
+# --------------------------------------------------------------
+# КОРОТКИЙ HEALTH CHECK (для Render)
+# --------------------------------------------------------------
+
+@router.get("/healthz")
+def api_healthz() -> Dict[str, Any]:
+    """Технический alias для оркестраторов."""
+    return api_health()
