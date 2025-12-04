@@ -37,7 +37,7 @@ def add_training_day(user_id: int, d: date | None = None) -> None:
     _save_data(data)
 
 
-def get_progress_summary(user_id: int) -> Dict[str, Any]:
+def get_progress_summary(user_id: int, limit: int = 7) -> dict:
     data = _load_data()
     key = str(user_id)
     day_strings = data.get(key, [])
