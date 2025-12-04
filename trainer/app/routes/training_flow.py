@@ -1,9 +1,14 @@
+# trainer/app/routes/training_flow.py
+from __future__ import annotations
+
+from datetime import date
+
 from aiogram import Router, F
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import StatesGroup, State
 from aiogram.types import Message
 
-from ..menu import MAIN_MENU              # ← здесь ДВЕ точки
+from ..menu import MAIN_MENU
 from ..core_client import send_timeline_event
 
 
@@ -34,7 +39,6 @@ class TrainingFlow(StatesGroup):
 async def start_training(message: Message, state: FSMContext) -> None:
     """
     Запуск тренировки дня:
-    - очищаем состояние
     - ставим состояние на ввод "vector"
     - шлём событие trainer.day.start в ядро
     """
@@ -67,8 +71,8 @@ async def handle_vector(message: Message, state: FSMContext) -> None:
     text = (message.text or "").strip()
 
     await state.update_data(vector=text)
-    await state.set_state(TrainingFlow.reflect)
 
+    await state.set_state(TrainingFlow.reflect)
     await message.answer(
         "2️⃣ Теперь отражение.\n\n"
         "Посмотри на свой день / практику со стороны — "
@@ -85,8 +89,8 @@ async def handle_reflect(message: Message, state: FSMContext) -> None:
     text = (message.text or "").strip()
 
     await state.update_data(reflect=text)
-    await state.set_state(TrainingFlow.transition)
 
+    await state.set_state(TrainingFlow.transition)
     await message.answer(
         "3️⃣ Маленький шаг.\n\n"
         "Какой один небольшой переход ты готов сделать после этой тренировки?\n"
@@ -103,8 +107,8 @@ async def handle_transition(message: Message, state: FSMContext) -> None:
     text = (message.text or "").strip()
 
     await state.update_data(transition=text)
-    await state.set_state(TrainingFlow.review)
 
+    await state.set_state(TrainingFlow.review)
     await message.answer(
         "4️⃣ Финальное слово.\n\n"
         "Напиши пару фраз — как тебе эта тренировка, "

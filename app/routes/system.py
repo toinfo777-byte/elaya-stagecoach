@@ -47,7 +47,7 @@ def _check_guard(x_guard_key: Optional[str]) -> None:
 class TimelineEvent(BaseModel):
     source: str
     scene: str
-    payload: Dict[str, Any] = {}  # маленькие payload'ы, тут ок
+    payload: Dict[str, Any] = {}
 
 
 # --------- API: ПРИЁМ СОБЫТИЙ ОТ ТРЕНЕРА / ДРУГИХ УЗЛОВ ------------
@@ -103,17 +103,9 @@ def _get_last_trainer_event() -> Dict[str, Any]:
     return {}
 
 
-@router.get("/health")
-def api_health() -> Dict[str, Any]:
+def _build_health_payload() -> Dict[str, Any]:
     """
-    Внутренний health-check ядра Элайи.
-
-    Не требует GUARD_KEY — можно дергать из коннекторов / браузера.
-    Даёт сводку:
-    - текущее время
-    - env/mode/image_tag
-    - краткий статус web
-    - информация о последних событиях тренера
+    Общая логика health-ответа, используется и /health, и /healthhz.
     """
     now = datetime.now(timezone.utc)
 
@@ -151,3 +143,25 @@ def api_health() -> Dict[str, Any]:
         },
         "trainer": trainer_block,
     }
+
+
+@router.get("/health")
+def api_health() -> Dict[str, Any]:
+    """
+    Внутренний health-check ядра Элайи.
+
+    Не требует GUARD_KEY — можно дергать из коннекторов / браузера.
+    """
+    return _build_health_payload()
+
+
+# --- Для обратной совместимости: старый путь Render'а ----------------
+
+
+@router.get("/healthhz")
+def api_healthhz() -> Dict[str, Any]:
+    """
+    Старый health-эндпоинт для Render'а.
+    Оставляем, чтобы не трогать настройки сервиса.
+    """
+    return _build_health_payload()
