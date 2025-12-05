@@ -1,7 +1,7 @@
 # app/routes/api.py
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timezone, date
 from typing import Any, Dict, List, Optional, Union
 import os
 
@@ -88,28 +88,44 @@ TIMELINE: List[TimelineEvent] = []
 
 
 @router.post("/event")
-async def push_event(
-    event: TimelineEvent,
-    x_guard_key: Optional[str] = Header(default=None, alias="X-Guard-Key"),
-) -> Dict[str, str]:
+async def api_event(
+    ev: TimelineEvent,
+    x_guard_key: Optional[str] = Header(None),
+) -> Dict[str, Any]:
     """
-    Приём событий от тренера / других источников.
-    Это основной вход событий для ядра.
+    Принимаем событие от любых источников (бот, ручные тесты и т.д.),
+    пишем его в таймлайн и, при необходимости, обновляем служебные данные.
     """
     _check_guard(x_guard_key)
 
-    # 1) сохраняем в легаси-таймлайн (для просмотра /api/timeline)
-    TIMELINE.append(event)
+    # 1. Всегда пишем в таймлайн
+    TIMELINE.append(ev)
 
-    # 2) сохраняем в CycleState
     state = CycleState.get()
-    state.append_event(event.source, event.scene, event.payload)
+    state.append_event(ev.source, ev.scene, ev.payload)
 
-    # 3) если тренировка завершена — отмечаем день в прогрессе
-    # ожидаем, что тренер передаёт payload с полем user_id
-    if event.scene == "transition":
-        user_id = int(event.payload.get("user_id", 1))
-        training_progress.add_training_day(user_id)
+    # 2. Хук для тренера: завершаем тренировку дня -> фиксируем тренировочный день
+    if ev.source == "trainer" and ev.scene in ("trainer:done", "trainer.day.finish"):
+        payload = ev.payload or {}
+
+        user_id_raw = payload.get("user_id")
+        date_str = payload.get("date")
+
+        try:
+            uid = int(user_id_raw) if user_id_raw is not None else None
+        except (TypeError, ValueError):
+            uid = None
+
+        if uid is not None:
+            d: Optional[date] = None
+            if date_str:
+                try:
+                    d = date.fromisoformat(date_str)
+                except (TypeError, ValueError):
+                    d = None
+
+            # ✅ Записываем день в training_progress.json
+            training_progress.add_training_day(user_id=uid, d=d)
 
     return {"status": "ok"}
 
@@ -154,6 +170,7 @@ async def post_timeline(
     state = CycleState.get()
     state.append_event(event.source, event.scene, event.payload)
 
+    # Старая логика: если сцена "transition" — считаем это днём тренировки
     if event.scene == "transition":
         user_id = int(event.payload.get("user_id", 1))
         training_progress.add_training_day(user_id)
