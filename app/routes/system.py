@@ -58,22 +58,40 @@ class TimelineEvent(BaseModel):
 # ПРИЁМ СОБЫТИЙ
 # --------------------------------------------------------------
 
+# app/routes/system.py
+
 @router.post("/event")
 def api_event(
     event: TimelineEvent,
-    x_guard_key: Optional[str] = Header(default=None, alias="X-Guard-Key"),
-) -> Dict[str, str]:
+    x_guard_key: Optional[str] = Header(None),
+) -> Dict[str, Any]:
     """
-    Приём события от тренера / других сервисов.
-    Требует корректного X-Guard-Key, если GUARD_KEY задан.
+    Приём события от тренера (и других источников) + запись в таймлайн.
+    Заодно обновляем прогресс тренировки.
     """
+    # защита по ключу
     _check_guard(x_guard_key)
 
+    # 1) пишем событие в таймлайн
     add_event(
         source=event.source,
         scene=event.scene,
-        payload=event.payload,
+        payload=event.payload or {},
     )
+
+    # 2) если это завершение тренировки — фиксируем день в статистике
+    if event.source == "trainer" and event.scene in ("trainer:done", "trainer.day.finish"):
+        payload = event.payload or {}
+
+        raw_user_id = payload.get("user_id")
+        try:
+            user_id = int(raw_user_id) if raw_user_id is not None else 0
+        except (TypeError, ValueError):
+            user_id = 0
+
+        if user_id:
+            # дата по умолчанию = сегодня
+            add_training_day(user_id=user_id)
 
     return {"status": "ok"}
 
