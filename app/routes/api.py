@@ -9,6 +9,7 @@ from fastapi import APIRouter, Header, HTTPException
 from pydantic import BaseModel, Field
 
 from app.core.cycle_state import CycleState
+from app.core.timeline import add_event as core_add_event
 from app import training_progress
 
 router = APIRouter(prefix="/api", tags=["api"])
@@ -88,21 +89,15 @@ TIMELINE: List[TimelineEvent] = []
 
 
 @router.post("/event")
-async def api_event(
-    ev: TimelineEvent,
-    x_guard_key: Optional[str] = Header(None),
-) -> Dict[str, Any]:
+async def api_event(ev: TimelineEvent, x_guard_key: Optional[str] = Header(None)) -> Dict[str, Any]:
     """
     Принимаем событие от любых источников (бот, ручные тесты и т.д.),
     пишем его в таймлайн и, при необходимости, обновляем служебные данные.
     """
     _check_guard(x_guard_key)
 
-    # 1. Всегда пишем в таймлайн
-    TIMELINE.append(ev)
-
-    state = CycleState.get()
-    state.append_event(ev.source, ev.scene, ev.payload)
+    # 1. Всегда пишем в таймлайн (ядро)
+    core_add_event(source=ev.source, scene=ev.scene, payload=ev.payload or {})
 
     # 2. Хук для тренера: завершаем тренировку дня -> фиксируем тренировочный день
     if ev.source == "trainer" and ev.scene in ("trainer:done", "trainer.day.finish"):
@@ -124,7 +119,7 @@ async def api_event(
                 except (TypeError, ValueError):
                     d = None
 
-            # ✅ Записываем день в training_progress.json
+            # Записываем день в training_progress.json
             training_progress.add_training_day(user_id=uid, d=d)
 
     return {"status": "ok"}
@@ -170,7 +165,6 @@ async def post_timeline(
     state = CycleState.get()
     state.append_event(event.source, event.scene, event.payload)
 
-    # Старая логика: если сцена "transition" — считаем это днём тренировки
     if event.scene == "transition":
         user_id = int(event.payload.get("user_id", 1))
         training_progress.add_training_day(user_id)

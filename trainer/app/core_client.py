@@ -13,6 +13,9 @@ GUARD_KEY = os.getenv("TRAINER_GUARD_KEY", "").strip()
 async def send_timeline_event(scene: str, payload: Optional[Dict[str, Any]] = None) -> None:
     """
     Асинхронная отправка события тренера в ядро Элайи.
+
+    ВАЖНО: любые ошибки сети или 5xx от ядра
+    НЕ должны ломать обработку апдейта в боте.
     """
     if not CORE_URL:
         print("WARN: TRAINER_CORE_URL not set")
@@ -33,10 +36,20 @@ async def send_timeline_event(scene: str, payload: Optional[Dict[str, Any]] = No
     try:
         async with httpx.AsyncClient(timeout=10) as client:
             r = await client.post(url, json=data, headers=headers)
+            # здесь могут прилететь 5xx / 4xx
             r.raise_for_status()
             print("Trainer event sent:", scene)
+    except httpx.HTTPStatusError as e:
+        # ядро ответило, но с ошибкой (например, 500, 502, 503)
+        print(
+            f"ERROR: send_timeline_event HTTP {e.response.status_code} "
+            f"for url={e.request.url}, scene={scene}"
+        )
+        # НЕ пробрасываем исключение дальше
     except httpx.RequestError as e:
-        print(f"ERROR: failed to send trainer event {scene}: {e!r}")
+        # проблемы сети, DNS, таймаут и т.п.
+        print(f"ERROR: send_timeline_event request error for scene={scene}: {e!r}")
+        # тоже просто логируем, бот продолжает жить
 
 
 async def fetch_progress(user_id: int, limit: int = 7) -> Dict[str, Any]:
@@ -45,18 +58,17 @@ async def fetch_progress(user_id: int, limit: int = 7) -> Dict[str, Any]:
 
     Ожидаемый ответ ядра (обобщённо):
     {
-        "status": "ok",
         "user_id": 123,
         "total_days": 3,
-        "last_date": {...} | {},
-        "days": [{...}, ...]
+        "current_streak": 2,
+        "last_date": "2025-12-05"
     }
     """
     if not CORE_URL:
         print("WARN: TRAINER_CORE_URL not set")
         return {}
 
-    url = f"{CORE_URL}/api/trainer/progress"
+    url = f"{CORE_URL}/api/progress"
 
     params = {
         "user_id": user_id,

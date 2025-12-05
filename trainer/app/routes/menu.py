@@ -1,146 +1,59 @@
 # trainer/app/routes/menu.py
 from __future__ import annotations
 
-import logging
-
 from aiogram import Router, F
-from aiogram.filters import CommandStart
-from aiogram.fsm.context import FSMContext
-from aiogram.types import (
-    Message,
-    ReplyKeyboardMarkup,
-    KeyboardButton,
+from aiogram.types import Message
+from aiogram.filters import CommandStart  # <-- новый импорт
+
+from .keyboards import (
+    MAIN_MENU,
+    BTN_PROGRESS,
+    BTN_HELP,
+    BTN_PREMIUM,
+    BTN_TRAINING_DAY,
 )
 
-from app.core_client import fetch_progress
-from .training_flow import start_training
-
-router = Router(name="menu")
-logger = logging.getLogger(__name__)
-
-# --- Клавиатура главного меню ------------------------------------
-
-MAIN_MENU = ReplyKeyboardMarkup(
-    keyboard=[
-        [
-            KeyboardButton(text="🎭 Тренировка дня"),
-        ],
-        [
-            KeyboardButton(text="📈 Мой прогресс"),
-            KeyboardButton(text="💬 Помощь"),
-        ],
-        [
-            KeyboardButton(text="⭐️ Расширенная версия"),
-        ],
-    ],
-    resize_keyboard=True,
-)
+router = Router()
 
 
-# --- Старт тренировки --------------------------------------------
-
-@router.message(CommandStart())
-@router.message(F.text == "🎭 Тренировка дня")
-async def handle_start(message: Message, state: FSMContext) -> None:
+@router.message(CommandStart())  # <-- вместо commands={"start"}
+async def cmd_start(message: Message) -> None:
     """
-    /start и кнопка «🎭 Тренировка дня» — запускают сценарий тренировки.
+    Старт бота: просто показываем главное меню.
     """
-    await start_training(message, state)
-
-
-# --- Мой прогресс ------------------------------------------------
-
-@router.message(F.text == "📈 Мой прогресс")
-async def handle_progress(message: Message) -> None:
-    """
-    Кнопка «📈 Мой прогресс» — сводка по недавним тренировкам пользователя.
-    """
-    user_id = message.from_user.id
-
-    try:
-        data = await fetch_progress(user_id=user_id, limit=7)
-    except Exception:
-        logger.exception("Failed to fetch progress for user %s", user_id)
-        await message.answer(
-            "Не получилось получить прогресс.\n"
-            "Попробуй ещё раз чуть позже.",
-            reply_markup=MAIN_MENU,
-        )
-        return
-
-    if not data or data.get("status") != "ok":
-        await message.answer(
-            "Пока не удалось получить прогресс.\n"
-            "Попробуй чуть позже.",
-            reply_markup=MAIN_MENU,
-        )
-        return
-
-    total_days = data.get("total_days", 0)
-    last_date = data.get("last_date") or {}
-    days = data.get("days") or []
-
-    lines: list[str] = []
-
-    lines.append("📈 <b>Твой прогресс</b>")
-    lines.append("")
-    lines.append(f"Всего тренированных дней: <b>{total_days}</b>")
-
-    ld_date = last_date.get("date") if isinstance(last_date, dict) else None
-    if ld_date:
-        lines.append(f"Последняя тренировка: <b>{ld_date}</b>")
-
-    if days:
-        lines.append("")
-        lines.append("Последние дни:")
-
-        for day in days:
-            if not isinstance(day, dict):
-                continue
-
-            d_date = day.get("date", "—")
-            vector = day.get("vector") or "—"
-            reflect = day.get("reflect") or "—"
-            transition = day.get("transition") or "—"
-            review = day.get("review") or "—"
-
-            lines.append(
-                f"\n🗓 <b>{d_date}</b>\n"
-                f"  🎯 Вектор: {vector}\n"
-                f"  🪞 Отражение: {reflect}\n"
-                f"  🔁 Шаг: {transition}\n"
-                f"  📝 Слово дня: {review}"
-            )
-    else:
-        lines.append("")
-        lines.append(
-            "Пока нет завершённых тренировок. "
-            "Нажимай «🎭 Тренировка дня», чтобы начать."
-        )
-
     await message.answer(
-        "\n".join(lines),
+        "Элайя — Тренер сцены.\n\n"
+        "Нажимай «🎭 Тренировка дня», чтобы пройти сегодняшнюю настройку.\n"
+        "Или выбери другую кнопку внизу.",
         reply_markup=MAIN_MENU,
     )
 
 
-# --- Помощь и расширенная версия (заглушки) ----------------------
-
-@router.message(F.text == "💬 Помощь")
-async def handle_help(message: Message) -> None:
+@router.message(F.text == BTN_PROGRESS)
+async def show_progress_entry(message: Message) -> None:
+    # пока просто заглушка, чтобы бот не молчал
     await message.answer(
-        "Я веду тренировки сцены в формате короткой рефлексии.\n"
-        "• «🎭 Тренировка дня» — 4 шага (вход, отражение, шаг, финальное слово).\n"
-        "• «📈 Мой прогресс» — сводка по дням.\n"
-        "⭐️ Расширенная версия» — в разработке.",
+        "Я пока считаю твой прогресс, но API ядра уже подключено. "
+        "Скоро здесь будет красивая сводка ❤️",
         reply_markup=MAIN_MENU,
     )
 
 
-@router.message(F.text == "⭐️ Расширенная версия")
-async def handle_extended(message: Message) -> None:
+@router.message(F.text == BTN_HELP)
+async def show_help(message: Message) -> None:
     await message.answer(
-        "Расширенная версия ещё в разработке.\n"
-        "Когда она появится — ты узнаешь об этом здесь.",
+        "Помощь тренера.\n\n"
+        "1) Нажимаешь «🎭 Тренировка дня».\n"
+        "2) Отвечаешь честно на 4 вопроса.\n"
+        "3) Я фиксирую твой день и возвращаю в главное меню.",
+        reply_markup=MAIN_MENU,
+    )
+
+
+@router.message(F.text == BTN_PREMIUM)
+async def premium_stub(message: Message) -> None:
+    await message.answer(
+        "⭐️ Расширенная версия ещё в разработке.\n"
+        "Ты уже в ядре проекта Элайи, так что увидишь её одним из первых.",
         reply_markup=MAIN_MENU,
     )
