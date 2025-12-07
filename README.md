@@ -6,6 +6,12 @@
 
 <!-- ELAYA_PULSE_LINK -->
 
+[Пульс · 2025-12-06](docs/hq/pulse/2025/12/2025-12-06.md)
+
+
+[Пульс · 2025-12-05](docs/hq/pulse/2025/12/2025-12-05.md)
+
+
 [Пульс · 2025-12-04](docs/hq/pulse/2025/12/2025-12-04.md)
 
 
@@ -99,5 +105,5 @@
 [Пульс · 2025-11-04](docs/hq/pulse/2025/11/2025-11-04.md)
 
 <!-- HQ_PULSE:START -->
-🪶 **Last Pulse** → [HQ_Pulse_2025-12-05.md](https://github.com/toinfo777-byte/elaya-stagecoach/blob/develop/docs/hq/pulse/HQ_Pulse_2025-12-05.md)
+🪶 **Last Pulse** → [HQ_Pulse_2025-12-07.md](https://github.com/toinfo777-byte/elaya-stagecoach/blob/develop/docs/hq/pulse/HQ_Pulse_2025-12-07.md)
 <!-- HQ_PULSE:END -->
