@@ -13,7 +13,7 @@ class Settings(BaseSettings):
     )
 
     # Telegram
-    tg_bot_token: str
+    tg_bot_token: str = ""  # без токена
 
     # Связь с ядром (Stagecoach Web)
     trainer_core_url: str = ""

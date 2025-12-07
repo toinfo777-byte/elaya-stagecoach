@@ -1,111 +1,121 @@
 from __future__ import annotations
 
 from datetime import date
+from typing import Any, Dict
 
 from aiogram import Router, F
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import StatesGroup, State
 from aiogram.types import Message
 
-from app.core_client import send_timeline_event, fetch_progress
-from .keyboards import MAIN_MENU, BTN_TRAINING_DAY
+from app.core_client import send_timeline_event
+from .menu import MAIN_MENU
 
 router = Router()
 
 
+# --- FSM состояния ------------------------------------------------------------
+
 class TrainingFlow(StatesGroup):
-    vector = State()      # 1. Вхождение в день
-    reflect = State()     # 2. Отражение
-    transition = State()  # 3. Маленький шаг
-    review = State()      # 4. Финальное слово
+    intro = State()      # 1. Вход в день
+    reflect = State()    # 2. Отражение
+    step = State()       # 3. Маленький шаг
+    review = State()     # 4. Финальное слово
 
 
-# --- Старт тренировки -----------------------------------------------------
+# --- Старт тренировки ---------------------------------------------------------
 
 
-@router.message(F.text == BTN_TRAINING_DAY)
+@router.message(F.text == "🎭 Тренировка дня")
 async def start_training(message: Message, state: FSMContext) -> None:
     """
-    Старт тренировки дня.
+    Точка входа в дневную тренировку.
     """
-    # на всякий случай чистим старое состояние
+    # Сбрасываем возможные старые состояния
     await state.clear()
 
+    # Телеметрия в ядро (если настроено)
     await send_timeline_event(
-        scene="trainer.day.start",
-        payload={"user_id": message.from_user.id},
+        "trainer.day.start",
+        payload={
+            "user_id": message.from_user.id if message.from_user else None,
+            "date": date.today().isoformat(),
+        },
     )
+
+    await state.set_state(TrainingFlow.intro)
 
     await message.answer(
         "Старт тренировки дня.\n\n"
         "1️⃣ Коротко напиши — в каком состоянии ты входишь в день.\n"
-        "Что сейчас главное в тебе / в поле?"
+        "Что сейчас главное в тебе / в поле?",
     )
 
-    await state.set_state(TrainingFlow.vector)
+
+# --- 1. Вход в день -----------------------------------------------------------
 
 
-# --- Вопрос 1 -------------------------------------------------------------
+@router.message(TrainingFlow.intro)
+async def handle_intro(message: Message, state: FSMContext) -> None:
+    text = (message.text or "").strip()
 
+    await state.update_data(vector=text)
 
-@router.message(TrainingFlow.vector)
-async def handle_vector(message: Message, state: FSMContext) -> None:
-    await state.update_data(vector=message.text.strip())
-
+    await state.set_state(TrainingFlow.reflect)
     await message.answer(
         "2️⃣ Теперь отражение.\n\n"
         "Посмотри на свой день / практику со стороны — "
-        "что ты видишь о себе, о движении, о качестве присутствия?"
+        "что ты видишь о себе, о движении, о качестве присутствия?",
     )
 
-    await state.set_state(TrainingFlow.reflect)
 
-
-# --- Вопрос 2 -------------------------------------------------------------
+# --- 2. Отражение -------------------------------------------------------------
 
 
 @router.message(TrainingFlow.reflect)
 async def handle_reflect(message: Message, state: FSMContext) -> None:
-    await state.update_data(reflect=message.text.strip())
+    text = (message.text or "").strip()
 
+    await state.update_data(reflect=text)
+
+    await state.set_state(TrainingFlow.step)
     await message.answer(
         "3️⃣ Маленький шаг.\n\n"
         "Какой один небольшой переход ты готов сделать после этой тренировки?\n"
-        "Что можно изменить уже сегодня — на 1–2 шага?"
+        "Что можно изменить уже сегодня — на 1–2 шага?",
     )
 
-    await state.set_state(TrainingFlow.transition)
+
+# --- 3. Маленький шаг ---------------------------------------------------------
 
 
-# --- Вопрос 3 -------------------------------------------------------------
+@router.message(TrainingFlow.step)
+async def handle_step(message: Message, state: FSMContext) -> None:
+    text = (message.text or "").strip()
 
+    await state.update_data(transition=text)
 
-@router.message(TrainingFlow.transition)
-async def handle_transition(message: Message, state: FSMContext) -> None:
-    await state.update_data(transition=message.text.strip())
-
+    await state.set_state(TrainingFlow.review)
     await message.answer(
         "4️⃣ Финальное слово.\n\n"
         "Напиши пару фраз — как тебе эта тренировка, "
-        "в каком состоянии ты выходишь."
+        "в каком состоянии ты выходишь.",
     )
 
-    await state.set_state(TrainingFlow.review)
 
-
-# --- Вопрос 4 + завершение -----------------------------------------------
+# --- 4. Финальное слово + завершение -----------------------------------------
 
 
 @router.message(TrainingFlow.review)
 async def handle_review(message: Message, state: FSMContext) -> None:
-    review = message.text.strip()
-    data = await state.get_data()
+    review = (message.text or "").strip()
+    data: Dict[str, Any] = await state.get_data()
 
-    user_id = message.from_user.id
+    user_id = message.from_user.id if message.from_user else 0
 
-    # фиксируем тренировку в ядре
+    # Отправляем всё ядру (оно уже само решит, как сохранять)
     await send_timeline_event(
-        scene="trainer.day.finish",
+        "trainer.day.finish",
         payload={
             "user_id": user_id,
             "date": date.today().isoformat(),

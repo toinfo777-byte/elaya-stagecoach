@@ -1,24 +1,25 @@
-# trainer/app/core_client.py
 from __future__ import annotations
 
-import os
+import logging
 from typing import Any, Dict, Optional
 
 import httpx
 
-CORE_URL = os.getenv("TRAINER_CORE_URL", "").rstrip("/")
-GUARD_KEY = os.getenv("TRAINER_GUARD_KEY", "").strip()
+from app.config import settings
+
+logger = logging.getLogger(__name__)
+
+# Берём адрес ядра и guard-ключ из Settings
+CORE_URL = (settings.trainer_core_url or "").rstrip("/")
+GUARD_KEY = settings.trainer_guard_key or ""
 
 
 async def send_timeline_event(scene: str, payload: Optional[Dict[str, Any]] = None) -> None:
     """
     Асинхронная отправка события тренера в ядро Элайи.
-
-    ВАЖНО: любые ошибки сети или 5xx от ядра
-    НЕ должны ломать обработку апдейта в боте.
     """
     if not CORE_URL:
-        print("WARN: TRAINER_CORE_URL not set")
+        logger.warning("TRAINER_CORE_URL not set — skip send_timeline_event(%s)", scene)
         return
 
     url = f"{CORE_URL}/api/event"
@@ -34,55 +35,34 @@ async def send_timeline_event(scene: str, payload: Optional[Dict[str, Any]] = No
     }
 
     try:
-        async with httpx.AsyncClient(timeout=10) as client:
+        async with httpx.AsyncClient(timeout=10.0) as client:
             r = await client.post(url, json=data, headers=headers)
-            # здесь могут прилететь 5xx / 4xx
             r.raise_for_status()
-            print("Trainer event sent:", scene)
-    except httpx.HTTPStatusError as e:
-        # ядро ответило, но с ошибкой (например, 500, 502, 503)
-        print(
-            f"ERROR: send_timeline_event HTTP {e.response.status_code} "
-            f"for url={e.request.url}, scene={scene}"
-        )
-        # НЕ пробрасываем исключение дальше
-    except httpx.RequestError as e:
-        # проблемы сети, DNS, таймаут и т.п.
-        print(f"ERROR: send_timeline_event request error for scene={scene}: {e!r}")
-        # тоже просто логируем, бот продолжает жить
+            logger.info("Trainer event sent: %s", scene)
+    except Exception as e:  # noqa: BLE001
+        logger.exception("Failed to send trainer event %s: %s", scene, e)
 
+
+async def fetch_progress() -> str:
+    """
+    Временная заглушка, чтобы кнопка 'Мой прогресс' работала локально.
+    потом она будет заменена на запрос в ядро.
+    """
+    return "Пока я не подключён к ядру. Но прогресс скоро появится ✨"
+
+from typing import Any, Dict
+
+# ...
 
 async def fetch_progress(user_id: int, limit: int = 7) -> Dict[str, Any]:
     """
-    Получить сводку прогресса пользователя из ядра.
-
-    Ожидаемый ответ ядра (обобщённо):
-    {
-        "user_id": 123,
-        "total_days": 3,
-        "current_streak": 2,
-        "last_date": "2025-12-05"
-    }
+    Временная заглушка для кнопки «Мой прогресс».
+    Потом здесь будет запрос в ядро (Stagecoach Web).
     """
-    if not CORE_URL:
-        print("WARN: TRAINER_CORE_URL not set")
-        return {}
-
-    url = f"{CORE_URL}/api/progress"
-
-    params = {
+    # Минимальный набор данных, с которым форматтер прогресса точно не сломается.
+    return {
         "user_id": user_id,
-        "limit": limit,
+        "total_days": 0,
+        "completed_days": 0,
+        "recent_days": [],
     }
-
-    try:
-        async with httpx.AsyncClient(timeout=10) as client:
-            r = await client.get(url, params=params)
-            r.raise_for_status()
-            return r.json()
-    except httpx.HTTPStatusError as e:
-        print(f"ERROR: fetch_progress HTTP {e.response.status_code} for url={e.request.url}")
-        return {}
-    except httpx.RequestError as e:
-        print(f"ERROR: fetch_progress request error {e!r}")
-        return {}

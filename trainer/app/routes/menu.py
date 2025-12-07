@@ -1,25 +1,38 @@
-# trainer/app/routes/menu.py
 from __future__ import annotations
 
-from aiogram import Router, F
-from aiogram.types import Message
-from aiogram.filters import CommandStart  # <-- новый импорт
+from typing import Any, Dict
 
-from .keyboards import (
-    MAIN_MENU,
-    BTN_PROGRESS,
-    BTN_HELP,
-    BTN_PREMIUM,
-    BTN_TRAINING_DAY,
-)
+from aiogram import Router, F
+from aiogram.filters import CommandStart
+from aiogram.types import Message, ReplyKeyboardMarkup, KeyboardButton
+
+from app.core_client import fetch_progress
 
 router = Router()
 
 
-@router.message(CommandStart())  # <-- вместо commands={"start"}
+# --- Клавиатура ---------------------------------------------------------------
+
+MAIN_MENU = ReplyKeyboardMarkup(
+    keyboard=[
+        [KeyboardButton(text="🎭 Тренировка дня")],
+        [
+            KeyboardButton(text="📈 Мой прогресс"),
+            KeyboardButton(text="💬 Помощь"),
+        ],
+        [KeyboardButton(text="⭐️ Расширенная версия")],
+    ],
+    resize_keyboard=True,
+)
+
+
+# --- Хендлеры -----------------------------------------------------------------
+
+
+@router.message(CommandStart())
 async def cmd_start(message: Message) -> None:
     """
-    Старт бота: просто показываем главное меню.
+    Стартовое приветствие + показ нижнего меню.
     """
     await message.answer(
         "Элайя — Тренер сцены.\n\n"
@@ -29,31 +42,53 @@ async def cmd_start(message: Message) -> None:
     )
 
 
-@router.message(F.text == BTN_PROGRESS)
-async def show_progress_entry(message: Message) -> None:
-    # пока просто заглушка, чтобы бот не молчал
+@router.message(F.text == "📈 Мой прогресс")
+async def handle_progress(message: Message) -> None:
+    """
+    Краткая сводка прогресса из ядра.
+    Если ядро не настроено / не отвечает — даём мягкий fallback.
+    """
+    user_id = message.from_user.id if message.from_user else 0
+
+    data: Dict[str, Any] = await fetch_progress(user_id=user_id, limit=7)
+    if not data:
+        await message.answer(
+            "Пока я не вижу сохранённых тренировок.\n"
+            "Пройди хотя бы одну — и я начну считать серию.",
+            reply_markup=MAIN_MENU,
+        )
+        return
+
+    total_days = data.get("total_days", 0)
+    current_streak = data.get("current_streak", 0)
+
+    text = (
+        "📈 Твой прогресс:\n\n"
+        f"• Всего тренировочных дней: <b>{total_days}</b>\n"
+        f"• Текущая серия: <b>{current_streak}</b> дней\n\n"
+        "Продолжай в том же духе. Если захочешь — нажимай «🎭 Тренировка дня»."
+    )
+
+    await message.answer(text, reply_markup=MAIN_MENU)
+
+
+@router.message(F.text == "💬 Помощь")
+async def handle_help(message: Message) -> None:
     await message.answer(
-        "Я пока считаю твой прогресс, но API ядра уже подключено. "
-        "Скоро здесь будет красивая сводка ❤️",
+        "Я — тренер практики присутствия.\n\n"
+        "Каждый день я задаю 3 простых вопроса:\n"
+        "1) В каком состоянии ты входишь в день.\n"
+        "2) Как ты видишь свой день со стороны.\n"
+        "3) Какой маленький шаг готов сделать.\n\n"
+        "Нажимай «🎭 Тренировка дня», чтобы пройти настройку.",
         reply_markup=MAIN_MENU,
     )
 
 
-@router.message(F.text == BTN_HELP)
-async def show_help(message: Message) -> None:
+@router.message(F.text == "⭐️ Расширенная версия")
+async def handle_premium(message: Message) -> None:
     await message.answer(
-        "Помощь тренера.\n\n"
-        "1) Нажимаешь «🎭 Тренировка дня».\n"
-        "2) Отвечаешь честно на 4 вопроса.\n"
-        "3) Я фиксирую твой день и возвращаю в главное меню.",
-        reply_markup=MAIN_MENU,
-    )
-
-
-@router.message(F.text == BTN_PREMIUM)
-async def premium_stub(message: Message) -> None:
-    await message.answer(
-        "⭐️ Расширенная версия ещё в разработке.\n"
-        "Ты уже в ядре проекта Элайи, так что увидишь её одним из первых.",
+        "Расширенная версия Элайи пока в разработке.\n"
+        "Ты уже в числе первых, кто тестирует тренера.",
         reply_markup=MAIN_MENU,
     )

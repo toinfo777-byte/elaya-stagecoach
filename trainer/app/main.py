@@ -10,24 +10,25 @@ from app.config import settings
 from app.routes import router as routes_router
 
 
-logging.basicConfig(level=logging.INFO)
-
-
 def _get_bot_token() -> str:
     return settings.tg_bot_token
 
 
 async def main() -> None:
+    logging.basicConfig(level=logging.INFO)
+    logging.getLogger("aiogram").setLevel(logging.INFO)
+
+    logging.warning("=== TRAINER STARTING ===")
+
     bot = Bot(
         token=_get_bot_token(),
         default=DefaultBotProperties(parse_mode="HTML"),
     )
     dp = Dispatcher()
 
-    # Подключаем агрегированный роутер
+    # Подключаем единый роутер
     dp.include_router(routes_router)
 
-    logging.warning("=== TRAINER STARTING ===")
     await dp.start_polling(bot)
 
 
