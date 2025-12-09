@@ -1,21 +1,30 @@
+# trainer/app/routes/__init__.py
 from __future__ import annotations
 
-from fastapi import APIRouter
+from aiogram import Router
 
-from . import system
-from . import ui
-from . import api
+from .menu import router as menu_router
+from .training import router as training_router
+from .training_flow import router as training_flow_router
+from .progress import router as progress_router
+from .feedback import router as feedback_router
+from .extended import router as extended_router
 
-# Корневой роутер ядра
-router = APIRouter()
+from .onboarding import router as onboarding_router
+from .faq import router as faq_router
 
-# системные /api эндпоинты (timeline, event, status и т.п.)
-router.include_router(system.router)
+router = Router(name="trainer-root")
 
-# дополнительные API (пока пустой, но на будущее)
-router.include_router(api.router)
+# Сначала «системные» вещи
+router.include_router(onboarding_router)
 
-# UI-страницы (если есть шаблоны)
-router.include_router(ui.router)
+# Основные сценарии
+router.include_router(menu_router)
+router.include_router(training_router)
+router.include_router(training_flow_router)
+router.include_router(progress_router)
+router.include_router(feedback_router)
+router.include_router(extended_router)
 
-__all__ = ["router"]
+# FAQ / помощь
+router.include_router(faq_router)

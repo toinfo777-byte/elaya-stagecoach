@@ -1,3 +1,4 @@
+# trainer/app/core_client.py
 from __future__ import annotations
 
 import logging
@@ -42,17 +43,6 @@ async def send_timeline_event(scene: str, payload: Optional[Dict[str, Any]] = No
     except Exception as e:  # noqa: BLE001
         logger.exception("Failed to send trainer event %s: %s", scene, e)
 
-
-async def fetch_progress() -> str:
-    """
-    Временная заглушка, чтобы кнопка 'Мой прогресс' работала локально.
-    потом она будет заменена на запрос в ядро.
-    """
-    return "Пока я не подключён к ядру. Но прогресс скоро появится ✨"
-
-from typing import Any, Dict
-
-# ...
 
 async def fetch_progress(user_id: int, limit: int = 7) -> Dict[str, Any]:
     """

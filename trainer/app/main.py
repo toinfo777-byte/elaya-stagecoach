@@ -15,18 +15,15 @@ def _get_bot_token() -> str:
 
 
 async def main() -> None:
-    logging.basicConfig(level=logging.INFO)
-    logging.getLogger("aiogram").setLevel(logging.INFO)
-
     logging.warning("=== TRAINER STARTING ===")
 
     bot = Bot(
         token=_get_bot_token(),
-        default=DefaultBotProperties(parse_mode="HTML"),
+        default=DefaultBotProperties(parse_mode="HTML")
     )
     dp = Dispatcher()
 
-    # Подключаем единый роутер
+    # Подключаем только ОДИН агрегированный роутер
     dp.include_router(routes_router)
 
     await dp.start_polling(bot)

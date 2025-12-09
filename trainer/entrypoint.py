@@ -9,7 +9,7 @@ from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.types import Update
 
-from app.routes import router as routes_router
+from app.routers import router as routes_router
 
 
 def _get_bot_token() -> str:

@@ -7,7 +7,7 @@ import logging
 from fastapi import FastAPI
 
 # Берём основной тренерский main из пакета trainer
-from trainer.app.main import main as trainer_main
+from app....main import main as trainer_main
 
 logger = logging.getLogger(__name__)
 

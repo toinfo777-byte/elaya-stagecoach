@@ -1,45 +1,76 @@
-# --- Python ---
+# ============================
+#  PYTHON
+# ============================
 __pycache__/
 *.py[cod]
 *.pyo
 *.pyd
 
-# --- Virtual env ---
+# compiled libraries
+*.so
+*.dll
+
+# wheel / build artifacts
+*.egg-info/
+*.dist-info/
+*.whl
+build/
+dist/
+
+# ============================
+#  VIRTUAL ENVIRONMENTS
+# ============================
 venv/
 .venv/
 
-# --- VSCode ---
+# ============================
+#  EDITORS / SYSTEM
+# ============================
 .vscode/
-
-# --- OS files ---
 .DS_Store
 Thumbs.db
 
-# --- Build artifacts ---
-build/
-dist/
-*.egg-info/
-
-# --- Project specific ---
-# Локальный CLI-агент
-elayа_cli/__pycache__/
-*.log
-
-# Логи pytest
+# ============================
+#  TESTING / ANALYSIS
+# ============================
 .pytest_cache/
-
-# MyPy / Ruff / Black
 .mypy_cache/
 .ruff_cache/
 .cache/
 
-# --- Local Python env ---
-venv/
-*.egg-info/
-*.dist-info/
-*.pth
-__pycache__/
-/venv/
-/elaya_cli/elaya_cli.egg-info/
-/elaya_cli/*.dist-info/
-/.venv/
+# ============================
+#  PROJECT-SPECIFIC
+# ============================
+
+# Локальный CLI-агент
+elaya_cli/
+elaya_cli/__pycache__/
+elaya_cli/*.egg-info
+elaya_cli/*.dist-info
+
+# SQLite (если используется локально)
+*.sqlite
+*.db
+
+# Логи
+*.log
+
+# Local environment files
+.env
+.env.*
+*.local
+
+# ============================
+#  TRAINER / STAGECOACH
+# ============================
+
+# Все кэши из trainer/*
+trainer/app/__pycache__/
+trainer/app/routes/__pycache__/
+trainer/app/keyboards/__pycache__/
+
+# Все кэши из app/*
+app/__pycache__/
+app/routes/__pycache__/
+app/keyboards/__pycache__/
+app/bot/__pycache__/
