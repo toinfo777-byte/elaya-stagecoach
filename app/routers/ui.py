@@ -6,7 +6,13 @@ from typing import Any, Dict, List
 from fastapi import APIRouter
 from fastapi.responses import HTMLResponse
 
-from app.routers.system import TIMELINE
+# Старый код ожидал TIMELINE в app.routers.system.
+# Если его там нет — подставляем безопасный дефолт.
+try:
+    from app.routers.system import TIMELINE  # type: ignore
+except ImportError:
+    TIMELINE = []  # заглушка, чтобы UI не падал
+
 
 router = APIRouter(tags=["ui"])
 
