@@ -20,19 +20,7 @@ ENV PORT=10000
 EXPOSE 10000
 
 # --- HEALTHCHECK: стучимся в /api/healthz на текущем порту ---
-HEALTHCHECK --interval=30s --timeout=5s --retries=3 CMD python - << 'EOF'
-import os, sys, http.client
-
-port = int(os.environ.get("PORT", "10000"))
-
-try:
-    conn = http.client.HTTPConnection("127.0.0.1", port, timeout=2)
-    conn.request("GET", "/api/healthz")
-    resp = conn.getresponse()
-    sys.exit(0 if resp.status == 200 else 1)
-except Exception:
-    sys.exit(1)
-EOF
+HEALTHCHECK --interval=30s --timeout=5s --retries=3 CMD python -c "import os,sys,http.client; port=int(os.environ.get('PORT','10000')); conn=http.client.HTTPConnection('127.0.0.1',port,timeout=2); conn.request('GET','/api/healthz'); resp=conn.getresponse(); sys.exit(0 if resp.status==200 else 1)"
 
 # --- запуск FastAPI ядра через uvicorn ---
 CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT}"]
