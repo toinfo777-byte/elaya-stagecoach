@@ -8,8 +8,8 @@ from fastapi import APIRouter, Header, HTTPException, Query
 from pydantic import BaseModel
 
 from app.core.timeline import add_event, get_timeline
-from app.core.meta import CORE_VERSION
 
+# Это FastAPI-роутер, а не aiogram
 router = APIRouter(prefix="/api", tags=["api"])
 
 # --- GUARD ---------------------------------------------------------
@@ -72,11 +72,3 @@ async def read_timeline(
     """
     events = get_timeline(limit=limit)
     return {"ok": True, "events": events}
-
-
-@router.get("/healthz")
-async def api_healthz() -> Dict[str, Any]:
-    """
-    Healthcheck именно API-слоя.
-    """
-    return {"status": "ok", "core_version": CORE_VERSION}

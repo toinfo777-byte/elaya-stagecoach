@@ -10,7 +10,8 @@ from aiogram.filters import Command
 
 from app.core.alerts import send_admin_alert
 
-router = Router()
+# Это aiogram.Router
+router = Router(name="hq")
 
 # ───────────────────────────────────────────────────────────────────────────────
 # Временные переменные состояния
