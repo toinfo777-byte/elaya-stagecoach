@@ -4,29 +4,12 @@ from typing import Any, Dict
 
 from aiogram import Router, F
 from aiogram.filters import CommandStart
-from aiogram.types import Message, ReplyKeyboardMarkup, KeyboardButton
+from aiogram.types import Message
 
 from app.core_client import fetch_progress
+from app.keyboards.main_menu import MAIN_MENU  # 👈 вот так
 
 router = Router()
-
-
-# --- Клавиатура ---------------------------------------------------------------
-
-MAIN_MENU = ReplyKeyboardMarkup(
-    keyboard=[
-        [KeyboardButton(text="🎭 Тренировка дня")],
-        [
-            KeyboardButton(text="📈 Мой прогресс"),
-            KeyboardButton(text="💬 Помощь"),
-        ],
-        [KeyboardButton(text="⭐️ Расширенная версия")],
-    ],
-    resize_keyboard=True,
-)
-
-
-# --- Хендлеры -----------------------------------------------------------------
 
 
 @router.message(CommandStart())
@@ -50,7 +33,16 @@ async def handle_progress(message: Message) -> None:
     """
     user_id = message.from_user.id if message.from_user else 0
 
-    data: Dict[str, Any] = await fetch_progress(user_id=user_id, limit=7)
+    try:
+        data: Dict[str, Any] = await fetch_progress()
+    except Exception:
+        await message.answer(
+            "Сейчас я не могу получить данные прогресса.\n"
+            "Но тренировка всё равно доступна — жми «🎭 Тренировка дня».",
+            reply_markup=MAIN_MENU,
+        )
+        return
+
     if not data:
         await message.answer(
             "Пока я не вижу сохранённых тренировок.\n"
