@@ -2,57 +2,105 @@
 from __future__ import annotations
 
 import logging
+import os
 from typing import Any, Dict, Optional
 
 import httpx
 
-from app.config import settings
-
 logger = logging.getLogger(__name__)
 
-# Берём адрес ядра и guard-ключ из Settings
-CORE_URL = (settings.trainer_core_url or "").rstrip("/")
-GUARD_KEY = settings.trainer_guard_key or ""
+# Базовый URL ядра (web-сервиса)
+WEB_URL = os.getenv("WEB_URL", "http://127.0.0.1:8000").rstrip("/")
+
+# Ключ защиты — берём либо специальный TRAINER_GUARD_KEY, либо общий GUARD_KEY
+TRAINER_GUARD_KEY = (
+    os.getenv("TRAINER_GUARD_KEY", "").strip()
+    or os.getenv("GUARD_KEY", "").strip()
+)
 
 
-async def send_timeline_event(scene: str, payload: Optional[Dict[str, Any]] = None) -> None:
+# ---------------------------------------------------------------------------
+# 1. Отправка событий таймлайна
+# ---------------------------------------------------------------------------
+
+async def send_timeline_event(
+    scene: str,
+    payload: Optional[Dict[str, Any]] = None,
+    source: str = "trainer",
+) -> None:
     """
-    Асинхронная отправка события тренера в ядро Элайи.
+    Отправка события в ядро (web) на /api/event.
+
+    :param scene: имя сцены, например "trainer.day.start"
+    :param payload: произвольный JSON-словарь с данными
+    :param source: источник события, по умолчанию "trainer"
     """
-    if not CORE_URL:
-        logger.warning("TRAINER_CORE_URL not set — skip send_timeline_event(%s)", scene)
+    if not WEB_URL:
+        logger.warning("CORE_CLIENT: WEB_URL is not configured")
         return
 
-    url = f"{CORE_URL}/api/event"
+    url = f"{WEB_URL}/api/event"
 
     headers: Dict[str, str] = {}
-    if GUARD_KEY:
-        headers["X-Guard-Key"] = GUARD_KEY
+    if TRAINER_GUARD_KEY:
+        headers["X-Guard-Key"] = TRAINER_GUARD_KEY
 
-    data = {
-        "source": "trainer",
+    data: Dict[str, Any] = {
+        "source": source,
         "scene": scene,
         "payload": payload or {},
     }
 
     try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            r = await client.post(url, json=data, headers=headers)
-            r.raise_for_status()
-            logger.info("Trainer event sent: %s", scene)
-    except Exception as e:  # noqa: BLE001
-        logger.exception("Failed to send trainer event %s: %s", scene, e)
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            resp = await client.post(url, json=data, headers=headers)
+            resp.raise_for_status()
+    except httpx.HTTPError as e:
+        logger.error(
+            "Failed to send trainer event %s: %s",
+            scene,
+            e,
+        )
 
 
-async def fetch_progress(user_id: int, limit: int = 7) -> Dict[str, Any]:
+# ---------------------------------------------------------------------------
+# 2. Получение прогресса для кнопки «📈 Мой прогресс»
+# ---------------------------------------------------------------------------
+
+async def fetch_progress(tg_user_id: int) -> Dict[str, Any]:
     """
-    Временная заглушка для кнопки «Мой прогресс».
-    Потом здесь будет запрос в ядро (Stagecoach Web).
+    Запрашивает прогресс пользователя у ядра (web) через /api/progress.
+
+    Ожидается ответ-словарь вида:
+      {
+        "total_days": int,
+        "current_streak": int
+      }
+
+    Если что-то пошло не так — возвращает нули.
     """
-    # Минимальный набор данных, с которым форматтер прогресса точно не сломается.
-    return {
-        "user_id": user_id,
-        "total_days": 0,
-        "completed_days": 0,
-        "recent_days": [],
-    }
+    if not WEB_URL:
+        logger.warning("CORE_CLIENT: WEB_URL is not configured")
+        return {"total_days": 0, "current_streak": 0}
+
+    url = f"{WEB_URL}/api/progress"
+
+    headers: Dict[str, str] = {}
+    if TRAINER_GUARD_KEY:
+        headers["X-Guard-Key"] = TRAINER_GUARD_KEY
+
+    params = {"tg_user_id": tg_user_id}
+
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            resp = await client.get(url, params=params, headers=headers)
+            resp.raise_for_status()
+            data = resp.json()
+            # Страховка на случай странного ответа
+            return {
+                "total_days": int(data.get("total_days", 0)),
+                "current_streak": int(data.get("current_streak", 0)),
+            }
+    except httpx.HTTPError as e:
+        logger.error("Failed to fetch progress for %s: %s", tg_user_id, e)
+        return {"total_days": 0, "current_streak": 0}

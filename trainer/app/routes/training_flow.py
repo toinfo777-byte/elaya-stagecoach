@@ -1,124 +1,113 @@
+# trainer/app/routes/training_flow.py
 from __future__ import annotations
 
 from datetime import date
-from typing import Any, Dict
 
-from aiogram import Router, F
+from aiogram import Router
 from aiogram.fsm.context import FSMContext
-from aiogram.fsm.state import StatesGroup, State
+from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import Message
 
+from app.keyboards.main_menu import MAIN_MENU
+from app.training_progress import register_training
 from app.core_client import send_timeline_event
-from .menu import MAIN_MENU
 
 router = Router()
 
 
-# --- FSM состояния ------------------------------------------------------------
-
 class TrainingFlow(StatesGroup):
-    intro = State()      # 1. Вход в день
-    reflect = State()    # 2. Отражение
-    step = State()       # 3. Маленький шаг
-    review = State()     # 4. Финальное слово
+    vector = State()
+    reflect = State()
+    transition = State()
+    review = State()
 
 
-# --- Старт тренировки ---------------------------------------------------------
+# --- Вход в тренировку -------------------------------------------------------
 
 
-@router.message(F.text == "🎭 Тренировка дня")
 async def start_training(message: Message, state: FSMContext) -> None:
-    """
-    Точка входа в дневную тренировку.
-    """
-    # Сбрасываем возможные старые состояния
-    await state.clear()
-
-    # Телеметрия в ядро (если настроено)
+    # Таймлайн: старт дня (ошибки логируются внутри send_timeline_event)
     await send_timeline_event(
-        "trainer.day.start",
+        scene="trainer.day.start",
         payload={
-            "user_id": message.from_user.id if message.from_user else None,
-            "date": date.today().isoformat(),
+            "tg_user_id": message.from_user.id,
         },
     )
 
-    await state.set_state(TrainingFlow.intro)
-
+    await state.set_state(TrainingFlow.vector)
     await message.answer(
         "Старт тренировки дня.\n\n"
         "1️⃣ Коротко напиши — в каком состоянии ты входишь в день.\n"
-        "Что сейчас главное в тебе / в поле?",
+        "Что сейчас главное в тебе / в поле?"
     )
 
 
-# --- 1. Вход в день -----------------------------------------------------------
+# --- Вопрос 1 ----------------------------------------------------------------
 
 
-@router.message(TrainingFlow.intro)
-async def handle_intro(message: Message, state: FSMContext) -> None:
-    text = (message.text or "").strip()
-
-    await state.update_data(vector=text)
+@router.message(TrainingFlow.vector)
+async def handle_vector(message: Message, state: FSMContext) -> None:
+    await state.update_data(vector=message.text.strip())
 
     await state.set_state(TrainingFlow.reflect)
     await message.answer(
-        "2️⃣ Теперь отражение.\n\n"
-        "Посмотри на свой день / практику со стороны — "
-        "что ты видишь о себе, о движении, о качестве присутствия?",
+        "2️⃣ Как ты видишь свой день со стороны?\n"
+        "Каким он может быть, если ты будешь в присутствии?"
     )
 
 
-# --- 2. Отражение -------------------------------------------------------------
+# --- Вопрос 2 ----------------------------------------------------------------
 
 
 @router.message(TrainingFlow.reflect)
 async def handle_reflect(message: Message, state: FSMContext) -> None:
-    text = (message.text or "").strip()
+    await state.update_data(reflect=message.text.strip())
 
-    await state.update_data(reflect=text)
-
-    await state.set_state(TrainingFlow.step)
+    await state.set_state(TrainingFlow.transition)
     await message.answer(
-        "3️⃣ Маленький шаг.\n\n"
-        "Какой один небольшой переход ты готов сделать после этой тренировки?\n"
-        "Что можно изменить уже сегодня — на 1–2 шага?",
+        "3️⃣ Какой один маленький шаг ты готов сделать сегодня,\n"
+        "чтобы поддержать это состояние и этот день?"
     )
 
 
-# --- 3. Маленький шаг ---------------------------------------------------------
+# --- Вопрос 3 ----------------------------------------------------------------
 
 
-@router.message(TrainingFlow.step)
-async def handle_step(message: Message, state: FSMContext) -> None:
-    text = (message.text or "").strip()
-
-    await state.update_data(transition=text)
+@router.message(TrainingFlow.transition)
+async def handle_transition(message: Message, state: FSMContext) -> None:
+    await state.update_data(transition=message.text.strip())
 
     await state.set_state(TrainingFlow.review)
     await message.answer(
-        "4️⃣ Финальное слово.\n\n"
-        "Напиши пару фраз — как тебе эта тренировка, "
-        "в каком состоянии ты выходишь.",
+        "📝 Если хочешь, напиши пару слов о том,\n"
+        "как тебе сама настройка / тренировка.\n\n"
+        "Можно просто отправить любой текст — даже один смайлик 🙂"
     )
 
 
-# --- 4. Финальное слово + завершение -----------------------------------------
+# --- Завершение тренировки ---------------------------------------------------
 
 
 @router.message(TrainingFlow.review)
 async def handle_review(message: Message, state: FSMContext) -> None:
-    review = (message.text or "").strip()
-    data: Dict[str, Any] = await state.get_data()
+    review = message.text.strip()
+    data = await state.get_data()
 
-    user_id = message.from_user.id if message.from_user else 0
+    # Сохраняем подробную тренировку (для будущей аналитики)
+    register_training(
+        user_id=message.from_user.id,
+        date=date.today(),
+        vector=data.get("vector", ""),
+        reflect=data.get("reflect", ""),
+        transition=data.get("transition", ""),
+        review=review,
+    )
 
-    # Отправляем всё ядру (оно уже само решит, как сохранять)
+    # Таймлайн: завершение дня
     await send_timeline_event(
-        "trainer.day.finish",
+        scene="trainer.day.finish",
         payload={
-            "user_id": user_id,
-            "date": date.today().isoformat(),
+            "tg_user_id": message.from_user.id,
             "vector": data.get("vector", ""),
             "reflect": data.get("reflect", ""),
             "transition": data.get("transition", ""),
