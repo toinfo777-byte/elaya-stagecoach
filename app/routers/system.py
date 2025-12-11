@@ -95,19 +95,14 @@ async def api_event(
 
 
 @router.get("/progress")
-async def api_progress() -> Dict[str, Any]:
+def api_progress(
+    tg_user_id: int = Query(..., alias="tg_user_id"),
+):
     """
-    Сводка прогресса по тренировкам для кнопки «📈 Мой прогресс».
-    Формат под тренер:
-
-        {
-            "total_days": int,
-            "current_streak": int,
-            "last_date": "YYYY-MM-DD" | None,
-        }
+    Возвращает сводку прогресса по конкретному пользователю.
+    tg_user_id берём из query-параметра и пробрасываем в get_progress_summary.
     """
-    summary = get_progress_summary()
-    return summary
+    return get_progress_summary(user_id=tg_user_id)
 
 
 # --- (ОПЦИОНАЛЬНО) ТАЙМЛАЙН ---------------------------------------------------
