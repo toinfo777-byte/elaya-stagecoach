@@ -1,16 +1,26 @@
-# trainer/app/core_client.py
 from __future__ import annotations
 
 import logging
 import os
+from pathlib import Path
 from typing import Any, Dict, Optional
 
 import httpx
+from dotenv import load_dotenv
+
+# === ЯВНО загружаем trainer/.env ==========================
+BASE_DIR = Path(__file__).resolve().parents[1]  # папка trainer/
+ENV_PATH = BASE_DIR / ".env"
+load_dotenv(ENV_PATH)
 
 logger = logging.getLogger(__name__)
 
 # Базовый URL ядра (web-сервиса)
-WEB_URL = os.getenv("WEB_URL", "http://127.0.0.1:8000").rstrip("/")
+WEB_URL = (
+    os.getenv("WEB_URL", "").rstrip("/")
+    or os.getenv("CORE_API_URL", "").rstrip("/")
+    or "http://127.0.0.1:8000"
+)
 
 # Ключ защиты — берём либо специальный TRAINER_GUARD_KEY, либо общий GUARD_KEY
 TRAINER_GUARD_KEY = (
@@ -18,9 +28,15 @@ TRAINER_GUARD_KEY = (
     or os.getenv("GUARD_KEY", "").strip()
 )
 
+logger.warning(
+    "CORE_CLIENT init: WEB_URL=%r, TRAINER_GUARD_KEY=%s",
+    WEB_URL,
+    (TRAINER_GUARD_KEY[:6] + "..." if TRAINER_GUARD_KEY else "<empty>"),
+)
+
 
 # ---------------------------------------------------------------------------
-# 1. Отправка событий таймлайна
+# 2. Отправка событий таймлайна
 # ---------------------------------------------------------------------------
 
 async def send_timeline_event(
@@ -55,16 +71,14 @@ async def send_timeline_event(
         async with httpx.AsyncClient(timeout=5.0) as client:
             resp = await client.post(url, json=data, headers=headers)
             resp.raise_for_status()
+            logger.info("Trainer event sent: %s", scene)
     except httpx.HTTPError as e:
-        logger.error(
-            "Failed to send trainer event %s: %s",
-            scene,
-            e,
-        )
+        # Сеть/Render упали — не ломаем тренера, просто логируем
+        logger.warning("Failed to send trainer event %s: %s", scene, e)
 
 
 # ---------------------------------------------------------------------------
-# 2. Получение прогресса для кнопки «📈 Мой прогресс»
+# 3. Получение прогресса для кнопки «📈 Мой прогресс»
 # ---------------------------------------------------------------------------
 
 async def fetch_progress(tg_user_id: int) -> Dict[str, Any]:
@@ -96,11 +110,10 @@ async def fetch_progress(tg_user_id: int) -> Dict[str, Any]:
             resp = await client.get(url, params=params, headers=headers)
             resp.raise_for_status()
             data = resp.json()
-            # Страховка на случай странного ответа
             return {
                 "total_days": int(data.get("total_days", 0)),
                 "current_streak": int(data.get("current_streak", 0)),
             }
     except httpx.HTTPError as e:
-        logger.error("Failed to fetch progress for %s: %s", tg_user_id, e)
+        logger.warning("Failed to fetch progress for %s: %s", tg_user_id, e)
         return {"total_days": 0, "current_streak": 0}
