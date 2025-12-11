@@ -1,84 +1,50 @@
 # web/app/training_progress.py
 from __future__ import annotations
 
-import os
-import sqlite3
-from datetime import date, datetime
-from typing import Dict
-
-DB_PATH = os.getenv("SQLITE_PATH", "data.sqlite3")
+from datetime import date, timedelta
+from typing import Dict, Set, Any
 
 
-def _get_conn() -> sqlite3.Connection:
+# user_id -> множество дат, в которые была тренировка
+_USER_DAYS: Dict[int, Set[date]] = {}
+
+
+def add_training_day(tg_user_id: int, day: date | None = None) -> None:
     """
-    Открывает соединение и при необходимости создаёт таблицу.
+    Отметить, что у пользователя была тренировка в указанный день.
+    Если day не передан — берём сегодняшнюю дату.
     """
-    conn = sqlite3.connect(DB_PATH)
-    conn.execute(
-        """
-        CREATE TABLE IF NOT EXISTS training_days (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            tg_user_id INTEGER NOT NULL,
-            day TEXT NOT NULL,
-            created_at TEXT NOT NULL,
-            UNIQUE (tg_user_id, day)
-        )
-        """
-    )
-    return conn
+    if day is None:
+        day = date.today()
+
+    days = _USER_DAYS.setdefault(tg_user_id, set())
+    days.add(day)
 
 
-def add_training_day(tg_user_id: int, day: date) -> None:
+def get_progress_summary(tg_user_id: int) -> Dict[str, Any]:
     """
-    Фиксируем факт тренировки за конкретный день.
+    Вернуть сводку прогресса для пользователя:
+
+        {
+            "total_days": int,      # всего уникальных дней с тренировками
+            "current_streak": int   # текущая серия по дням (подряд до сегодня)
+        }
     """
-    conn = _get_conn()
-    try:
-        conn.execute(
-            """
-            INSERT OR IGNORE INTO training_days (tg_user_id, day, created_at)
-            VALUES (?, ?, ?)
-            """,
-            (int(tg_user_id), day.isoformat(), datetime.utcnow().isoformat()),
-        )
-        conn.commit()
-    finally:
-        conn.close()
+    days = sorted(_USER_DAYS.get(tg_user_id, set()))
+    total = len(days)
 
+    if not days:
+        return {"total_days": 0, "current_streak": 0}
 
-def get_progress_summary(tg_user_id: int) -> Dict[str, int]:
-    """
-    Возвращает:
-      - total_days — всего уникальных дней с тренировкой
-      - current_streak — текущая серия по дням, заканчивающаяся сегодня
-    """
-    conn = _get_conn()
-    try:
-        cur = conn.cursor()
-        cur.execute(
-            "SELECT day FROM training_days WHERE tg_user_id = ? ORDER BY day ASC",
-            (int(tg_user_id),),
-        )
-        rows = [date.fromisoformat(row[0]) for row in cur.fetchall()]
-    finally:
-        conn.close()
+    # считаем серию с конца
+    streak = 1
+    for i in range(len(days) - 2, -1, -1):
+        if days[i + 1] - days[i] == timedelta(days=1):
+            streak += 1
+        else:
+            break
 
-    total = len(rows)
-    streak = 0
-
-    if rows:
-        days_set = set(rows)
-        today = date.today()
-
-        # считаем серию, только если в серии есть сегодняшний день
-        if today in days_set:
-            streak = 1
-            d = today
-            while True:
-                d = date.fromordinal(d.toordinal() - 1)
-                if d in days_set:
-                    streak += 1
-                else:
-                    break
-
-    return {"total_days": total, "current_streak": streak}
+    return {
+        "total_days": total,
+        "current_streak": streak,
+    }
