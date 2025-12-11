@@ -1,7 +1,7 @@
 # web/app/routes/system.py
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timezone, date
 from typing import Any, Dict, Optional
 
 import os
@@ -73,7 +73,7 @@ async def post_event(
         if tg_user_id:
             try:
                 tg_user_id_int = int(tg_user_id)
-                add_training_day(tg_user_id_int)
+                add_training_day(tg_user_id_int, date.today())  # ← вот так
             except (TypeError, ValueError):
                 # тихо игнорируем странный id
                 pass
