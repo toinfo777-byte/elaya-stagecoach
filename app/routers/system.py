@@ -6,7 +6,7 @@ from typing import Any, Dict, List, Optional
 import logging
 import os
 
-from fastapi import APIRouter, Header, HTTPException
+from fastapi import APIRouter, Header, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from app.core.timeline import add_event as core_add_event, get_timeline
