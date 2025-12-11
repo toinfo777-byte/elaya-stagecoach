@@ -39,38 +39,37 @@ Thumbs.db
 .cache/
 
 # ============================
-#  PROJECT-SPECIFIC
+#  LOCAL ENVIRONMENT
 # ============================
-
-# Локальный CLI-агент
-elaya_cli/
-elaya_cli/__pycache__/
-elaya_cli/*.egg-info
-elaya_cli/*.dist-info
-
-# SQLite (если используется локально)
-*.sqlite
-*.db
-
-# Логи
-*.log
-
-# Local environment files
 .env
 .env.*
 *.local
 
 # ============================
-#  TRAINER / STAGECOACH
+#  PROJECT-SPECIFIC
 # ============================
 
-# Все кэши из trainer/*
-trainer/app/__pycache__/
-trainer/app/routes/__pycache__/
-trainer/app/keyboards/__pycache__/
+# Local CLI agent
+elaya_cli/
+elaya_cli/__pycache__/
+elaya_cli/*.egg-info
+elaya_cli/*.dist-info
 
-# Все кэши из app/*
+# SQLite local DBs
+*.sqlite
+*.db
+
+# Logs
+*.log
+
+# ============================
+#  STAGECOACH & TRAINER
+# ============================
+
+# All caches inside trainer/*
+trainer/app/__pycache__/
+trainer/app/**/__pycache__/
+
+# All caches inside app/*
 app/__pycache__/
-app/routes/__pycache__/
-app/keyboards/__pycache__/
-app/bot/__pycache__/
+app/**/__pycache__/
