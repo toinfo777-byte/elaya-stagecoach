@@ -5,120 +5,117 @@ import logging
 import os
 import sqlite3
 from datetime import date, timedelta
-from typing import Dict
 
 logger = logging.getLogger(__name__)
 
-# Путь к SQLite-файлу берём из переменной окружения
+# Путь к базе — как в .env (ENV=prod, MODE=web)
 DB_PATH = os.getenv("SQLITE_PATH", "data.sqlite3")
 
 
 def _get_conn() -> sqlite3.Connection:
     """
-    Открываем соединение и гарантируем наличие таблицы.
+    Открываем соединение к SQLite.
+    Отдельное соединение на каждый вызов — безопасно и просто.
     """
     conn = sqlite3.connect(DB_PATH)
-    conn.execute(
-        """
-        CREATE TABLE IF NOT EXISTS training_days (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            tg_user_id INTEGER NOT NULL,
-            day TEXT NOT NULL,
-            UNIQUE (tg_user_id, day)
-        )
-        """
-    )
+    conn.row_factory = sqlite3.Row
     return conn
 
 
-def add_training_day(tg_user_id: int, when: date | None = None) -> None:
+def _init_db() -> None:
     """
-    Фиксируем тренировочный день для пользователя.
-    Если when не передан — берём сегодняшнюю дату.
+    Создаём таблицу для тренировочных дней, если её ещё нет.
     """
-    if when is None:
-        when = date.today()
+    with _get_conn() as conn:
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS training_days (
+                tg_user_id INTEGER NOT NULL,
+                day        TEXT    NOT NULL,
+                PRIMARY KEY (tg_user_id, day)
+            )
+            """
+        )
+        conn.commit()
 
-    day_str = when.isoformat()
-    conn: sqlite3.Connection | None = None
+
+# Инициализация при старте ядра
+_init_db()
+
+
+def add_training_day(tg_user_id: int, day: date | None = None) -> None:
+    """
+    Записываем день тренировки для пользователя (id + дата).
+    Если запись за этот день уже есть — тихо игнорируем.
+    """
+    if day is None:
+        day = date.today()
+
+    day_str = day.isoformat()
 
     try:
-        conn = _get_conn()
-        with conn:
+        with _get_conn() as conn:
             conn.execute(
                 "INSERT OR IGNORE INTO training_days (tg_user_id, day) VALUES (?, ?)",
-                (tg_user_id, day_str),
+                (int(tg_user_id), day_str),
             )
+            conn.commit()
+
+        logger.info("training day recorded: tg_user_id=%s day=%s", tg_user_id, day_str)
     except Exception:
+        # Не роняем ядро, просто логируем
         logger.exception(
-            "Failed to add_training_day: user=%s day=%s", tg_user_id, day_str
+            "failed to add_training_day tg_user_id=%s day=%s",
+            tg_user_id,
+            day_str,
         )
-    finally:
-        if conn is not None:
-            conn.close()
 
 
-def get_progress_summary(
-    tg_user_id: int,
-    limit: int = 60,
-) -> Dict[str, int]:
+def _load_user_days(tg_user_id: int) -> list[date]:
     """
-    Возвращает сводку прогресса по пользователю.
-
-    total_days      — сколько уникальных дней с тренировками вообще.
-    current_streak  — текущая серия подряд идущих дней.
+    Все дни тренировок пользователя, отсортированные по возрастанию.
     """
-    today = date.today()
-    conn: sqlite3.Connection | None = None
-
-    try:
-        conn = _get_conn()
-        cur = conn.cursor()
-        cur.execute(
-            """
-            SELECT day
-            FROM training_days
-            WHERE tg_user_id = ?
-              AND day <= ?
-            ORDER BY day DESC
-            """,
-            (tg_user_id, today.isoformat()),
+    with _get_conn() as conn:
+        cur = conn.execute(
+            "SELECT day FROM training_days WHERE tg_user_id = ? ORDER BY day ASC",
+            (int(tg_user_id),),
         )
         rows = cur.fetchall()
+
+    return [date.fromisoformat(row["day"]) for row in rows]
+
+
+def get_progress_summary(tg_user_id: int) -> dict[str, int]:
+    """
+    Возвращает словарь:
+      {
+        "total_days": int,       # сколько разных дней есть в базе
+        "current_streak": int    # длина последней непрерывной серии по дням
+      }
+
+    Серия считается так:
+    - Берём все даты пользователя
+    - Считаем длину последней последовательности,
+      где каждая следующая дата = предыдущая + 1 день.
+    """
+    try:
+        days = _load_user_days(tg_user_id)
     except Exception:
-        logger.exception("Failed to get_progress_summary for user=%s", tg_user_id)
+        logger.exception("failed to load progress for tg_user_id=%s", tg_user_id)
+        # В случае ошибки не валим /api/progress, а отдаём нули
         return {"total_days": 0, "current_streak": 0}
-    finally:
-        if conn is not None:
-            conn.close()
 
-    # Преобразуем строки в date
-    days = [date.fromisoformat(r[0]) for r in rows]
     total = len(days)
-
-    if not days:
+    if total == 0:
         return {"total_days": 0, "current_streak": 0}
 
-    day_set = set(days)
-
-    # Пытаемся считать серию от сегодняшнего дня.
-    streak = 0
-    for i in range(limit):
-        d = today - timedelta(days=i)
-        if d in day_set:
+    # Серия с конца: последняя дата всегда входит в серию
+    streak = 1
+    # пары (предыдущий, текущий) в обратном порядке
+    for prev, curr in zip(reversed(days[:-1]), reversed(days[1:])):
+        if (curr - prev) == timedelta(days=1):
             streak += 1
         else:
-            # Если за сегодня записи нет — серия может начинаться
-            # с последнего тренировочного дня.
-            if i == 0:
-                base = days[0]  # самая поздняя дата
-                streak = 0
-                for j in range(limit):
-                    d2 = base - timedelta(days=j)
-                    if d2 in day_set:
-                        streak += 1
-                    else:
-                        break
             break
 
     return {"total_days": total, "current_streak": streak}
