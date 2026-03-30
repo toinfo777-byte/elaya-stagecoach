@@ -204,5 +204,65 @@
     "source": "manual",
     "scene": "test",
     "payload": {}
+  },
+  {
+    "ts": "2025-12-12T08:22:23.470835+00:00",
+    "source": "trainer",
+    "scene": "trainer.day.start",
+    "payload": {
+      "tg_user_id": 7341758189
+    }
+  },
+  {
+    "ts": "2025-12-12T08:22:30.737347+00:00",
+    "source": "trainer",
+    "scene": "trainer.day.finish",
+    "payload": {
+      "tg_user_id": 7341758189,
+      "vector": "fssdf",
+      "reflect": "sfsd",
+      "transition": "sdfs",
+      "review": "впва"
+    }
+  },
+  {
+    "ts": "2025-12-12T08:32:04.588573+00:00",
+    "source": "trainer",
+    "scene": "trainer.day.start",
+    "payload": {
+      "tg_user_id": 7341758189
+    }
+  },
+  {
+    "ts": "2025-12-12T08:32:09.372159+00:00",
+    "source": "trainer",
+    "scene": "trainer.day.finish",
+    "payload": {
+      "tg_user_id": 7341758189,
+      "vector": "ываы",
+      "reflect": "выаы",
+      "transition": "ыаыв",
+      "review": "ыав"
+    }
+  },
+  {
+    "ts": "2025-12-12T08:50:06.863316+00:00",
+    "source": "trainer",
+    "scene": "trainer.day.start",
+    "payload": {
+      "tg_user_id": 7341758189
+    }
+  },
+  {
+    "ts": "2025-12-12T08:50:11.155666+00:00",
+    "source": "trainer",
+    "scene": "trainer.day.finish",
+    "payload": {
+      "tg_user_id": 7341758189,
+      "vector": "выа",
+      "reflect": "ыаы",
+      "transition": "ываы",
+      "review": "аыва"
+    }
   }
 ]

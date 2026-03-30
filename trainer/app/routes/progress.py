@@ -1,9 +1,9 @@
 # trainer/app/routes/progress.py
+
 from __future__ import annotations
 
 import logging
-
-from aiogram import F, Router
+from aiogram import Router, F
 from aiogram.types import Message
 
 from app.keyboards.main_menu import MAIN_MENU, BTN_PROGRESS
