@@ -58,4 +58,4 @@
 
 ---
 
-*Обновлено: 07 June 2026 · Elaya HQ · StageCoach Core
+*Обновлено: 08 June 2026 · Elaya HQ · StageCoach Core
